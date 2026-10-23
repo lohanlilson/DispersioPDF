@@ -63,7 +63,9 @@ jobs:
         shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests/smoke_test.py
+        run: |
+          python tests/smoke_test.py
+          python tests/features_test.py
 
       - name: Gerar executável, instalador e patch
         if: steps.versao.outputs.publicar == 'sim'

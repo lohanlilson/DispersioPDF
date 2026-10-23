@@ -2,6 +2,9 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.0.3
+- Corrigida a assinatura com certificado digital, que falhava ao gerar o carimbo com o logo.
+
 ## 1.0.2
 - Corrigido erro ao abrir o programa ("check_default_app") que impedia a inicialização.
 
