@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFileDialog, Q
                                QFrame, QLabel, QPushButton)
 
 from . import ops
+from .config import cfg
 from .viewer import PdfView
 from .panels import QuickRail, NavPill, SidePanel
 
@@ -130,14 +131,74 @@ class DocTab(QWidget):
         self.view.pageChanged.connect(lambda c, t: self.side.thumbs.highlight(c))
         self.rail.modeRequested.connect(self.set_mode)
         self.rail.colorChosen.connect(self._color)
-        if settings is not None:
-            self.view.author = settings.value("author", "Usuário")
-            z = settings.value("default_zoom", "Ajustar largura")
-            self.view.zoom_mode = {"Ajustar página": "fit_page", "100%": "custom"}.get(z, "fit_width")
+        self.apply_settings(initial=True)
         self.view.set_document(self.doc)
         self.side.rebuild()
         self.view.set_mode("select")
+        self._restore_position()
+        panel = {"thumbs": 0, "bookmarks": 1, "comments": 2}.get(cfg.get("open_side_panel"))
+        if panel is not None:
+            self.side.show_panel(panel)
         self.validate_signatures()
+
+    # ------------------------------------------------------------ preferências
+    def apply_settings(self, initial=False):
+        v = self.view
+        v.author = cfg.get("author")
+        for mode, key in [("highlight", "color_highlight"), ("area_highlight", "color_highlight"),
+                          ("underline", "color_underline"), ("strikeout", "color_strikeout"),
+                          ("squiggly", "color_strikeout"), ("note", "color_note"), ("freetext", "color_freetext"),
+                          ("ink", "color_ink"), ("rect", "color_shapes"), ("ellipse", "color_shapes"),
+                          ("line", "color_shapes"), ("arrow", "color_shapes")]:
+            v.colors[mode] = cfg.get(key)
+        v.stroke_width = cfg.get("stroke_width")
+        v.opacity = cfg.get("annot_opacity") / 100
+        v.wheel_zoom = cfg.get("wheel_zoom")
+        v.page_shadow = cfg.get("page_shadow")
+        self.rail.setVisible(cfg.get("show_quick_rail"))
+        self.sig_bar_enabled = cfg.get("show_sig_bar")
+        if not self.sig_bar_enabled:
+            self.sig_bar.hide()
+        elif self.sig_results:
+            self.sig_bar.show_results(self.sig_results)
+        inv = cfg.get("invert_pages")
+        if initial:
+            z = cfg.get("default_zoom")
+            if z == "Ajustar página":
+                v.zoom_mode = "fit_page"
+            elif z.endswith("%"):
+                v.zoom_mode, v.zoom = "custom", float(z[:-1]) / 100
+            else:
+                v.zoom_mode = "fit_width"
+            v.two_page = cfg.get("two_page")
+            self.nav.two.blockSignals(True)
+            self.nav.two.setChecked(v.two_page)
+            self.nav.two.blockSignals(False)
+            v.invert = inv
+        else:
+            v.apply_theme()
+            if v.invert != inv:
+                v.invert = inv
+                v.refresh()
+            v.viewport().update()
+
+    def _restore_position(self):
+        if not (self.path and cfg.get("remember_position")):
+            return
+        st = cfg.doc_state(self.path)
+        if not st:
+            return
+        page, zoom, mode = st
+        if mode == "custom":
+            self.view.set_zoom(zoom)
+        elif mode in ("fit_width", "fit_page"):
+            self.view.set_fit(mode)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self.view.goto(min(page, self.doc.page_count - 1)))
+
+    def save_position(self):
+        if self.path and cfg.get("remember_position") and self.view.items:
+            cfg.save_doc_state(self.path, self.view.current_page(), self.view.zoom, self.view.zoom_mode)
 
     # ------------------------------------------------------------ assinaturas
     def validate_signatures(self):
@@ -153,7 +214,10 @@ class DocTab(QWidget):
 
     def _sig_done(self, results):
         self.sig_results = results or []
-        self.sig_bar.show_results(self.sig_results)
+        if getattr(self, "sig_bar_enabled", True):
+            self.sig_bar.show_results(self.sig_results)
+        else:
+            self.sig_bar.hide()
 
     # ------------------------------------------------------------ estado
     def title(self):
@@ -260,8 +324,16 @@ class DocTab(QWidget):
         return self.save(fn)
 
     def save_copy_bytes(self, data, suffix):
-        base = os.path.splitext(self.path or "Documento.pdf")[0] + suffix + ".pdf"
-        fn, _ = QFileDialog.getSaveFileName(self, "Salvar", base, "PDF (*.pdf)")
+        if suffix == "_assinado":
+            suffix = cfg.get("sign_suffix") or "_assinado"
+        base = os.path.splitext(self.path or os.path.join(os.path.expanduser("~"), "Documento.pdf"))[0] + suffix + ".pdf"
+        if cfg.get("save_copies") == "same_folder" and self.path:
+            fn, n = base, 2
+            while os.path.exists(fn):
+                fn = base[:-4] + f" ({n}).pdf"
+                n += 1
+        else:
+            fn, _ = QFileDialog.getSaveFileName(self, "Salvar", base, "PDF (*.pdf)")
         if fn:
             with open(fn, "wb") as f:
                 f.write(data)
@@ -282,7 +354,8 @@ class DocTab(QWidget):
         if len(set(pages)) >= self.doc.page_count:
             QMessageBox.warning(self, "Excluir páginas", "Não é possível excluir todas as páginas.")
             return
-        if QMessageBox.question(self, "Excluir páginas", f"Excluir {len(pages)} página(s)?") != QMessageBox.Yes:
+        if cfg.get("confirm_delete_pages") and \
+                QMessageBox.question(self, "Excluir páginas", f"Excluir {len(pages)} página(s)?") != QMessageBox.Yes:
             return
         self.checkpoint()
         ops.delete_pages(self.doc, pages)

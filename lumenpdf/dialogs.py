@@ -338,8 +338,9 @@ class CertSignDialog(FormDialog):
         rl.addWidget(self.pfx)
         rl.addWidget(bpick)
         self.pwd = line(password=True, placeholder="Senha do arquivo / PIN do token")
-        self.reason = line("Concordo com o conteúdo deste documento")
-        self.location = line("Goiânia/GO")
+        from .config import cfg as _cfg
+        self.reason = line(_cfg.get("sign_reason"))
+        self.location = line(_cfg.get("sign_location"))
         from . import signing
         st = getattr(parent, "settings", None)
         self.use_tsa = QCheckBox("Carimbo de tempo (data e hora certificadas por um servidor confiável)")
@@ -665,7 +666,8 @@ class RedactSearchDialog(FormDialog):
 class CompressDialog(FormDialog):
     def __init__(self, parent):
         self.level = combo(["Baixa compressão (alta qualidade)", "Média (recomendado)", "Alta compressão (menor arquivo)"])
-        self.level.setCurrentIndex(1)
+        from .config import cfg as _cfg
+        self.level.setCurrentIndex({"baixa": 0, "media": 1, "alta": 2}.get(_cfg.get("compress_level"), 1))
         super().__init__(parent, "Comprimir PDF", [("Nível:", self.level)], ok_text="Comprimir")
 
     def value(self):
@@ -674,8 +676,13 @@ class CompressDialog(FormDialog):
 
 class OcrDialog(FormDialog):
     def __init__(self, parent, langs, page_count, default="por"):
-        self.lang = combo(langs or ["por"], default if default in langs else None)
-        self.dpi = combo(["200", "300", "400"], "300")
+        from .config import cfg as _cfg
+        langs = list(langs or ["por"])
+        if "por" in langs and "eng" in langs:
+            langs.append("por+eng")
+        default = _cfg.get("ocr_lang") or default
+        self.lang = combo(langs, default if default in langs else None)
+        self.dpi = combo(["200", "300", "400"], str(_cfg.get("ocr_dpi")))
         self.pages = line(placeholder=f"Todas (1-{page_count})")
         self.force = QCheckBox("Reconhecer também páginas que já possuem texto")
         super().__init__(parent, "Reconhecer texto (OCR)", [("Idioma:", self.lang), ("Resolução (dpi):", self.dpi),
@@ -686,8 +693,9 @@ class OcrDialog(FormDialog):
 
 class ImageExportDialog(FormDialog):
     def __init__(self, parent, page_count):
-        self.fmt = combo(["png", "jpg", "tiff"])
-        self.dpi = combo(["72", "150", "200", "300", "600"], "200")
+        from .config import cfg as _cfg
+        self.fmt = combo(["png", "jpg", "tiff"], _cfg.get("image_format"))
+        self.dpi = combo(["72", "150", "200", "300", "600"], str(_cfg.get("image_dpi")))
         self.pages = line(placeholder=f"Todas (1-{page_count})")
         super().__init__(parent, "Exportar como imagem", [("Formato:", self.fmt), ("Resolução (dpi):", self.dpi),
                                                           ("Páginas:", self.pages)], ok_text="Exportar")

@@ -20,7 +20,7 @@ is_dark = False
 
 def qss(c):
     return f"""
-* {{ font-family: 'Segoe UI', 'Inter', 'Noto Sans', sans-serif; font-size: 13px; color: {c['text']}; }}
+* {{ font-family: 'Segoe UI', 'Inter', 'Noto Sans', sans-serif; font-size: {c.get('font_px', 13)}px; color: {c['text']}; }}
 QMainWindow, QDialog {{ background: {c['bg']}; }}
 QWidget#Panel, QWidget#HomePage, QWidget#ToolPanel, QWidget#SidePanel {{ background: {c['panel']}; }}
 QWidget#ToolPanel {{ border-right: 1px solid {c['border']}; }}
@@ -82,10 +82,37 @@ QToolTip {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['
 """
 
 
-def apply(dark=False):
+def system_is_dark():
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QGuiApplication
+        return QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
+    except Exception:
+        return False
+
+
+def apply(dark=False, accent=None, font_px=13, canvas=None):
+    """Aplica o tema. dark pode ser True/False ou 'system'."""
     global current, is_dark
-    is_dark = dark
-    current = dict(DARK if dark else LIGHT)
+    if dark == "system":
+        dark = system_is_dark()
+    elif isinstance(dark, str):
+        dark = dark == "dark"
+    is_dark = bool(dark)
+    current = dict(DARK if is_dark else LIGHT)
+    if accent:
+        current["accent"] = accent
+        from PySide6.QtGui import QColor as _C
+        a = _C(accent)
+        sel = _C(a)
+        sel.setAlpha(255)
+        base = _C(current["panel"])
+        mix = 0.18 if not is_dark else 0.30
+        current["selected"] = _C(int(base.red() * (1 - mix) + a.red() * mix), int(base.green() * (1 - mix) + a.green() * mix),
+                                 int(base.blue() * (1 - mix) + a.blue() * mix)).name()
+    if canvas:
+        current["canvas"] = canvas
+    current["font_px"] = font_px
     app = QApplication.instance()
     app.setStyle("Fusion")
     pal = QPalette()
@@ -100,3 +127,8 @@ def apply(dark=False):
     app.setPalette(pal)
     app.setStyleSheet(qss(current))
     icons.set_color(current["text"])
+
+
+def apply_from_config():
+    from .config import cfg, UI_FONT_PX
+    apply(cfg.get("theme"), cfg.get("accent"), UI_FONT_PX.get(cfg.get("ui_size"), 13), cfg.get("canvas_color") or None)

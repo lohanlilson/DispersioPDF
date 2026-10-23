@@ -2,6 +2,19 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.1.0
+- **Preferências completas** (Ctrl+K ou ícone de engrenagem):
+  - Geral: seu nome, janela maximizada / última posição / normal, reabrir documentos da última sessão,
+    tamanho da lista de recentes, confirmação ao excluir páginas, atualizações automáticas.
+  - Aparência: tema claro, escuro ou seguindo o Windows; cor de destaque; tamanho dos textos; cor do fundo;
+    painéis visíveis e painel lateral aberto ao abrir PDFs.
+  - Documentos: zoom inicial, duas páginas, reabrir na página onde parou, leitura noturna, zoom pela roda do mouse.
+  - Comentários: cores padrão de cada ferramenta, espessura e opacidade.
+  - Assinatura: motivo e local padrão, carimbo de tempo e servidor, LTV, onde salvar o arquivo assinado e sufixo.
+  - OCR e conversão: idioma (inclusive português + inglês), resolução, compressão e exportação de imagens.
+  - Exportar/importar preferências e restaurar padrões.
+- Corrigido: ícone do programa não aparecia na barra de tarefas.
+
 ## 1.0.9
 - **Carimbo de tempo** nas assinaturas digitais: a data e a hora passam a ser certificadas por um servidor
   confiável (DigiCert, Sectigo, GlobalSign ou FreeTSA), e não pelo relógio do computador.

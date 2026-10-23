@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
                                QProgressDialog, QGridLayout, QListWidget, QListWidgetItem, QButtonGroup,
                                QToolButton, QApplication, QColorDialog, QStatusBar, QFrame, QMenu)
 
+from .config import cfg
 from . import ops, theme, icons, dialogs, signing, system, errors, __version__, resource, AUTHOR, EMAIL, COPYRIGHT
 from .doctab import DocTab
 from .panels import ToolPanel, OrganizeDialog, tool_button, ALL_TOOLS, list_annots
@@ -131,7 +132,7 @@ class HomePage(QWidget):
         self.refresh()
 
     def refresh(self):
-        self.hello.setText(f"Bem-vindo(a), {self.win.settings.value('author', 'Usuário')}")
+        self.hello.setText(f"Bem-vindo(a), {cfg.get('author')}")
         self.recent.clear()
         for p in self.win.recent_files():
             exists = os.path.exists(p)
@@ -151,7 +152,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.settings = QSettings("LumenPDF", "LumenPDF")
-        theme.apply(self.settings.value("dark", "false") == "true")
+        theme.apply_from_config()
         self.setWindowTitle(APP)
         self.resize(1400, 880)
         self.setMinimumSize(560, 480)  # permite encaixar em meia tela (Windows Snap)
@@ -259,7 +260,8 @@ class MainWindow(QMainWindow):
                             ("save", "Salvar (Ctrl+S)", self.save), ("print", "Imprimir (Ctrl+P)", lambda: self.run_tool("print")),
                             ("speaker", "Ler em voz alta", lambda: self.run_tool("read_aloud")),
                             ("readmode", "Modo de leitura (Ctrl+H)", self.toggle_read_mode),
-                            ("moon", "Tema escuro", self.toggle_dark)]:
+                            ("moon", "Tema claro/escuro", self.toggle_dark),
+                            ("gear", "Preferências (Ctrl+K)", lambda: self.preferences())]:
             b = tool_button(ic, tip)
             b.clicked.connect(fn)
             if ic in ("speaker", "readmode", "moon", "redo"):
@@ -313,7 +315,7 @@ class MainWindow(QMainWindow):
         act(m, "Resultado anterior", lambda: self.cur() and self.cur().view.next_hit(-1), "Shift+F3")
         m.addSeparator()
         act(m, "Editar texto e imagens", lambda: self.run_tool("edittext"), "Ctrl+E", "edittext")
-        act(m, "Preferências…", self.preferences, "Ctrl+K")
+        act(m, "Preferências…", self.preferences, "Ctrl+K", "gear")
 
         m = mb.addMenu("E&xibir")
         act(m, "Ampliar", lambda: self.cur() and self.cur().view.zoom_step(1.25), "Ctrl++", "zoom_in")
@@ -352,7 +354,7 @@ class MainWindow(QMainWindow):
             act(m, "Definir como leitor de PDF padrão…", lambda: self.check_default_app(force=True))
         act(m, "Verificar atualizações…", lambda: self.updater.check(silent=False))
         auto = QAction("Verificar atualizações automaticamente", self, checkable=True)
-        auto.setChecked(self.settings.value("auto_update", "true") != "false")
+        auto.setChecked(cfg.get("auto_update"))
         auto.toggled.connect(lambda on: self.settings.setValue("auto_update", "true" if on else "false"))
         m.addAction(auto)
         m.addSeparator()
@@ -376,14 +378,15 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, e):
         """Layout responsivo: permite encaixar a janela em meia tela (Windows Snap)."""
-        super().resizeEvent(e)
+        if e is not None:
+            super().resizeEvent(e)
         w = self.width()
         self.home.reflow(w)
         for b in self._compact_hide:
             b.setVisible(w >= 1000)
         for b in self._narrow_hide:
             b.setVisible(w >= 820)
-        auto_hide = w < 1100
+        auto_hide = w < 1100 or not cfg.get("show_tools_panel")
         if auto_hide != getattr(self, "_tools_auto_hidden", False):
             self._tools_auto_hidden = auto_hide
             self.tools.setVisible(not auto_hide)
@@ -445,6 +448,7 @@ class MainWindow(QMainWindow):
                                      QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
             if r == QMessageBox.Cancel or (r == QMessageBox.Save and not tab.save()):
                 return False
+        tab.save_position()
         self.tabbar.removeTab(i)
         self.tab_widgets.pop(i)
         self.docs.removeWidget(tab)
@@ -453,11 +457,17 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, e):
+        session = [t.path for t in self.tab_widgets[1:] if t.path]
+        for t in self.tab_widgets[1:]:
+            t.save_position()
+        cfg.qs.setValue("geometry", self.saveGeometry())
+        cfg.qs.setValue("was_maximized", "true" if self.isMaximized() else "false")
         while len(self.tab_widgets) > 1:
             self.tabbar.setCurrentIndex(len(self.tab_widgets) - 1)
             if not self.close_tab(len(self.tab_widgets) - 1):
                 e.ignore()
                 return
+        cfg.qs.setValue("session", session)
         e.accept()
 
     # ------------------------------------------------------------ abrir / arquivos recentes
@@ -467,7 +477,7 @@ class MainWindow(QMainWindow):
 
     def _add_recent(self, path):
         r = [p for p in self.recent_files() if os.path.normcase(p) != os.path.normcase(path)]
-        self.settings.setValue("recent", [path] + r[:19])
+        self.settings.setValue("recent", ([path] + r)[:max(cfg.get("recent_max"), 0)])
 
     def _fill_recent_menu(self):
         self.recent_menu.clear()
@@ -606,17 +616,8 @@ class MainWindow(QMainWindow):
                 t.view.goto(n - 1)
 
     def toggle_dark(self):
-        theme.apply(not theme.is_dark)
-        self.settings.setValue("dark", "true" if theme.is_dark else "false")
-        self.tabbar.setTabIcon(0, icons.icon("home"))
-        self._search_icon.setIcon(icons.icon("search"))
-        for t in self.tab_widgets[1:]:
-            t.view.apply_theme()
-            t.rail.set_color(t.rail._color)
-            t.side.comments.rebuild()
-            t.side.attachments.rebuild()
-            t.side.thumbs.list.viewport().update()
-        self.home.refresh()
+        cfg.set("theme", "light" if theme.is_dark else "dark")
+        self.apply_settings()
 
     def toggle_invert(self):
         for t in self.tab_widgets[1:]:
@@ -636,17 +637,29 @@ class MainWindow(QMainWindow):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
 
     def preferences(self):
-        d = dialogs.PreferencesDialog(self, self.settings, ops.ocr_languages())
-        if d.exec():
-            self.settings.setValue("author", d.author.text() or "Usuário")
-            self.settings.setValue("ocr_lang", d.ocr.currentText())
-            self.settings.setValue("default_zoom", d.zoom.currentText())
-            self.settings.setValue("tessdata", d.tess.text())
-            if d.tess.text():
-                os.environ["TESSDATA_PREFIX"] = d.tess.text()
-            for t in self.tab_widgets[1:]:
-                t.view.author = d.author.text() or "Usuário"
-            self.home.refresh()
+        from .settings_dialog import SettingsDialog
+        SettingsDialog(self).exec()
+
+    def apply_settings(self):
+        """Reaplica as preferências em toda a interface (chamado ao salvar a janela de Preferências)."""
+        theme.apply_from_config()
+        if cfg.get("tessdata"):
+            os.environ["TESSDATA_PREFIX"] = cfg.get("tessdata")
+        self.tabbar.setTabIcon(0, icons.icon("home"))
+        self._search_icon.setIcon(icons.icon("search"))
+        self._tools_auto_hidden = None
+        self.resizeEvent(None)
+        for t in self.tab_widgets[1:]:
+            t.apply_settings()
+            t.rail.set_color(t.rail._color)
+            t.side.comments.rebuild()
+            t.side.attachments.rebuild()
+            t.side.thumbs.list.viewport().update()
+        self.home.refresh()
+
+    def _on_system_theme(self, *_):
+        if cfg.get("theme") == "system":
+            self.apply_settings()
 
     def shortcuts_help(self):
         html = """<h3>Atalhos de teclado</h3><table cellpadding=4>
@@ -1221,7 +1234,7 @@ class MainWindow(QMainWindow):
         if self.settings.value("tessdata"):
             os.environ["TESSDATA_PREFIX"] = self.settings.value("tessdata")
         langs = ops.ocr_languages()
-        d = dialogs.OcrDialog(self, langs, tab.doc.page_count, self.settings.value("ocr_lang", "por"))
+        d = dialogs.OcrDialog(self, langs, tab.doc.page_count, cfg.get("ocr_lang"))
         if not d.exec() or not langs:
             return
         src = tab.doc.tobytes()

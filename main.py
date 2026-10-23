@@ -26,6 +26,19 @@ def send_to_running(paths):
     return True
 
 
+def app_icon():
+    """Ícone em vários tamanhos a partir do PNG (não depende do plugin de .ico do Qt)."""
+    from PySide6.QtGui import QPixmap
+    icon = QIcon()
+    big = QPixmap(resource("assets", "logo.png"))
+    if not big.isNull():
+        for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
+            icon.addPixmap(big.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    if icon.isNull():
+        icon = QIcon(resource("assets", "lumenpdf.ico"))
+    return icon
+
+
 def main():
     if "--selftest" in sys.argv:  # usado pelo build para conferir o executável gerado
         from lumenpdf import selftest
@@ -47,7 +60,7 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
     app.setOrganizationName(APP_ID)
-    app.setWindowIcon(QIcon(resource("assets", "lumenpdf.ico")))
+    app.setWindowIcon(app_icon())
 
     paths = [os.path.abspath(a) for a in sys.argv[1:] if os.path.exists(a)]
     if send_to_running(paths):
@@ -78,7 +91,26 @@ def main():
         conn.readyRead.connect(read)
     server.newConnection.connect(incoming)
 
-    win.showMaximized()
+    from lumenpdf.config import cfg
+    win.setWindowIcon(app.windowIcon())
+    mode = cfg.get("window_mode")
+    if mode == "last" and cfg.qs.value("geometry") is not None:
+        win.restoreGeometry(cfg.qs.value("geometry"))
+        win.showMaximized() if cfg.qs.value("was_maximized", "true") == "true" else win.show()
+    elif mode == "normal":
+        win.resize(1280, 820)
+        win.show()
+    else:
+        win.showMaximized()
+    try:  # tema "Seguir o Windows"
+        app.styleHints().colorSchemeChanged.connect(win._on_system_theme)
+    except Exception:
+        pass
+    if not paths and cfg.get("startup") == "last_session":
+        session = cfg.qs.value("session", []) or []
+        for p in ([session] if isinstance(session, str) else session):
+            if os.path.exists(p):
+                win.open_path(p)
     import threading
     from lumenpdf import ops
     threading.Thread(target=ops.system_fonts, daemon=True).start()  # prepara a edição de texto com fontes originais

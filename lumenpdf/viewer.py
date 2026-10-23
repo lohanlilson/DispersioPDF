@@ -327,7 +327,8 @@ class PdfView(QGraphicsView):
 
     def paint_page(self, item, p):
         r = item.page_rect()
-        p.fillRect(r.translated(2, 3), QColor(0, 0, 0, 35))
+        if getattr(self, "page_shadow", True):
+            p.fillRect(r.translated(2, 3), QColor(0, 0, 0, 35))
         p.fillRect(r, QColor("#ffffff") if not self.invert else QColor("#111111"))
         cached = self.cache.get(item.index)
         if cached:
@@ -615,7 +616,9 @@ class PdfView(QGraphicsView):
 
     # ------------------------------------------------------------ eventos do mouse
     def wheelEvent(self, e):
-        if e.modifiers() & Qt.ControlModifier:
+        zoom_key = not (e.modifiers() & Qt.ControlModifier) if getattr(self, "wheel_zoom", False) else \
+            bool(e.modifiers() & Qt.ControlModifier)
+        if zoom_key:
             self.zoom_step(1.25 if e.angleDelta().y() > 0 else 0.8)
             e.accept()
             return

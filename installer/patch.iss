@@ -51,6 +51,11 @@ Source: "..\assets\pdfdoc.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 #include "..\build\patch\delete.iss"
 
+[Icons]
+; recria os atalhos com o identificador do app (ícone correto na barra de tarefas)
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "LumenPDF.App"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "LumenPDF.App"; Check: DesktopIconExists
+
 [Registry]
 Root: HKA; Subkey: "Software\LumenPDF"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"
 
@@ -59,6 +64,11 @@ Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait
 Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [Code]
+function DesktopIconExists(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{autodesktop}\{#AppName}.lnk'));
+end;
+
 function InstalledVersion(): String;
 begin
   { procura nas visões 64 e 32 bits do registro e na instalação por usuário }
