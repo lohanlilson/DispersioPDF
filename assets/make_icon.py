@@ -1,6 +1,6 @@
 """Identidade visual do Lumen PDF (lumen = luz).
 
-Marca: uma página branca iluminada por um brilho dourado, sobre um fundo índigo-violeta.
+Marca: o Prisma — a luz branca atravessa um prisma e se abre em violeta e dourado, com um brilho no centro.
 Gera: logo.png (1024), lumenpdf.png (256), lumenpdf.ico (programa) e pdfdoc.ico (arquivos .pdf).
 """
 import math
@@ -94,57 +94,57 @@ def page_mask(size, x0, y0, x1, y1, fold, r):
     return m
 
 
+def _put(img, m, color, clip=None):
+    if clip is not None:
+        m = ImageChops.multiply(m, clip)
+    if isinstance(color, Image.Image):
+        layer = color.copy()
+        layer.putalpha(m)
+    else:
+        layer = Image.new("RGBA", m.size, color[:3] + (255,))
+        a = color[3] if len(color) > 3 else 255
+        layer.putalpha(m.point(lambda v: v * a // 255))
+    img.alpha_composite(layer)
+
+
 def app_icon(s=S):
+    """Prisma suave: a luz branca entra, atravessa o prisma e se abre em violeta e dourado, com um brilho (lúmen)."""
     u = s / 1024
+    P = lambda *pts: [(x * u, y * u) for x, y in pts]  # noqa: E731
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     box = [int(56 * u), int(56 * u), int(s - 56 * u), int(s - 56 * u)]
-    mask = squircle_mask((s, s), box, int(236 * u))
-    base = linear((s, s), [(0, INDIGO_1), (0.55, INDIGO_2), (1, VIOLET)], angle=60).convert("RGBA")
-    # luz quente vindo do canto superior direito
-    base.alpha_composite(radial((s, s), (800 * u, 230 * u), 700 * u, (255, 120, 170), 0.35))
-    base.alpha_composite(radial((s, s), (780 * u, 260 * u), 430 * u, (255, 200, 120), 0.55))
-    img.paste(base, (0, 0), mask)
-    # brilho de borda superior (vidro)
-    gloss = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(gloss).rounded_rectangle([box[0], box[1], box[2], int(430 * u)], radius=int(236 * u), fill=38)
-    gloss = ImageChops.multiply(gloss.filter(ImageFilter.GaussianBlur(40 * u)), mask)
-    img.paste(Image.new("RGBA", (s, s), (255, 255, 255, 255)), (0, 0), gloss)
-
-    # página
-    x0, y0, x1, y1, f = 300 * u, 250 * u, 690 * u, 790 * u, 130 * u
-    pm = page_mask((s, s), x0, y0, x1, y1, f, 34 * u)
-    sh = Image.new("L", (s, s), 0)
-    sh.paste(pm, (int(14 * u), int(30 * u)))
-    sh = ImageChops.multiply(sh.filter(ImageFilter.GaussianBlur(26 * u)).point(lambda v: int(v * 0.6)), mask)
-    shadow = Image.new("RGBA", (s, s), (10, 0, 40, 255))
-    shadow.putalpha(sh)
-    img.alpha_composite(shadow)
-    img.paste(Image.new("RGBA", (s, s), (255, 255, 255, 255)), (0, 0), pm)
-    d = ImageDraw.Draw(img)
-    fold = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(fold).rounded_rectangle([x1 - f, y0 - 40 * u, x1 + 40 * u, y0 + f], radius=26 * u, fill=255)
+    clip = squircle_mask((s, s), box, int(236 * u))
+    img.paste(linear((s, s), [(0, (60, 24, 150)), (1, (130, 80, 255))], angle=60).convert("RGBA"), (0, 0), clip)
+    img.alpha_composite(radial((s, s), (640 * u, 520 * u), 420 * u, (200, 160, 255), 0.4))
+    # feixe de luz branca entrando
+    beam = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(beam).line(P((60, 660), (430, 560)), fill=255, width=int(26 * u))
+    _put(img, beam.filter(ImageFilter.GaussianBlur(18 * u)), (255, 255, 255, 170), clip)
+    _put(img, beam, (255, 255, 255, 255), clip)
+    # leque de luz saindo
+    apex = (600 * u, 520 * u)
+    for (ex, ey), c in zip([(1000, 380), (1000, 520), (1000, 660)],
+                           [(214, 196, 255, 220), (170, 125, 255, 230), (255, 200, 110, 220)]):
+        ang = math.atan2(ey * u - apex[1], ex * u - apex[0]) + math.pi / 2
+        dx, dy = math.cos(ang) * 40 * u, math.sin(ang) * 40 * u
+        m = Image.new("L", (s, s), 0)
+        ImageDraw.Draw(m).polygon([apex, (ex * u - dx, ey * u - dy), (ex * u + dx, ey * u + dy)], fill=255)
+        _put(img, m, c, clip)
+    # prisma de cantos arredondados
     tri = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(tri).polygon([(x1 - f, y0), (x1 - f, y0 + f), (x1, y0 + f)], fill=255)
-    fold = ImageChops.multiply(fold, tri)
-    fsh = Image.new("RGBA", (s, s), (120, 60, 0, 255))
-    fsh.putalpha(fold.filter(ImageFilter.GaussianBlur(10 * u)).point(lambda v: int(v * 0.35)))
-    img.alpha_composite(fsh, (int(-6 * u), int(8 * u)))
-    img.paste(Image.new("RGBA", (s, s), (255, 220, 160, 255)), (0, 0), fold)
-    # linhas de texto
-    for k, w in enumerate((260, 300, 220)):
-        yy = y0 + 210 * u + k * 70 * u
-        d.rounded_rectangle([x0 + 62 * u, yy, x0 + (62 + w) * u, yy + 30 * u], radius=15 * u, fill=(212, 206, 236, 255))
-    # o lúmen: brilho dourado com halo, atravessando a borda da página
-    cx, cy = 690 * u, 660 * u
-    halo = radial((s, s), (cx, cy), 260 * u, (255, 200, 80), 0.9)
-    img.alpha_composite(halo)
-    glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    star4(ImageDraw.Draw(glow), cx, cy, 200 * u, (255, 190, 70, 255))
-    img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(22 * u)))
+    ImageDraw.Draw(tri).polygon(P((500, 250), (730, 690), (270, 690)), fill=255)
+    tri = tri.filter(ImageFilter.GaussianBlur(26 * u)).point(lambda v: 255 if v > 150 else 0)
+    tri = tri.filter(ImageFilter.GaussianBlur(2 * u))
+    sh = Image.new("L", (s, s), 0)
+    sh.paste(tri, (0, int(20 * u)))
+    _put(img, sh.filter(ImageFilter.GaussianBlur(24 * u)).point(lambda v: int(v * 0.45)), (16, 0, 50), clip)
+    _put(img, tri, linear((s, s), [(0, (255, 255, 255)), (1, (226, 212, 255))], 100).convert("RGBA"))
+    # o lúmen: brilho dourado no ponto em que a luz se abre
+    cx, cy = 610 * u, 520 * u
+    img.alpha_composite(radial((s, s), (cx, cy), 170 * u, (255, 200, 90), 0.95))
     d = ImageDraw.Draw(img)
-    star4(d, cx, cy, 175 * u, (255, 205, 92, 255))
-    star4(d, cx, cy, 120 * u, (255, 236, 170, 255))
-    star4(d, cx, cy, 58 * u, (255, 255, 255, 255))
+    star4(d, cx, cy, 110 * u, (255, 205, 100, 255))
+    star4(d, cx, cy, 60 * u, (255, 245, 210, 255))
     return img
 
 
