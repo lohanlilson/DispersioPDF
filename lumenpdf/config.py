@@ -14,7 +14,7 @@ DEFAULTS = {
     "default_asked": False,
     # Aparência
     "theme": "light",                    # light | dark | system
-    "accent": "#1473e6",
+    "accent": "#6d3cf0",
     "ui_size": "normal",                 # small | normal | large
     "show_tools_panel": True,
     "show_quick_rail": True,
@@ -61,6 +61,10 @@ UI_FONT_PX = {"small": 12, "normal": 13, "large": 15}
 class Config:
     def __init__(self):
         self.qs = QSettings(APP_ID, APP_ID)
+        if self.qs.value("brand_v2", None) is None:  # nova identidade: troca o azul antigo pelo violeta da marca
+            if str(self.qs.value("accent", "")).lower() in ("#1473e6", ""):
+                self.qs.remove("accent")
+            self.qs.setValue("brand_v2", "true")
 
     def get(self, key):
         default = DEFAULTS.get(key)

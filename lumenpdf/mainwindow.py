@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
 from .config import cfg
 from . import ops, theme, icons, dialogs, signing, system, errors, __version__, resource, AUTHOR, EMAIL, COPYRIGHT
 from .doctab import DocTab
+from .home import HomePage
 from .panels import ToolPanel, OrganizeDialog, tool_button, ALL_TOOLS, list_annots
 
 APP = "Lumen PDF"
@@ -41,113 +42,6 @@ class Worker(QThread):
             self.failed.emit(e)
 
 
-class HomePage(QWidget):
-    def __init__(self, win):
-        super().__init__()
-        self.win = win
-        self.setObjectName("HomePage")
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(48, 32, 48, 24)
-        lay.setSpacing(14)
-        brand = QHBoxLayout()
-        logo = QLabel()
-        logo.setPixmap(QIcon(resource("assets", "logo.png")).pixmap(44, 44))
-        brand.addWidget(logo)
-        name = QLabel(f"<span style='font-size:20px;font-weight:700'>{APP}</span>")
-        brand.addWidget(name)
-        brand.addStretch()
-        lay.addLayout(brand)
-        self.hello = QLabel()
-        self.hello.setObjectName("Title")
-        lay.addWidget(self.hello)
-        sub = QLabel("Ferramentas recomendadas")
-        sub.setObjectName("Muted")
-        lay.addWidget(sub)
-        grid = QGridLayout()
-        self.grid = grid
-        self.cards = []
-        grid.setSpacing(12)
-        cards = [("open", "open", "Abrir arquivo", "Visualize e comente PDFs"),
-                 ("edittext", "edit", "Editar PDF", "Edite textos e imagens"),
-                 ("merge", "merge", "Combinar arquivos", "Junte vários arquivos em um PDF"),
-                 ("export_word", "convert", "Converter PDF", "Para Word, Excel ou imagem"),
-                 ("signature", "sign", "Preencher e assinar", "Assine e preencha formulários"),
-                 ("certsign", "certificate", "Certificado digital", "Assinatura A1/A3 ICP-Brasil"),
-                 ("ocr", "ocr", "Escanear e OCR", "Torne digitalizados pesquisáveis"),
-                 ("compress", "compress", "Comprimir PDF", "Reduza o tamanho do arquivo"),
-                 ("organize", "organize", "Organizar páginas", "Reordene, gire e exclua"),
-                 ("protect", "lock", "Proteger", "Senhas e permissões"),
-                 ("redact", "redact", "Ocultar", "Tarje informações sigilosas"),
-                 ("compare", "compare", "Comparar arquivos", "Encontre diferenças entre versões")]
-        for n, (key, ic, title, desc) in enumerate(cards):
-            b = QPushButton(f"  {title}\n  {desc}")
-            b.setObjectName("Card")
-            icons.bind(b, ic)
-            b.setIconSize(QSize(28, 28))
-            b.setMinimumHeight(70)
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, k=key: self.win.home_tool(k))
-            b.setMinimumWidth(170)
-            self.cards.append(b)
-            grid.addWidget(b, n // 4, n % 4)
-        lay.addLayout(grid)
-        head = QHBoxLayout()
-        rl = QLabel("Recentes")
-        rl.setStyleSheet("font-size:16px; font-weight:600; margin-top:12px;")
-        head.addWidget(rl)
-        head.addStretch()
-        clr = QPushButton("Limpar lista")
-        clr.clicked.connect(self._clear)
-        head.addWidget(clr)
-        lay.addLayout(head)
-        self.recent = QListWidget()
-        self.recent.setIconSize(QSize(22, 22))
-        self.recent.itemActivated.connect(lambda it: self.win.open_path(it.data(Qt.UserRole)))
-        self.recent.itemClicked.connect(lambda it: self.win.open_path(it.data(Qt.UserRole)))
-        lay.addWidget(self.recent, 1)
-        foot = QLabel(f"{APP} {__version__}  •  Desenvolvido por {AUTHOR}  •  "
-                      f"<a href='mailto:{EMAIL}'>{EMAIL}</a>")
-        foot.setObjectName("Muted")
-        foot.setWordWrap(True)
-        foot.setOpenExternalLinks(True)
-        lay.addWidget(foot)
-        self.refresh()
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self.reflow(self.width())
-
-    def reflow(self, width):
-        cols = max(1, min(4, (width - 96) // 240))
-        if getattr(self, "_cols", None) != cols:
-            self._cols = cols
-            for b in self.cards:
-                self.grid.removeWidget(b)
-            for n, b in enumerate(self.cards):
-                self.grid.addWidget(b, n // cols, n % cols)
-
-    def _clear(self):
-        self.win.settings.setValue("recent", [])
-        self.refresh()
-
-    def refresh(self):
-        self.hello.setText(f"Bem-vindo(a), {cfg.get('author')}")
-        self.recent.clear()
-        for p in self.win.recent_files():
-            exists = os.path.exists(p)
-            when = datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d/%m/%Y %H:%M") if exists else "não encontrado"
-            it = QListWidgetItem(icons.icon("textfile"), f"{os.path.basename(p)}\n{os.path.dirname(p)}  ·  {when}")
-            it.setData(Qt.UserRole, p)
-            if not exists:
-                it.setForeground(QColor(theme.current["muted"]))
-            self.recent.addItem(it)
-        if not self.recent.count():
-            it = QListWidgetItem("Nenhum arquivo recente. Abra um PDF ou arraste-o para esta janela.")
-            it.setFlags(Qt.NoItemFlags)
-            self.recent.addItem(it)
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -169,7 +63,7 @@ class MainWindow(QMainWindow):
         self.tabbar.setMovable(True)
         self.tabbar.setExpanding(False)
         self.tabbar.setDocumentMode(True)
-        self.tabbar.addTab(icons.icon("home"), "Início")
+        self.tabbar.addTab(QIcon(resource("assets", "logo.png")), "Início")
         self.tabbar.setTabButton(0, QTabBar.RightSide, None)
         self.tabbar.currentChanged.connect(self._tab_changed)
         self.tabbar.tabCloseRequested.connect(self.close_tab)
@@ -425,7 +319,7 @@ class MainWindow(QMainWindow):
         tab.view.request_tool = lambda name, **kw: self.run_tool(name, **kw)
         self.docs.addWidget(tab)
         self.tab_widgets.append(tab)
-        i = self.tabbar.addTab(tab.title())
+        i = self.tabbar.addTab(QIcon(resource("assets", "pdfdoc.png")), tab.title())
         close = QToolButton()
         icons.bind(close, "close")
         close.setIconSize(QSize(12, 12))
@@ -645,7 +539,7 @@ class MainWindow(QMainWindow):
         theme.apply_from_config()
         if cfg.get("tessdata"):
             os.environ["TESSDATA_PREFIX"] = cfg.get("tessdata")
-        self.tabbar.setTabIcon(0, icons.icon("home"))
+        self.tabbar.setTabIcon(0, QIcon(resource("assets", "logo.png")))
         self._search_icon.setIcon(icons.icon("search"))
         self._tools_auto_hidden = None
         self.resizeEvent(None)

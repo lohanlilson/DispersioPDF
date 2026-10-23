@@ -151,10 +151,10 @@ class ToolPanel(QWidget):
             lb.setObjectName("Section")
             self.inner_lay.addWidget(lb)
             for key, ic, label in items:
-                b = QPushButton(label)
+                b = QPushButton("  " + label)
                 b.setObjectName("ToolItem")
-                icons.bind(b, ic)
-                b.setIconSize(QSize(18, 18))
+                b.setIcon(icons.chip(ic, icons.SECTION_COLORS.get(section, "#7c3aed"), 24))
+                b.setIconSize(QSize(24, 24))
                 b.setCursor(Qt.PointingHandCursor)
                 b.clicked.connect(lambda _=False, k=key: self.triggered.emit(k))
                 self.inner_lay.addWidget(b)

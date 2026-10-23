@@ -133,3 +133,40 @@ def set_color(color):
 
 def current_color():
     return _color
+
+
+_chip_cache = {}
+
+
+def chip(name, color, size=40, radius=0.28):
+    """Ícone branco sobre um quadrado arredondado colorido (estilo dos cartões modernos)."""
+    key = (name, color, size)
+    if key in _chip_cache:
+        return _chip_cache[key]
+    from PySide6.QtGui import QColor, QLinearGradient, QBrush
+    pm = QPixmap(QSize(size * 2, size * 2))
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    c = QColor(color)
+    g = QLinearGradient(0, 0, size * 2, size * 2)
+    g.setColorAt(0, c.lighter(118))
+    g.setColorAt(1, c)
+    p.setBrush(QBrush(g))
+    p.setPen(Qt.NoPen)
+    p.drawRoundedRect(0, 0, size * 2, size * 2, size * 2 * radius, size * 2 * radius)
+    renderer = QSvgRenderer(QByteArray(_svg(name, "#ffffff").encode()))
+    m = int(size * 2 * 0.24)
+    from PySide6.QtCore import QRectF
+    renderer.render(p, QRectF(m, m, size * 2 - 2 * m, size * 2 - 2 * m))
+    p.end()
+    pm.setDevicePixelRatio(2)
+    ic = QIcon(pm)
+    _chip_cache[key] = ic
+    return ic
+
+
+SECTION_COLORS = {
+    "Comentar": "#f59e0b", "Editar": "#7c3aed", "Organizar páginas": "#10b981", "Converter e exportar": "#3b82f6",
+    "Proteger": "#ef4444", "Assinar": "#ec4899", "Formulários": "#14b8a6", "Mais ferramentas": "#64748b",
+}

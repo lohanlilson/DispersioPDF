@@ -2,6 +2,15 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.3.0
+- **Nova identidade visual “Lumen”**: ícone com uma página iluminada por um brilho dourado (lúmen = luz).
+- **Novo ícone dos arquivos PDF** no Windows, no estilo moderno dos leitores profissionais (folha branca com o
+  selo da marca).
+- **Visual renovado**: cores violeta + dourado, cantos arredondados, botões com degradê, abas e menus modernos,
+  ferramentas com ícones coloridos por categoria e barra de título do Windows 11 na cor do tema.
+- **Nova tela Início**: banner de boas-vindas, atalhos rápidos e **arquivos recentes com miniatura da primeira
+  página**, pesquisa e menu (abrir, mostrar na pasta, remover da lista).
+
 ## 1.2.0
 - **Novo gerenciador de impressão** (Ctrl+P), com pré-visualização de cada folha:
   - Impressora, status e trabalhos na fila; propriedades do driver; atalhos para a fila e para as impressoras do Windows.

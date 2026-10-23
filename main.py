@@ -30,7 +30,7 @@ def app_icon():
     """Ícone em vários tamanhos a partir do PNG (não depende do plugin de .ico do Qt)."""
     from PySide6.QtGui import QPixmap
     icon = QIcon()
-    big = QPixmap(resource("assets", "logo.png"))
+    big = QPixmap(resource("assets", "logo.png"))  # nova marca
     if not big.isNull():
         for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
             icon.addPixmap(big.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
@@ -102,6 +102,8 @@ def main():
         win.show()
     else:
         win.showMaximized()
+    from lumenpdf import theme as _theme
+    _theme.style_titlebar(win)
     try:  # tema "Seguir o Windows"
         app.styleHints().colorSchemeChanged.connect(win._on_system_theme)
     except Exception:
