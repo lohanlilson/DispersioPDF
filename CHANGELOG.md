@@ -2,6 +2,20 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.2.0
+- **Novo gerenciador de impressão** (Ctrl+P), com pré-visualização de cada folha:
+  - Impressora, status e trabalhos na fila; propriedades do driver; atalhos para a fila e para as impressoras do Windows.
+  - Cópias e agrupamento; escala de cinza; frente e verso (borda longa/curta) e **frente e verso manual**.
+  - Páginas: todas, atual, intervalo, selecionadas nas miniaturas; somente ímpares/pares; ordem inversa.
+  - Tamanho: ajustar, tamanho real, reduzir páginas grandes, escala personalizada, girar e centralizar.
+  - **Várias páginas por folha** (2, 4, 6, 9, 16 ou personalizado), ordem e bordas.
+  - **Livreto** (frente, verso ou ambos; encadernação à esquerda/direita).
+  - **Pôster** (amplia em várias folhas, com sobreposição, rótulos e marcas de corte).
+  - Papel, orientação, qualidade e margem extra; imprimir com ou sem comentários.
+  - Rodapé com arquivo/página/data e marca d'água de impressão (ex.: CÓPIA).
+  - Predefinições prontas e personalizadas; lembra as últimas opções; **Salvar como PDF**.
+- **Imprimir vários arquivos** de uma vez (Ferramentas › Mais ferramentas).
+
 ## 1.1.0
 - **Preferências completas** (Ctrl+K ou ícone de engrenagem):
   - Geral: seu nome, janela maximizada / última posição / normal, reabrir documentos da última sessão,

@@ -84,6 +84,7 @@ CATALOG = [
     ("Mais ferramentas", [
         ("compare", "compare", "Comparar arquivos"), ("read_aloud", "speaker", "Ler em voz alta"),
         ("attach", "attach", "Anexar arquivo"), ("print", "print", "Imprimir"),
+        ("print_batch", "print", "Imprimir vários arquivos"),
     ]),
 ]
 

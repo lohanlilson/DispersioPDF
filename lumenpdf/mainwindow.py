@@ -21,7 +21,7 @@ APP = "Lumen PDF"
 MODE_TOOLS = {"note", "highlight", "underline", "strikeout", "freetext", "ink", "rect", "ellipse", "arrow",
               "line", "stamp", "edittext", "addtext", "image", "link", "redact", "crop", "signature",
               "field_text", "field_check", "field_combo", "certsign", "select", "hand"}
-NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature"}
+NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch"}
 
 
 class Worker(QThread):
@@ -1319,39 +1319,31 @@ class MainWindow(QMainWindow):
         dialogs.HtmlDialog(self, "Comparar arquivos", html, "comparacao.html").exec()
 
     def tool_print(self, tab, **kw):
-        from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-        printer = QPrinter(QPrinter.HighResolution)
-        printer.setDocName(os.path.basename(tab.path or "Documento"))
-        printer.setFromTo(1, tab.doc.page_count)
-        dlg = QPrintDialog(printer, self)
-        dlg.setOption(QPrintDialog.PrintPageRange, True)
-        dlg.setOption(QPrintDialog.PrintCurrentPage, True)
-        dlg.setMinMax(1, tab.doc.page_count)
-        if dlg.exec() != QPrintDialog.Accepted:
+        from .print_manager import PrintManager, Source
+        name = os.path.basename(tab.path) if tab.path else self.tabbar.tabText(self.tabbar.currentIndex()).lstrip("● ")
+        src = Source(name, tab.doc, tab.view.current_page(), tab.side.thumbs.selected_pages())
+        PrintManager(self, [src]).exec()
+
+    def tool_print_batch(self, tab=None, **kw):
+        from .print_manager import PrintManager, Source
+        fns, _ = QFileDialog.getOpenFileNames(self, "Imprimir vários arquivos (na ordem selecionada)",
+                                              self.settings.value("last_dir", ""), "PDF e imagens (*.pdf *.png *.jpg *.jpeg *.tif *.tiff)")
+        if not fns:
             return
-        if printer.printRange() == QPrinter.PageRange:
-            pages = range(printer.fromPage() - 1, printer.toPage())
-        elif printer.printRange() == QPrinter.CurrentPage:
-            pages = [tab.view.current_page()]
-        else:
-            pages = range(tab.doc.page_count)
-        dpi = min(printer.resolution(), 300)
-        painter = QPainter(printer)
-        first = True
-        for p in pages:
-            if not first:
-                printer.newPage()
-            first = False
-            pix = tab.doc[p].get_pixmap(dpi=dpi, alpha=False, annots=True)
-            img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
-            area = painter.viewport()
-            sz = img.size().scaled(area.size(), Qt.KeepAspectRatio)
-            painter.setViewport(area.x() + (area.width() - sz.width()) // 2, area.y(), sz.width(), sz.height())
-            painter.setWindow(img.rect())
-            painter.drawImage(0, 0, img)
-            painter.setViewport(area)
-        painter.end()
-        self.statusBar().showMessage("Documento enviado para a impressora.", 5000)
+        sources = []
+        for fn in fns:
+            try:
+                d = pymupdf.open(fn)
+                if not d.is_pdf:
+                    d = pymupdf.open("pdf", d.convert_to_pdf())
+                if d.needs_pass:
+                    QMessageBox.warning(self, APP, f"“{os.path.basename(fn)}” está protegido por senha e foi ignorado.")
+                    continue
+                sources.append(Source(os.path.basename(fn), d))
+            except Exception as e:
+                QMessageBox.warning(self, APP, f"Não foi possível abrir “{os.path.basename(fn)}”: {e}")
+        if sources:
+            PrintManager(self, sources, f"Imprimir {len(sources)} arquivo(s)").exec()
 
     def tool_read_aloud(self, tab, **kw):
         self.tool_speak(tab, text=tab.view.selected_text() or tab.doc[tab.view.current_page()].get_text("text", sort=True))

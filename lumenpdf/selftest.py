@@ -103,6 +103,29 @@ def run(log_path=None):
         assert "editado" in dd[0].get_text(), dd[0].get_text()
         log(f"edição de texto ok ({used})")
 
+        # gerenciador de impressão: imposição e saída via QPdfWriter (mesmo caminho da impressora)
+        from PySide6.QtWidgets import QApplication
+        _app = QApplication.instance() or QApplication([])
+        from PySide6.QtGui import QPdfWriter, QPainter, QPageSize
+        from . import print_manager as pmod
+        src = pmod.Source("teste.pdf", pymupdf.open("pdf", data))
+        for mode in ("size", "multiple", "booklet", "poster"):
+            o = dict(pmod.DEFAULT_OPTS, mode=mode, footer=True, watermark="CÓPIA", gray=(mode == "multiple"))
+            sheets = pmod.impose([src], o, 559, 783)
+            out_pdf = os.path.join(tmp, f"print_{mode}.pdf")
+            wtr = QPdfWriter(out_pdf)
+            wtr.setPageSize(QPageSize(QPageSize.A4))
+            wtr.setResolution(150)
+            pnt = QPainter(wtr)
+            kk = wtr.resolution() / 72
+            for i, sh in enumerate(sheets):
+                if i:
+                    wtr.newPage()
+                pmod.draw_sheet(pnt, sh, [src], o, kk, (0, 0), 559, 783, sheet_no=i + 1, total=len(sheets))
+            pnt.end()
+            assert pymupdf.open(out_pdf).page_count == len(sheets), mode
+        log("impressão ok (tamanho, várias, livreto, pôster)")
+
         # módulos carregados sob demanda pela interface
         import PySide6.QtPrintSupport  # noqa
         import PySide6.QtSvg  # noqa
