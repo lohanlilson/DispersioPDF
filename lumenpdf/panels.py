@@ -649,7 +649,7 @@ class SidePanel(QWidget):
         self.body = QWidget()
         self.body.setObjectName("SidePanel")
         self.body.setAttribute(Qt.WA_StyledBackground, True)
-        self.body.setFixedWidth(240)
+        self.body.setFixedWidth(220)
         bl = QVBoxLayout(self.body)
         bl.setContentsMargins(6, 8, 6, 6)
         self.title = QLabel()

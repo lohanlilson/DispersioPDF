@@ -64,6 +64,8 @@ class HomePage(QWidget):
         sub.setObjectName("Muted")
         lay.addWidget(sub)
         grid = QGridLayout()
+        self.grid = grid
+        self.cards = []
         grid.setSpacing(12)
         cards = [("open", "open", "Abrir arquivo", "Visualize e comente PDFs"),
                  ("edittext", "edit", "Editar PDF", "Edite textos e imagens"),
@@ -85,6 +87,8 @@ class HomePage(QWidget):
             b.setMinimumHeight(70)
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, k=key: self.win.home_tool(k))
+            b.setMinimumWidth(170)
+            self.cards.append(b)
             grid.addWidget(b, n // 4, n % 4)
         lay.addLayout(grid)
         head = QHBoxLayout()
@@ -104,9 +108,23 @@ class HomePage(QWidget):
         foot = QLabel(f"{APP} {__version__}  •  Desenvolvido por {AUTHOR}  •  "
                       f"<a href='mailto:{EMAIL}'>{EMAIL}</a>")
         foot.setObjectName("Muted")
+        foot.setWordWrap(True)
         foot.setOpenExternalLinks(True)
         lay.addWidget(foot)
         self.refresh()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.reflow(self.width())
+
+    def reflow(self, width):
+        cols = max(1, min(4, (width - 96) // 240))
+        if getattr(self, "_cols", None) != cols:
+            self._cols = cols
+            for b in self.cards:
+                self.grid.removeWidget(b)
+            for n, b in enumerate(self.cards):
+                self.grid.addWidget(b, n // cols, n % cols)
 
     def _clear(self):
         self.win.settings.setValue("recent", [])
@@ -136,6 +154,7 @@ class MainWindow(QMainWindow):
         theme.apply(self.settings.value("dark", "false") == "true")
         self.setWindowTitle(APP)
         self.resize(1400, 880)
+        self.setMinimumSize(560, 480)  # permite encaixar em meia tela (Windows Snap)
         self.setAcceptDrops(True)
         self.tts = None
         self.pending_tool = None
@@ -158,7 +177,14 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         self.home = HomePage(self)
-        self.stack.addWidget(self.home)
+        from PySide6.QtWidgets import QScrollArea
+        home_scroll = QScrollArea()
+        home_scroll.setWidgetResizable(True)
+        home_scroll.setFrameShape(QFrame.NoFrame)
+        home_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        home_scroll.setWidget(self.home)
+        self.home_scroll = home_scroll
+        self.stack.addWidget(home_scroll)
         self.doc_area = QWidget()
         da = QVBoxLayout(self.doc_area)
         da.setContentsMargins(0, 0, 0, 0)
@@ -194,6 +220,7 @@ class MainWindow(QMainWindow):
         menu_btn.setPopupMode(QToolButton.InstantPopup)
         self._menu_btn = menu_btn
         lay.addWidget(menu_btn)
+        self._compact_hide, self._narrow_hide = [], []
         self.top_tabs = QButtonGroup(self)
         for key, label in [("all", "Todas as ferramentas"), ("edit", "Editar"), ("convert", "Converter"), ("sign", "Assinar")]:
             b = QToolButton()
@@ -203,6 +230,8 @@ class MainWindow(QMainWindow):
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, k=key: self._top_tab(k))
             self.top_tabs.addButton(b)
+            if key != "all":
+                self._compact_hide.append(b)
             lay.addWidget(b)
             if key == "all":
                 b.setChecked(True)
@@ -211,7 +240,10 @@ class MainWindow(QMainWindow):
         self.search.setObjectName("Search")
         self.search.setPlaceholderText("Localizar texto  (Ctrl+F)")
         self.search.setClearButtonEnabled(True)
-        self.search.setFixedWidth(300)
+        self.search.setMinimumWidth(110)
+        self.search.setMaximumWidth(320)
+        from PySide6.QtWidgets import QSizePolicy
+        self.search.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._search_icon = self.search.addAction(icons.icon("search"), QLineEdit.LeadingPosition)
         self.search.returnPressed.connect(self._search)
         self.search.textChanged.connect(lambda t: self.cur() and not t and self.cur().view.search(""))
@@ -230,6 +262,8 @@ class MainWindow(QMainWindow):
                             ("moon", "Tema escuro", self.toggle_dark)]:
             b = tool_button(ic, tip)
             b.clicked.connect(fn)
+            if ic in ("speaker", "readmode", "moon", "redo"):
+                self._narrow_hide.append(b)
             lay.addWidget(b)
         return bar
 
@@ -338,9 +372,23 @@ class MainWindow(QMainWindow):
         i = self.tabbar.currentIndex()
         return self.tab_widgets[i] if 0 <= i < len(self.tab_widgets) else None
 
+    def resizeEvent(self, e):
+        """Layout responsivo: permite encaixar a janela em meia tela (Windows Snap)."""
+        super().resizeEvent(e)
+        w = self.width()
+        self.home.reflow(w)
+        for b in self._compact_hide:
+            b.setVisible(w >= 1000)
+        for b in self._narrow_hide:
+            b.setVisible(w >= 820)
+        auto_hide = w < 1100
+        if auto_hide != getattr(self, "_tools_auto_hidden", False):
+            self._tools_auto_hidden = auto_hide
+            self.tools.setVisible(not auto_hide)
+
     def _tab_changed(self, i):
         if i <= 0 or i >= len(getattr(self, "tab_widgets", [])):
-            self.stack.setCurrentWidget(self.home)
+            self.stack.setCurrentWidget(self.home_scroll)
             self.home.refresh()
             self.setWindowTitle(APP)
             return

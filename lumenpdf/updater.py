@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QProgressBar,
@@ -177,16 +177,14 @@ class Updater:
         self.th = None
 
     def auto_check(self):
-        s = self.win.settings
-        if s.value("auto_update", "true") == "false":
+        """Verifica em segundo plano a cada abertura do programa e depois a cada 4 horas enquanto estiver aberto."""
+        if self.win.settings.value("auto_update", "true") == "false":
             return
-        last = s.value("last_update_check", "")
-        try:
-            if last and datetime.now() - datetime.fromisoformat(last) < timedelta(hours=12):
-                return
-        except ValueError:
-            pass
         self.check(silent=True)
+        if not getattr(self, "_timer", None):
+            from PySide6.QtCore import QTimer
+            self._timer = QTimer(self.win, interval=4 * 3600 * 1000, timeout=lambda: self.check(silent=True))
+            self._timer.start()
 
     def check(self, silent=False):
         if self.th and self.th.isRunning():
@@ -211,4 +209,10 @@ class Updater:
             return
         if silent and s.value("skip_version", "") == latest:
             return
-        UpdateDialog(self.win, info).exec()
+        if getattr(self, "_showing", False):
+            return
+        self._showing = True
+        try:
+            UpdateDialog(self.win, info).exec()
+        finally:
+            self._showing = False

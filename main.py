@@ -76,7 +76,7 @@ def main():
         conn.readyRead.connect(read)
     server.newConnection.connect(incoming)
 
-    win.show()
+    win.showMaximized()
     for p in paths:
         win.open_path(p)
     QTimer.singleShot(1200, win.check_default_app)
