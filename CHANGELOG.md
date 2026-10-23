@@ -2,6 +2,11 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.4.5
+
+- **Texto mais nítido na tela:** as páginas agora são desenhadas pixel a pixel, sem a suavização que deixava o texto levemente borrado.
+- **Carimbo de assinatura redesenhado:** o nome, os dados e o símbolo do Lumen agora são vetoriais. Ficam nítidos em qualquer zoom e na impressão, e o texto do carimbo pode ser pesquisado e copiado.
+
 ## 1.4.4
 
 - **Correção importante:** assinar um documento que já tinha assinatura fazia a assinatura anterior aparecer como inválida. Agora cada nova assinatura é adicionada como revisão incremental, e todas as assinaturas continuam válidas.

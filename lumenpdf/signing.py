@@ -88,14 +88,132 @@ def stamp_image(signer_name, box_w, box_h, reason="", location="", when=None, sc
     return img
 
 
+def _font_file(bold=False):
+    import os
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    names = (["segoeuib.ttf", "arialbd.ttf"] if bold else ["segoeui.ttf", "arial.ttf"])
+    cands = [os.path.join(windir, "Fonts", n) for n in names] + [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/Library/Fonts/Arial.ttf"]
+    return next((c for c in cands if os.path.exists(c)), None)
+
+
+def _wrap(font, text, size, max_w):
+    lines = []
+    for para in text.split("\n"):
+        cur = ""
+        for word in para.split(" "):
+            trial = (cur + " " + word).strip()
+            if font.text_length(trial, size) <= max_w or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        lines.append(cur)
+    return lines
+
+
+def _fit(font, text, max_w, max_h, start, max_lines, lh=1.18):
+    size = start
+    while size > 4:
+        lines = _wrap(font, text, size, max_w)
+        if len(lines) <= max_lines and size * lh * len(lines) <= max_h and \
+                all(font.text_length(l, size) <= max_w for l in lines):
+            return size, lines
+        size -= 0.25
+    return 4, _wrap(font, text, 4, max_w)[:max_lines]
+
+
+def _prism_vector(page, cx, cy, side, opacity=0.24):
+    """Símbolo do Lumen (feixe + prisma + leque de luz) em vetor — nítido em qualquer zoom e na impressão."""
+    import math
+    import pymupdf
+    u = side / 1024
+    ox, oy = cx - 512 * u, cy - 512 * u
+    P = lambda x, y: pymupdf.Point(ox + x * u, oy + y * u)  # noqa: E731
+    violet, light, mid, gold = (0.43, 0.24, 0.94), (0.67, 0.55, 1.0), (0.43, 0.24, 0.94), (1.0, 0.69, 0.27)
+    page.draw_line(P(60, 660), P(430, 560), color=violet, width=30 * u, lineCap=1, stroke_opacity=opacity)
+    apex = P(600, 520)
+    for (ex, ey), c in zip([(980, 380), (980, 520), (980, 660)], [light, mid, gold]):
+        e = P(ex, ey)
+        ang = math.atan2(e.y - apex.y, e.x - apex.x) + math.pi / 2
+        dx, dy = math.cos(ang) * 40 * u, math.sin(ang) * 40 * u
+        page.draw_polyline([apex, pymupdf.Point(e.x - dx, e.y - dy), pymupdf.Point(e.x + dx, e.y + dy)],
+                           color=None, fill=c, closePath=True, fill_opacity=opacity)
+    # prisma com cantos arredondados (polígono único, sem sobreposição de traço e preenchimento)
+    corners, r = [(500, 250), (730, 690), (270, 690)], 34
+    pts = []
+    for k, (x, y) in enumerate(corners):
+        a, b = corners[k - 1], corners[(k + 1) % 3]
+        v1 = (a[0] - x, a[1] - y); v2 = (b[0] - x, b[1] - y)
+        l1, l2 = math.hypot(*v1), math.hypot(*v2)
+        n1 = (v1[0] / l1, v1[1] / l1); n2 = (v2[0] / l2, v2[1] / l2)
+        half = math.acos(max(-1, min(1, n1[0] * n2[0] + n1[1] * n2[1]))) / 2
+        dist = r / math.tan(half)
+        p1 = (x + n1[0] * dist, y + n1[1] * dist); p2 = (x + n2[0] * dist, y + n2[1] * dist)
+        bis = (n1[0] + n2[0], n1[1] + n2[1]); bl = math.hypot(*bis)
+        c = (x + bis[0] / bl * r / math.sin(half), y + bis[1] / bl * r / math.sin(half))
+        a1, a2 = math.atan2(p1[1] - c[1], p1[0] - c[0]), math.atan2(p2[1] - c[1], p2[0] - c[0])
+        while a2 - a1 > math.pi: a2 -= 2 * math.pi  # noqa: E701
+        while a1 - a2 > math.pi: a2 += 2 * math.pi  # noqa: E701
+        for t in range(9):
+            ang = a1 + (a2 - a1) * t / 8
+            pts.append(P(c[0] + r * math.cos(ang), c[1] + r * math.sin(ang)))
+    page.draw_polyline(pts, color=None, fill=(0.36, 0.18, 0.82), closePath=True, fill_opacity=opacity)
+
+
+def stamp_pdf(signer_name, box_w, box_h, reason="", location="", when=None):
+    """Aparência da assinatura em vetor (como Acrobat/Foxit): símbolo do programa esmaecido ao fundo, nome do
+    signatário em destaque à esquerda e detalhes à direita. Texto real com fonte embutida (nítido e pesquisável)."""
+    import pymupdf
+    when = when or datetime.now().astimezone()
+    W, H = max(box_w, 20), max(box_h, 10)
+    doc = pymupdf.open()
+    page = doc.new_page(width=W, height=H)
+    _prism_vector(page, W / 2, H / 2, min(W, H) * 1.15)
+    name = signer_name.split(":")[0].strip() if ":" in signer_name and signer_name.split(":")[-1].strip().isdigit() \
+        else signer_name
+    tz = when.strftime("%z")
+    details = (f"Assinado de forma digital por {signer_name}\n"
+               f"Data: {when:%d/%m/%Y %H:%M:%S} {tz[:3]}'{tz[3:]}'")
+    if reason:
+        details += f"\nMotivo: {reason}"
+    if location:
+        details += f"\nLocal: {location}"
+    fb, fr = _font_file(True), _font_file(False)
+    fbold = pymupdf.Font(fontfile=fb) if fb else pymupdf.Font("hebo")
+    freg = pymupdf.Font(fontfile=fr) if fr else pymupdf.Font("helv")
+    page.insert_font(fontname="LB", fontfile=fb) if fb else page.insert_font(fontname="LB", fontbuffer=fbold.buffer)
+    page.insert_font(fontname="LR", fontfile=fr) if fr else page.insert_font(fontname="LR", fontbuffer=freg.buffer)
+    pad = min(3.0, H * 0.06)
+    split = W * 0.46
+    ink = (0.08, 0.08, 0.10)
+    for font, fname, text, x, w, start, maxl in (
+            (fbold, "LB", name, pad, split - 2 * pad, H * 0.30, 3),
+            (freg, "LR", details, split + pad, W - split - 2 * pad, H * 0.16, 8)):
+        size, lines = _fit(font, text, w, H - 2 * pad, start, maxl)
+        lh = size * 1.18
+        asc = font.ascender * size
+        y = (H - lh * len(lines)) / 2 + asc
+        for l in lines:
+            page.insert_text((x, y), l, fontname=fname, fontsize=size, color=ink)
+            y += lh
+    doc.subset_fonts()
+    return doc.tobytes(garbage=3, deflate=True)
+
+
 def _stamp(signer_name, box_w, box_h, reason="", location=""):
+    import os
+    import tempfile
     from pyhanko import stamp
-    from pyhanko.pdf_utils import images, layout
-    img = stamp_image(signer_name, box_w, box_h, reason, location)
+    from pyhanko.pdf_utils import content, layout
+    fd, path = tempfile.mkstemp(suffix=".pdf", prefix="lumen-carimbo-")
+    with os.fdopen(fd, "wb") as f:
+        f.write(stamp_pdf(signer_name, box_w, box_h, reason, location))
     return stamp.TextStampStyle(
         stamp_text="",
         border_width=0,
-        background=images.PdfImage(img),
+        background=content.ImportedPdfPage(path),
         background_opacity=1.0,
         background_layout=layout.SimpleBoxLayoutRule(
             x_align=layout.AxisAlignment.ALIGN_MID, y_align=layout.AxisAlignment.ALIGN_MID,

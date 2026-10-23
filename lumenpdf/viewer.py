@@ -366,6 +366,23 @@ class PdfView(QGraphicsView):
         self._schedule_visible()
         self.viewport().update()
 
+    def _draw_page_pixmap(self, p, r, cached):
+        """Desenha a página 1:1 com os pixels da tela (sem reamostragem), para o texto ficar nítido.
+        Só reamostra enquanto a renderização no zoom atual ainda não ficou pronta."""
+        scale_, pm = cached
+        t = p.worldTransform()
+        dpr = pm.devicePixelRatio() or 1.0
+        if abs(scale_ - round(self.scale(), 4)) < 1e-6 and t.isAffine() and abs(t.m11() - 1) < 1e-9 \
+                and abs(t.m22() - 1) < 1e-9 and abs(t.m12()) < 1e-9 and abs(t.m21()) < 1e-9:
+            o = t.map(r.topLeft())
+            p.save()
+            p.resetTransform()
+            p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+            p.drawPixmap(QPointF(round(o.x() * dpr) / dpr, round(o.y() * dpr) / dpr), pm)
+            p.restore()
+        else:
+            p.drawPixmap(r, pm, QRectF(0, 0, pm.width(), pm.height()))
+
     def paint_page(self, item, p):
         r = item.page_rect()
         if getattr(self, "page_shadow", True):
@@ -373,7 +390,7 @@ class PdfView(QGraphicsView):
         p.fillRect(r, QColor("#ffffff") if not self.invert else QColor("#111111"))
         cached = self.cache.get(item.index)
         if cached:
-            p.drawPixmap(r, cached[1], QRectF(0, 0, cached[1].width(), cached[1].height()))
+            self._draw_page_pixmap(p, r, cached)
         s = self.scale()
 
         def qr(rect):
