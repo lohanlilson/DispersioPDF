@@ -10,6 +10,7 @@ class LumenApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
         engine = PdfEngine(this)
         recents = Recents(this)
     }

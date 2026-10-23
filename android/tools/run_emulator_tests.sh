@@ -5,7 +5,8 @@ APK=android/app/build/outputs/apk
 adb install -r "$APK/debug/app-debug.apk"
 adb install -r "$APK/androidTest/debug/app-debug-androidTest.apk"
 adb logcat -c || true
-adb shell am instrument -w -r io.github.lohanlilson.lumenpdf.test/androidx.test.runner.AndroidJUnitRunner | tee instr.txt
+adb shell am instrument -w -r -e class io.github.lohanlilson.lumenpdf.ViewerTest io.github.lohanlilson.lumenpdf.test/androidx.test.runner.AndroidJUnitRunner | tee instr.txt
+adb logcat -d | grep -E "LumenTest" | tail -60
 mkdir -p capturas
 adb pull /sdcard/Android/data/io.github.lohanlilson.lumenpdf/files/capturas/. capturas/ || true
 # APK de publicação (código otimizado pelo R8): abre e confere que não fecha sozinho
@@ -26,6 +27,6 @@ if [ "$RELEASE_OK" != 1 ]; then
 fi
 if grep -qE "FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|shortMsg" instr.txt || ! grep -q "^OK (" instr.txt; then
   echo "---- logcat ----"
-  adb logcat -d | grep -E "AndroidRuntime|lumenpdf|TestRunner|FATAL" | tail -150
+  adb logcat -d | grep -E "AndroidRuntime|lumenpdf|TestRunner|FATAL|LumenTest|pdfium" | tail -200
   exit 1
 fi

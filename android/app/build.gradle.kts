@@ -74,6 +74,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // exibição: PDFium (mesmo motor do Chrome)
     implementation("io.legere:pdfiumandroid:1.0.35")
+    // edição, formulários e assinatura: PDFBox (com BouncyCastle)
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     androidTestImplementation(bom)

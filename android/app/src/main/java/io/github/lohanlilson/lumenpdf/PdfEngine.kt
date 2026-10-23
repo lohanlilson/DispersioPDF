@@ -32,9 +32,14 @@ data class TocItem(val title: String, val page: Int, val level: Int)
 
 class PasswordNeeded : Exception()
 
+data class TextSelection(val page: Int, val start: Int, val end: Int, val text: String,
+                         val rects: List<FracRect>, val pdfRects: List<RectF>)
+
 /**
  * Acesso ao PDFium. Tudo roda numa única thread: o PDFium não é seguro para uso em paralelo.
  */
+private const val BASE = 4000
+
 class PdfEngine(context: Context) {
     private val core = PdfiumCore(context)
     val dispatcher = Executors.newSingleThreadExecutor { r -> Thread(r, "pdfium").apply { priority = Thread.NORM_PRIORITY } }
@@ -84,13 +89,12 @@ class PdfEngine(context: Context) {
 
     /** Converte um retângulo em coordenadas do PDF para frações da largura exibida. */
     private fun frac(p: PdfPage, sz: PageSize, r: RectF): FracRect {
-        val base = 4000
-        val hh = (base * sz.ratio).roundToInt()
-        val d: Rect = p.mapRectToDevice(0, 0, base, hh, 0, r)
-        val l = minOf(d.left, d.right) / base.toFloat()
-        val rr = maxOf(d.left, d.right) / base.toFloat()
-        val t = minOf(d.top, d.bottom) / base.toFloat()
-        val b = maxOf(d.top, d.bottom) / base.toFloat()
+        val hh = (BASE * sz.ratio).roundToInt()
+        val d: Rect = p.mapRectToDevice(0, 0, BASE, hh, 0, r)
+        val l = minOf(d.left, d.right) / BASE.toFloat()
+        val rr = maxOf(d.left, d.right) / BASE.toFloat()
+        val t = minOf(d.top, d.bottom) / BASE.toFloat()
+        val b = maxOf(d.top, d.bottom) / BASE.toFloat()
         return FracRect(l, t, rr, b)
     }
 
@@ -117,6 +121,55 @@ class PdfEngine(context: Context) {
             }
         }
         out
+    }
+
+
+    /** Ponto em frações da largura exibida -> coordenadas do PDF. */
+    private fun toPdf(p: PdfPage, sz: PageSize, fx: Float, fy: Float): android.graphics.PointF {
+        val hh = (BASE * sz.ratio).roundToInt()
+        return p.mapDeviceCoordsToPage(0, 0, BASE, hh, 0, (fx * BASE).roundToInt(), (fy * BASE).roundToInt())
+    }
+
+    suspend fun pdfPoint(pdf: OpenPdf, page: Int, fx: Float, fy: Float): android.graphics.PointF = withContext(dispatcher) {
+        pdf.doc.openPage(page).use { p -> toPdf(p, pdf.sizes[page], fx, fy) }
+    }
+
+    suspend fun pdfPoints(pdf: OpenPdf, page: Int, pts: List<Pair<Float, Float>>): FloatArray = withContext(dispatcher) {
+        pdf.doc.openPage(page).use { p ->
+            val out = FloatArray(pts.size * 2)
+            pts.forEachIndexed { i, (x, y) -> val q = toPdf(p, pdf.sizes[page], x, y); out[i * 2] = q.x; out[i * 2 + 1] = q.y }
+            out
+        }
+    }
+
+    suspend fun fracOf(pdf: OpenPdf, page: Int, r: RectF): FracRect = withContext(dispatcher) {
+        pdf.doc.openPage(page).use { p -> frac(p, pdf.sizes[page], r) }
+    }
+
+    /** Índice do caractere sob o dedo (-1 se não houver texto perto). */
+    suspend fun charAt(pdf: OpenPdf, page: Int, fx: Float, fy: Float): Int = withContext(dispatcher) {
+        pdf.doc.openPage(page).use { p ->
+            val pt = toPdf(p, pdf.sizes[page], fx, fy)
+            p.openTextPage().use { tp ->
+                var i = tp.textPageGetCharIndexAtPos(pt.x.toDouble(), pt.y.toDouble(), 4.0, 4.0)
+                if (i < 0) i = tp.textPageGetCharIndexAtPos(pt.x.toDouble(), pt.y.toDouble(), 14.0, 10.0)
+                i
+            }
+        }
+    }
+
+    /** Seleção de a até b (inclusive): texto, retângulos na tela e no PDF. */
+    suspend fun selection(pdf: OpenPdf, page: Int, a: Int, b: Int): TextSelection = withContext(dispatcher) {
+        val s = minOf(a, b)
+        val n = maxOf(a, b) - s + 1
+        pdf.doc.openPage(page).use { p ->
+            p.openTextPage().use { tp ->
+                val nr = tp.textPageCountRects(s, n)
+                val pdfRects = (0 until nr).mapNotNull { tp.textPageGetRect(it) }
+                TextSelection(page, s, s + n - 1, tp.textPageGetText(s, n) ?: "",
+                    pdfRects.map { frac(p, pdf.sizes[page], it) }, pdfRects)
+            }
+        }
     }
 
     suspend fun links(pdf: OpenPdf, page: Int): List<PageLink> = withContext(dispatcher) {

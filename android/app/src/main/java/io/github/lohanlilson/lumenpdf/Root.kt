@@ -38,7 +38,7 @@ fun LumenRoot(vm: AppVm) {
     if (d == null) {
         HomeScreen(vm)
     } else {
-        BackHandler { vm.closeDoc() }
+        BackHandler { if (d.editing && d.tool != Tool.NONE) d.tool = Tool.NONE else vm.requestClose() }
         ViewerScreen(vm, d)
     }
     if (vm.loading) {

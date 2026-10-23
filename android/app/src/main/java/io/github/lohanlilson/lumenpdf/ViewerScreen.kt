@@ -18,6 +18,18 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditOff
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -145,6 +157,18 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     val list = rememberLazyListState()
     val hs = rememberScrollState()
     var geom by remember { mutableStateOf<ViewerGeom?>(null) }
+    var saveMenu by remember { mutableStateOf(false) }
+    var pendingTap by remember { mutableStateOf<Triple<Tool, Int, Offset>?>(null) }   // ferramenta, página, ponto (frações)
+    var editField by remember { mutableStateOf<FormField?>(null) }
+    var signPad by remember { mutableStateOf(false) }
+    var nameDialog by remember { mutableStateOf(false) }
+    val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { u ->
+        if (u != null) vm.saveAs(d, u)
+    }
+    fun doSave() = vm.save(d) { saveAs.launch(d.name) }
+    LaunchedEffect(vm.toast) {
+        vm.toast?.let { Toast.makeText(ctx, it, Toast.LENGTH_SHORT).show(); vm.toast = null }
+    }
 
     LaunchedEffect(d) {
         if (d.startPage > 0) list.scrollToItem(d.startPage)
@@ -180,8 +204,18 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 } else {
                     TopAppBar(
                         title = { Text(d.name, maxLines = 1, style = MaterialTheme.typography.titleMedium) },
-                        navigationIcon = { IconButton({ vm.closeDoc() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") } },
+                        navigationIcon = { IconButton({ vm.requestClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") } },
                         actions = {
+                            if (d.dirty) Box {
+                                IconButton({ saveMenu = true }) { Icon(Icons.Filled.Save, "Salvar", tint = MaterialTheme.colorScheme.primary) }
+                                DropdownMenu(saveMenu, { saveMenu = false }) {
+                                    DropdownMenuItem(text = { Text("Salvar") }, onClick = { saveMenu = false; doSave() })
+                                    DropdownMenuItem(text = { Text("Salvar uma cópia…") }, onClick = { saveMenu = false; saveAs.launch(d.name) })
+                                }
+                            }
+                            IconButton({ d.editing = !d.editing; d.tool = Tool.NONE; d.strokes.clear(); d.selection = null }) {
+                                Icon(if (d.editing) Icons.Filled.EditOff else Icons.Filled.Edit, if (d.editing) "Sair da edição" else "Editar")
+                            }
                             IconButton({ searchMode = true }) { Icon(Icons.Filled.Search, "Localizar") }
                             IconButton({ showToc = true }) { Icon(Icons.AutoMirrored.Filled.List, "Sumário") }
                             IconButton({ share(ctx, d) }) { Icon(Icons.Filled.Share, "Compartilhar") }
@@ -192,6 +226,9 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                         leadingIcon = { Icon(Icons.Filled.DarkMode, null) },
                                         onClick = { menu = false; d.night = !d.night })
                                     DropdownMenuItem(text = { Text("Ir para a página…") }, onClick = { menu = false; gotoDialog = true })
+                                    DropdownMenuItem(text = { Text("Salvar uma cópia…") }, onClick = { menu = false; saveAs.launch(d.name) })
+                                    DropdownMenuItem(text = { Text("Seu nome nos comentários…") }, onClick = { menu = false; nameDialog = true })
+                                    DropdownMenuItem(text = { Text("Redesenhar rubrica…") }, onClick = { menu = false; signPad = true })
                                     DropdownMenuItem(text = { Text("Copiar texto da página") },
                                         leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
                                         onClick = {
@@ -206,9 +243,12 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 }
             }
         },
+        bottomBar = {
+            if (d.editing) EditBar(vm, d, onSign = { if (loadSignature(ctx) == null) signPad = true })
+        },
     ) { pad ->
         BoxWithConstraints(
-            Modifier.fillMaxSize().padding(top = pad.calculateTopPadding())
+            Modifier.fillMaxSize().padding(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding())
                 .background(if (d.night) Color(0xFF101014) else MaterialTheme.colorScheme.surfaceVariant)
         ) {
             val density = LocalDensity.current
@@ -266,7 +306,25 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                             onDoubleTap = { p -> commitZoom(if (d.zoom > 1.2f) 1f else 2.5f, p) },
                             onTap = { p ->
                                 scope.launch {
-                                    if (!handleLinkTap(ctx, vm, d, g, p)) bars = !bars
+                                    val hit = pageAt(d, g, p)
+                                    val field = hit?.let { (pg, fx, fy) ->
+                                        d.fields.firstOrNull { (f, r) -> f.page == pg && fx in r.l..r.r && fy in r.t..r.b && !f.readOnly }?.first
+                                    }
+                                    when {
+                                        hit != null && d.editing && d.tool in setOf(Tool.CHECK, Tool.CROSS, Tool.SIGN) ->
+                                            placeNow(ctx, vm, d, d.tool, hit.first, Offset(hit.second, hit.third)) { signPad = true }
+                                        hit != null && d.editing && d.tool in setOf(Tool.NOTE, Tool.TEXT) ->
+                                            pendingTap = Triple(d.tool, hit.first, Offset(hit.second, hit.third))
+                                        field != null && field.kind == FormField.Kind.CHECK ->
+                                            vm.edit(d, "marcar o campo") { Editor.setField(it, field.name, if (field.value.isEmpty() || field.value == "Off") "on" else "") }
+                                        field != null && field.kind == FormField.Kind.SIGNATURE ->
+                                            Toast.makeText(ctx, if (field.value.isEmpty()) "Campo de assinatura: a assinatura com certificado chega na próxima versão."
+                                                else "Este campo já está assinado.", Toast.LENGTH_LONG).show()
+                                        field != null -> editField = field
+                                        handleLinkTap(ctx, vm, d, g, p) -> Unit
+                                        d.selection != null -> d.selection = null
+                                        else -> bars = !bars
+                                    }
                                 }
                             },
                         )
@@ -275,6 +333,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             ) {
                 LazyColumn(
                     state = list,
+                    userScrollEnabled = d.tool != Tool.INK,
                     modifier = Modifier.width(with(density) { contentW.toDp() }).fillMaxHeight()
                         .graphicsLayer {
                             scaleX = gesture
@@ -291,12 +350,17 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                     }
                 }
             }
+            if (d.selection != null) Box(Modifier.align(Alignment.BottomCenter)) {
+                SelectionBar(vm, d) { copyText(ctx, it) }
+            }
+            if (d.busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             // indicador de página
             Surface(
                 onClick = { gotoDialog = true },
                 shape = RoundedCornerShape(50),
                 color = Color(0xCC1C1B22),
-                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 14.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).then(if (d.editing) Modifier else Modifier.navigationBarsPadding())
+                    .padding(bottom = if (d.selection != null) 84.dp else 14.dp),
             ) {
                 Text("${d.page + 1} / ${d.pageCount}", color = Color.White,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
@@ -308,6 +372,51 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
         showToc = false
         scope.launch { list.scrollToItem(p) }
     }
+    pendingTap?.let { (tool, page, at) ->
+        val sz = d.pdf.sizes[page]
+        when (tool) {
+            Tool.NOTE -> TextInputDialog("Nova nota", "Comentário", onDismiss = { pendingTap = null }) { text, _ ->
+                pendingTap = null
+                scope.launch {
+                    val pt = vm.engine.pdfPoint(d.pdf, page, at.x, at.y)
+                    vm.edit(d, "adicionar a nota") { Editor.note(it, page, pt.x, pt.y, text, 0xFFFFD400) }
+                }
+            }
+            Tool.TEXT -> TextInputDialog("Adicionar texto", "Texto", withSize = true, onDismiss = { pendingTap = null }) { text, size ->
+                pendingTap = null
+                scope.launch {
+                    val pt = vm.engine.pdfPoint(d.pdf, page, at.x, at.y + size * 0.35f / sz.w)
+                    vm.edit(d, "adicionar o texto") { Editor.text(it, page, pt.x, pt.y, text, size, 0xFF1C1B22) }
+                }
+            }
+            else -> pendingTap = null
+        }
+    }
+    editField?.let { f ->
+        FieldDialog(f, onDismiss = { editField = null }) { v ->
+            editField = null
+            vm.edit(d, "preencher o campo") { Editor.setField(it, f.name, v) }
+        }
+    }
+    if (signPad) SignaturePad(ctx, onDismiss = { signPad = false }) {
+        signPad = false
+        d.tool = Tool.SIGN
+        Toast.makeText(ctx, "Rubrica salva. Toque na página onde quer colocá-la.", Toast.LENGTH_LONG).show()
+    }
+    if (nameDialog) TextInputDialog("Seu nome", "Aparece como autor dos comentários", vm.authorName(), multiline = false,
+        onDismiss = { nameDialog = false }) { n, _ -> nameDialog = false; vm.setAuthorName(n) }
+    if (vm.confirmClose) AlertDialog(
+        onDismissRequest = { vm.confirmClose = false },
+        title = { Text("Salvar alterações?") },
+        text = { Text("“${d.name}” tem alterações que ainda não foram salvas.") },
+        confirmButton = { TextButton({ vm.confirmClose = false; vm.save(d) { saveAs.launch(d.name) }; vm.closeAfterSave = true }) { Text("Salvar") } },
+        dismissButton = {
+            Row {
+                TextButton({ vm.confirmClose = false; vm.closeDoc() }) { Text("Descartar") }
+                TextButton({ vm.confirmClose = false }) { Text("Cancelar") }
+            }
+        },
+    )
     if (gotoDialog) GotoDialog(d, onDismiss = { gotoDialog = false }) { p ->
         gotoDialog = false
         scope.launch { list.scrollToItem(p) }
@@ -324,15 +433,84 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int) 
     LaunchedEffect(d, i, renderW) {
         shown = vm.engine.render(d.pdf, i, renderW).asImageBitmap()
     }
+    val scope = rememberCoroutineScope()
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Box(
             Modifier.size(with(density) { pageW.toDp() }, with(density) { pageH.toDp() })
                 .shadow(3.dp)
                 .background(if (d.night) Color.Black else Color.White)
+                .pointerInput(d, d.tool, pageW) {
+                    if (d.tool == Tool.INK) {
+                        // desenho à mão livre
+                        var cur = mutableListOf<Offset>()
+                        detectDragGestures(
+                            onDragStart = { o -> cur = mutableListOf(Offset(o.x / pageW, o.y / pageW)); d.strokes += i to cur.toList() },
+                            onDrag = { ch, _ ->
+                                ch.consume()
+                                cur.add(Offset(ch.position.x / pageW, ch.position.y / pageW))
+                                if (d.strokes.isNotEmpty()) d.strokes[d.strokes.lastIndex] = i to cur.toList()
+                            },
+                        )
+                    } else {
+                        // tocar e segurar no texto: seleciona; arrastar estende a seleção
+                        var anchor = -1
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { o ->
+                                scope.launch {
+                                    anchor = vm.engine.charAt(d.pdf, i, o.x / pageW, o.y / pageW)
+                                    if (anchor >= 0) {
+                                        // começa pela palavra inteira
+                                        val txt = vm.engine.selection(d.pdf, i, maxOf(0, anchor - 40), anchor + 40)
+                                        val rel = anchor - txt.start
+                                        val t = txt.text
+                                        var a = rel; var b = rel
+                                        while (a > 0 && t.getOrNull(a - 1)?.isLetterOrDigit() == true) a--
+                                        while (b < t.length - 1 && t.getOrNull(b + 1)?.isLetterOrDigit() == true) b++
+                                        anchor = txt.start + a
+                                        d.selection = vm.engine.selection(d.pdf, i, txt.start + a, txt.start + b)
+                                    }
+                                }
+                            },
+                            onDrag = { ch, _ ->
+                                ch.consume()
+                                val pos = ch.position
+                                if (anchor >= 0) scope.launch {
+                                    val c = vm.engine.charAt(d.pdf, i, pos.x / pageW, pos.y / pageW)
+                                    if (c >= 0) d.selection = vm.engine.selection(d.pdf, i, anchor, c)
+                                }
+                            },
+                        )
+                    }
+                }
         ) {
             shown?.let {
                 Image(it, "Página ${i + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
                     colorFilter = if (d.night) INVERT else null)
+            }
+            val fields = d.fields.filter { it.first.page == i }
+            val sel = d.selection?.takeIf { it.page == i }
+            val strokes = d.strokes.filter { it.first == i }
+            if (fields.isNotEmpty() || sel != null || strokes.isNotEmpty()) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width
+                    for ((f, r) in fields) {
+                        val tl = Offset(r.l * w, r.t * w)
+                        val sz2 = Size((r.r - r.l) * w, (r.b - r.t) * w)
+                        if (f.kind == FormField.Kind.SIGNATURE) {
+                            if (f.value.isEmpty()) {
+                                drawRect(Color(0x186D3CF0), tl, sz2)
+                                drawRect(Color(0xFF6D3CF0), tl, sz2, style = Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f))))
+                            }
+                        } else if (!f.readOnly) drawRect(Color(0x40CCD7FF), tl, sz2)
+                    }
+                    sel?.rects?.forEach { r -> drawRect(Color(0x553D7BFF), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w)) }
+                    val px = d.inkWidth * w / sz.w
+                    for ((_, pts) in strokes) {
+                        if (pts.size < 2) continue
+                        val path = Path().apply { moveTo(pts[0].x * w, pts[0].y * w); pts.drop(1).forEach { lineTo(it.x * w, it.y * w) } }
+                        drawPath(path, Color(d.inkColor), style = Stroke(px, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    }
+                }
             }
             val hits = d.hits
             if (hits.isNotEmpty()) {
@@ -352,6 +530,36 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int) 
             }
         }
     }
+}
+
+/** ✓, ✗ e rubrica: colocados direto no ponto tocado (centralizados). */
+private suspend fun placeNow(ctx: Context, vm: AppVm, d: ViewerDoc, tool: Tool, page: Int, at: Offset, needPad: () -> Unit) {
+    val sz = d.pdf.sizes[page]
+    when (tool) {
+        Tool.CHECK, Tool.CROSS -> {
+            val pt = vm.engine.pdfPoint(d.pdf, page, at.x, at.y)
+            vm.edit(d, "marcar") { Editor.mark(it, page, pt.x, pt.y, tool == Tool.CHECK, 14f, 0xFF1C1B22) }
+        }
+        Tool.SIGN -> {
+            val bmp = loadSignature(ctx) ?: return needPad()
+            val w = 120f
+            val h = w * bmp.height / bmp.width
+            // canto inferior esquerdo visual da rubrica centralizada no toque
+            val pt = vm.engine.pdfPoint(d.pdf, page, at.x - w / 2 / sz.w, at.y + h / 2 / sz.w)
+            vm.edit(d, "colocar a rubrica") { Editor.image(it, page, bmp, pt.x, pt.y, w, h) }
+        }
+        else -> Unit
+    }
+}
+
+/** Página e posição (frações da largura da página) sob um ponto da tela. */
+private fun pageAt(d: ViewerDoc, g: ViewerGeom, p: Offset): Triple<Int, Float, Float>? {
+    val item = g.list.layoutInfo.visibleItemsInfo.firstOrNull { p.y >= it.offset && p.y <= it.offset + it.size } ?: return null
+    val pw = g.pageWidth(d.zoom)
+    val x = (p.x + g.hs.value - g.sidePx) / pw
+    val y = (p.y - item.offset) / pw
+    if (x < 0f || x > 1f || y < 0f || y > d.pdf.sizes[item.index].ratio) return null
+    return Triple(item.index, x, y)
 }
 
 /** Toque num link: vai para a página de destino ou abre o endereço. */
