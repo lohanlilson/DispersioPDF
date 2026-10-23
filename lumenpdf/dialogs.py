@@ -400,39 +400,146 @@ class CertSignDialog(FormDialog):
             self.pfx.setText(fn)
 
 
+def _fmt_dt(dt):
+    if not dt:
+        return "—"
+    try:
+        return dt.astimezone().strftime("%d/%m/%Y %H:%M:%S (UTC%z)")
+    except Exception:
+        return str(dt)
+
+
+SIG_COLORS = {"ok": "#2d9d78", "warn": "#c58a00", "bad": "#d7373f"}
+SIG_SYMBOL = {"ok": "✔", "warn": "⚠", "bad": "✖"}
+
+
+class SignatureInfoDialog(QDialog):
+    """Validação individual de uma assinatura (equivalente às 'Propriedades da assinatura' do Acrobat)."""
+
+    def __init__(self, parent, info, on_view_signed=None):
+        from . import signing
+        super().__init__(parent)
+        self.setWindowTitle("Validação da assinatura")
+        self.setMinimumWidth(620)
+        lvl, title = signing.status_of(info)
+        col = SIG_COLORS[lvl]
+        lay = QVBoxLayout(self)
+        head = QLabel(f"<table><tr><td style='font-size:30px; color:{col}; padding-right:10px'>{SIG_SYMBOL[lvl]}</td>"
+                      f"<td><span style='font-size:15px; font-weight:600'>{html_escape(title)}</span><br>"
+                      f"<span style='color:gray'>Assinatura {info.get('index', 1)} de {info.get('total', 1)} — "
+                      f"campo “{html_escape(info.get('field') or '')}”</span></td></tr></table>")
+        head.setWordWrap(True)
+        lay.addWidget(head)
+        c = info.get("cert") or {}
+
+        def yesno(ok, yes, no):
+            return f"<span style='color:{SIG_COLORS['ok'] if ok else SIG_COLORS['bad']}'>{'✔ ' + yes if ok else '✖ ' + no}</span>"
+        mod = info.get("modification")
+        mod_txt = {None: "—", "NONE": "Nenhuma alteração após a assinatura",
+                   "LTA_UPDATES": "Apenas dados de validação de longo prazo (permitido)",
+                   "FORM_FILLING": "Preenchimento de formulário/assinaturas posteriores (permitido)",
+                   "ANNOTATIONS": "Comentários adicionados depois da assinatura",
+                   "OTHER": "Conteúdo alterado depois da assinatura"}.get(mod, mod)
+        rows = [
+            ("<b>Signatário</b>", ""),
+            ("Nome", c.get("nome") or info.get("signer")),
+            ("CPF/CNPJ", c.get("documento") or "—"),
+            ("Organização", c.get("organizacao") or "—"),
+            ("E-mail", c.get("email") or "—"),
+            ("<b>Assinatura</b>", ""),
+            ("Data/hora informada", _fmt_dt(info.get("time"))),
+            ("Motivo", info.get("reason") or "—"),
+            ("Local", info.get("location") or "—"),
+            ("Integridade", yesno(info.get("intact"), "O documento não foi alterado desde a assinatura",
+                                  "O conteúdo assinado foi alterado")),
+            ("Criptografia", yesno(info.get("valid"), "Assinatura matematicamente válida", "Assinatura inválida")),
+            ("Alterações posteriores", html_escape(str(mod_txt))),
+            ("Identidade", yesno(info.get("trusted"), "Certificado confiável (cadeia verificada)",
+                                 "Cadeia de certificação não verificada neste computador")),
+            ("<b>Certificado</b>", ""),
+            ("Emitido por", f"{c.get('emissor', '—')}" + (f" ({c.get('emissor_org')})" if c.get('emissor_org') else "")),
+            ("Validade", f"{_fmt_dt(c.get('valido_de'))[:10]} a {_fmt_dt(c.get('valido_ate'))[:10]}" if c else "—"),
+            ("Número de série", c.get("serie") or "—"),
+            ("Cadeia", " › ".join(info.get("chain") or []) or "—"),
+        ]
+        if info.get("error"):
+            rows.append(("Detalhe técnico", html_escape(info["error"][:300])))
+        table = "".join(
+            f"<tr><td colspan=2 style='padding-top:10px'>{k}</td></tr>" if not v else
+            f"<tr><td style='color:gray; padding-right:14px; white-space:nowrap'>{k}</td><td>{v if k in ('Integridade','Criptografia','Identidade') else html_escape(str(v))}</td></tr>"
+            for k, v in rows)
+        body = QLabel(f"<table cellspacing=2>{table}</table>")
+        body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        body.setWordWrap(True)
+        lay.addWidget(body)
+        if not info.get("trusted") and info.get("intact"):
+            note = QLabel("Para certificados ICP-Brasil, a identidade é confirmada quando as cadeias da ICP-Brasil "
+                          "estão instaladas no Windows (disponíveis no site do ITI).")
+            note.setWordWrap(True)
+            note.setObjectName("Muted")
+            lay.addWidget(note)
+        row = QHBoxLayout()
+        if on_view_signed and info.get("revision_end"):
+            b = QPushButton("Ver versão assinada")
+            b.setToolTip("Abre o documento exatamente como estava no momento desta assinatura")
+            b.clicked.connect(lambda: (on_view_signed(info), self.accept()))
+            row.addWidget(b)
+        row.addStretch()
+        close = QPushButton("Fechar")
+        close.setObjectName("Primary")
+        close.clicked.connect(self.accept)
+        row.addWidget(close)
+        lay.addLayout(row)
+
+
+def html_escape(t):
+    import html
+    return html.escape(t or "")
+
+
 class SignaturesDialog(QDialog):
-    def __init__(self, parent, results):
+    def __init__(self, parent, results, on_view_signed=None):
+        from . import signing
         super().__init__(parent)
         self.setWindowTitle("Painel de assinaturas")
-        self.resize(720, 300)
+        self.resize(760, 320)
+        self.results, self.on_view_signed = results, on_view_signed
         lay = QVBoxLayout(self)
         if not results:
             lay.addWidget(QLabel("Este documento não possui assinaturas digitais."))
-        t = QTableWidget(len(results), 5)
-        t.setHorizontalHeaderLabels(["Campo", "Signatário", "Data", "Integridade", "Situação"])
+        t = QTableWidget(len(results), 4)
+        t.setHorizontalHeaderLabels(["", "Signatário", "Data", "Situação"])
         for r, info in enumerate(results):
-            ok = info["intact"] and info["valid"]
-            vals = [info["field"], info["signer"], info["time"].strftime("%d/%m/%Y %H:%M") if info["time"] else "—",
-                    "Íntegra" if info["intact"] else "ALTERADA",
-                    ("Válida" + (" e confiável" if info["trusted"] else " (cadeia não verificada)")) if ok else
-                    (info.get("error") or "Inválida")]
+            lvl, title = signing.status_of(info)
+            vals = [SIG_SYMBOL[lvl], info["signer"], _fmt_dt(info["time"])[:16], title]
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(str(v))
-                if c >= 3:
-                    it.setForeground(QColor("#2d9d78" if ok else "#d7373f"))
+                if c in (0, 3):
+                    it.setForeground(QColor(SIG_COLORS[lvl]))
                 t.setItem(r, c, it)
-        t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        t.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        t.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        t.setColumnWidth(0, 30)
         t.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        t.setSelectionBehavior(QAbstractItemView.SelectRows)
+        t.cellDoubleClicked.connect(lambda r, c: self._details(r))
+        self.table = t
         lay.addWidget(t)
-        note = QLabel("A confiança na cadeia ICP-Brasil exige os certificados raiz instalados; a integridade "
-                      "confirma que o conteúdo não foi alterado após a assinatura.")
-        note.setWordWrap(True)
+        row = QHBoxLayout()
+        note = QLabel("Clique duas vezes em uma assinatura para ver a validação completa.")
         note.setObjectName("Muted")
-        lay.addWidget(note)
-        bb = QDialogButtonBox(QDialogButtonBox.Close)
-        bb.button(QDialogButtonBox.Close).setText("Fechar")
-        bb.rejected.connect(self.reject)
-        lay.addWidget(bb)
+        row.addWidget(note, 1)
+        det = QPushButton("Detalhes…")
+        det.clicked.connect(lambda: self._details(t.currentRow()))
+        row.addWidget(det)
+        close = QPushButton("Fechar")
+        close.clicked.connect(self.reject)
+        row.addWidget(close)
+        lay.addLayout(row)
+
+    def _details(self, r):
+        if 0 <= r < len(self.results):
+            SignatureInfoDialog(self, self.results[r], self.on_view_signed).exec()
 
 
 # ---------------------------------------------------------------- páginas e documento

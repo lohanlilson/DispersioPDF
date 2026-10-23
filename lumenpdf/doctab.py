@@ -2,14 +2,86 @@
 import os
 
 import pymupdf
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFileDialog, QMessageBox, QInputDialog
+from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFileDialog, QMessageBox, QInputDialog,
+                               QFrame, QLabel, QPushButton)
 
 from . import ops
 from .viewer import PdfView
 from .panels import QuickRail, NavPill, SidePanel
 
 MAX_UNDO = 30
+
+
+class _SigThread(QThread):
+    done = Signal(list)
+
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
+
+    def run(self):
+        try:
+            from . import signing
+            self.done.emit(signing.validate(self.data))
+        except Exception:
+            self.done.emit([])
+
+
+class SignatureBar(QFrame):
+    """Faixa no topo do documento com o resumo das assinaturas (como nos leitores profissionais)."""
+
+    def __init__(self, tab):
+        super().__init__()
+        self.tab = tab
+        self.setObjectName("SigBar")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 6, 8, 6)
+        self.icon = QLabel()
+        self.text = QLabel()
+        self.text.setWordWrap(True)
+        self.btn = QPushButton("Painel de assinaturas")
+        self.btn.clicked.connect(lambda: self.tab.window().run_tool("validate_sigs"))
+        lay.addWidget(self.icon)
+        lay.addWidget(self.text, 1)
+        lay.addWidget(self.btn)
+        self.hide()
+
+    def _style(self, level):
+        colors = {"ok": ("#e7f6ee", "#2d9d78"), "warn": ("#fff6dd", "#c58a00"), "bad": ("#fde8e9", "#d7373f"),
+                  "info": ("#eef3fc", "#1473e6")}
+        bg, fg = colors[level]
+        self.setStyleSheet(f"QFrame#SigBar{{background:{bg}; border:1px solid {fg}; border-radius:8px;}}"
+                           f"QFrame#SigBar QLabel{{color:#222; background:transparent;}}")
+        sym = {"ok": "✔", "warn": "⚠", "bad": "✖", "info": "…"}[level]
+        self.icon.setText(f"<span style='font-size:18px; color:{fg}'>{sym}</span>")
+
+    def show_checking(self):
+        self._style("info")
+        self.text.setText("Validando assinaturas…")
+        self.btn.hide()
+        self.show()
+
+    def show_results(self, results):
+        from . import signing
+        if not results:
+            self.hide()
+            return
+        levels = [signing.status_of(r)[0] for r in results]
+        n = len(results)
+        if "bad" in levels:
+            lvl, msg = "bad", "Pelo menos uma assinatura é inválida."
+        elif all(l == "ok" for l in levels):
+            lvl, msg = "ok", ("Assinado e todas as assinaturas são válidas." if n > 1 else "Assinado e a assinatura é válida.")
+        else:
+            lvl, msg = "warn", ("Assinado — as assinaturas estão íntegras, mas há pontos de atenção."
+                                if n > 1 else "Assinado — assinatura íntegra, mas há pontos de atenção.")
+        if self.tab.modified:
+            msg += " (alterações não salvas não são consideradas)"
+        self._style(lvl)
+        self.text.setText(f"<b>{msg}</b> {n} assinatura(s). Clique sobre uma assinatura para ver os detalhes.")
+        self.btn.show()
+        self.show()
 
 
 class DocTab(QWidget):
@@ -21,6 +93,8 @@ class DocTab(QWidget):
         self.path = path
         self.password = password
         self.doc = ops.open_bytes(data, password)
+        self.original_bytes = data  # arquivo como está em disco (usado para validar assinaturas)
+        self.sig_results = []
         self.undo_stack, self.redo_stack = [], []
         self.modified = False
         self.has_signatures = self._detect_signatures()
@@ -38,7 +112,12 @@ class DocTab(QWidget):
         rail_col.addStretch()
         cl.addLayout(rail_col)
         self.view = PdfView()
-        cl.addWidget(self.view, 1)
+        view_col = QVBoxLayout()
+        view_col.setSpacing(6)
+        self.sig_bar = SignatureBar(self)
+        view_col.addWidget(self.sig_bar)
+        view_col.addWidget(self.view, 1)
+        cl.addLayout(view_col, 1)
         lay.addWidget(center, 1)
         self.side = SidePanel(self)
         lay.addWidget(self.side)
@@ -58,6 +137,23 @@ class DocTab(QWidget):
         self.view.set_document(self.doc)
         self.side.rebuild()
         self.view.set_mode("select")
+        self.validate_signatures()
+
+    # ------------------------------------------------------------ assinaturas
+    def validate_signatures(self):
+        """Valida as assinaturas em segundo plano e atualiza a faixa no topo do documento."""
+        self.sig_bar.hide()
+        if not self.has_signatures:
+            return
+        self.sig_bar.show_checking()
+        data = self.original_bytes
+        self._sig_thread = _SigThread(data)
+        self._sig_thread.done.connect(self._sig_done)
+        self._sig_thread.start()
+
+    def _sig_done(self, results):
+        self.sig_results = results or []
+        self.sig_bar.show_results(self.sig_results)
 
     # ------------------------------------------------------------ estado
     def title(self):
@@ -66,7 +162,9 @@ class DocTab(QWidget):
 
     def _detect_signatures(self):
         try:
-            return any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and w.field_value
+            if self.doc.get_sigflags() > 0:
+                return True
+            return any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE
                        for p in self.doc for w in (p.widgets() or []))
         except Exception:
             return False
@@ -141,6 +239,7 @@ class DocTab(QWidget):
             if r != QMessageBox.Yes:
                 return False
         data = self.doc.tobytes(garbage=3, deflate=True)
+        self.original_bytes = data
         tmp = path + ".tmp"
         with open(tmp, "wb") as f:
             f.write(data)

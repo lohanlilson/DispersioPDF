@@ -110,7 +110,7 @@ def sign_pdf_bytes(pdf_bytes, signer, page_index, unrot_rect, page_height, reaso
     from pyhanko.sign.fields import SigFieldSpec, append_signature_field
 
     w = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes), strict=False)
-    field_name = field_name or f"Assinatura_{datetime.now():%Y%m%d%H%M%S}"
+    field_name = field_name or f"Assinatura_{datetime.now():%Y%m%d%H%M%S%f}"
     if visible:
         append_signature_field(w, SigFieldSpec(sig_field_name=field_name, on_page=page_index,
                                                box=_box_pdf_coords(page_height, unrot_rect)))
@@ -157,30 +157,125 @@ def cert_subject(signer):
     return _cn(signer.signing_cert)
 
 
-def validate(pdf_bytes):
-    """Lista assinaturas com integridade e dados do signatário (sem cadeia de confiança ICP)."""
+_VC_CERTS = None
+
+
+def _validation_context():
+    """Contexto de validação com as raízes confiáveis do Windows (inclui ICP-Brasil quando instaladas)."""
+    global _VC_CERTS
+    from pyhanko_certvalidator import ValidationContext
+    if _VC_CERTS is not None:
+        roots, others = _VC_CERTS
+        kw = dict(allow_fetching=False, revocation_mode="soft-fail")
+        if roots:
+            kw.update(trust_roots=roots, other_certs=others)
+        return ValidationContext(**kw)
+    roots, others = [], []
+    try:
+        from . import wincert
+        if wincert.IS_WINDOWS:
+            from asn1crypto import x509 as ax
+            crypt32, _ = wincert._libs()
+            for store, bucket in (("Root", roots), ("CA", others)):
+                for der, _ in wincert._store_certs(crypt32, store):
+                    try:
+                        bucket.append(ax.Certificate.load(der))
+                    except Exception:
+                        pass
+    except Exception:
+        roots, others = [], []
+    _VC_CERTS = (roots, others)
+    kw = dict(allow_fetching=False, revocation_mode="soft-fail")
+    if roots:
+        kw.update(trust_roots=roots, other_certs=others)
+    return ValidationContext(**kw)
+
+
+def _cert_info(cert):
+    try:
+        subj = cert.subject.native
+        iss = cert.issuer.native
+        validity = cert["tbs_certificate"]["validity"]
+        cn = subj.get("common_name", "")
+        doc = cn.split(":")[-1] if ":" in cn and cn.split(":")[-1].strip().isdigit() else ""
+        return {"nome": cn.split(":")[0] if doc else cn, "documento": doc,
+                "organizacao": subj.get("organization_name", ""), "email": subj.get("email_address", ""),
+                "emissor": iss.get("common_name", cert.issuer.human_friendly),
+                "emissor_org": iss.get("organization_name", ""),
+                "serie": format(cert.serial_number, "X"),
+                "valido_de": validity["not_before"].native, "valido_ate": validity["not_after"].native,
+                "assunto": cert.subject.human_friendly, "algoritmo": cert.signature_algo}
+    except Exception:
+        return {}
+
+
+def validate(pdf_bytes, field=None):
+    """Valida as assinaturas (ou só a do campo informado). Retorna dados completos de cada uma."""
     from pyhanko.pdf_utils.reader import PdfFileReader
     from pyhanko.sign.validation import validate_pdf_signature
     import logging
     logging.getLogger("pyhanko").setLevel(logging.CRITICAL)
     logging.getLogger("pyhanko_certvalidator").setLevel(logging.CRITICAL)
+    try:
+        vc = _validation_context()
+    except Exception:
+        vc = None
     results = []
     reader = PdfFileReader(io.BytesIO(pdf_bytes), strict=False)
-    for sig in reader.embedded_signatures:
-        info = dict(field=sig.field_name, signer="?", time=None, intact=False, valid=False,
-                    covers_all=False, trusted=False, error=None)
-        info["signer"] = _cn(sig.signer_cert)
+    sigs = reader.embedded_signatures
+    for idx, sig in enumerate(sigs):
+        if field and sig.field_name != field:
+            continue
+        info = dict(field=sig.field_name, index=idx + 1, total=len(sigs), signer="?", time=None, intact=False,
+                    valid=False, covers_all=False, trusted=False, error=None, modification=None,
+                    reason="", location="", contact="", cert={}, chain=[], revision_end=None,
+                    later_changes=False)
         try:
-            st = validate_pdf_signature(sig)
-            info.update(intact=st.intact, valid=st.valid, trusted=st.trusted,
-                        time=st.signer_reported_dt)
+            so = sig.sig_object
+            info["reason"] = str(so.get("/Reason", "") or "")
+            info["location"] = str(so.get("/Location", "") or "")
+            info["contact"] = str(so.get("/ContactInfo", "") or "")
+            br = [int(x) for x in so["/ByteRange"]]
+            info["revision_end"] = br[2] + br[3]
+            info["later_changes"] = info["revision_end"] < len(pdf_bytes.rstrip(b"\r\n\x00 "))
+        except Exception:
+            pass
+        info["signer"] = _cn(sig.signer_cert)
+        info["cert"] = _cert_info(sig.signer_cert)
+        try:
+            st = validate_pdf_signature(sig, signer_validation_context=vc) if vc else validate_pdf_signature(sig)
+            info.update(intact=st.intact, valid=st.valid, trusted=st.trusted, time=st.signer_reported_dt)
             try:
-                from pyhanko.sign.diff_analysis import ModificationLevel  # noqa
                 info["covers_all"] = st.coverage.name == "ENTIRE_FILE"
                 info["modification"] = st.modification_level.name if st.modification_level else None
+            except Exception:
+                pass
+            try:
+                path = st.validation_path
+                if path is not None:
+                    info["chain"] = [_cn(c) for c in path.iter_certs(include_root=True)]
             except Exception:
                 pass
         except Exception as e:
             info["error"] = str(e)
         results.append(info)
     return results
+
+
+def signed_revision(pdf_bytes, info):
+    """Bytes do documento exatamente como estava quando esta assinatura foi aplicada."""
+    end = info.get("revision_end")
+    return pdf_bytes[:end] if end else None
+
+
+def status_of(info):
+    """(nível, título) — nível: ok | warn | bad."""
+    if info.get("error") and not info.get("intact"):
+        return "bad", "Assinatura inválida"
+    if not info.get("intact") or not info.get("valid"):
+        return "bad", "Assinatura INVÁLIDA — o documento foi alterado ou a assinatura está corrompida"
+    if info.get("modification") not in (None, "NONE", "LTA_UPDATES", "FORM_FILLING"):
+        return "warn", "Assinatura válida, mas o documento recebeu alterações depois de assinado"
+    if not info.get("trusted"):
+        return "warn", "Assinatura íntegra — identidade do signatário não verificada (certificado raiz não confiável neste computador)"
+    return "ok", "Assinatura válida"

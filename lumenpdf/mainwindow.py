@@ -837,9 +837,32 @@ class MainWindow(QMainWindow):
             self._add_recent(fn)
             QMessageBox.information(self, APP, f"Documento assinado por {signing.cert_subject(signer)}.\nSalvo em:\n{fn}")
 
+    def _sig_results(self, tab, field=None):
+        if tab.sig_results and not field:
+            return tab.sig_results
+        res = [r for r in tab.sig_results if r["field"] == field] if field else []
+        if not res:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                res = signing.validate(tab.original_bytes, field)
+            finally:
+                QApplication.restoreOverrideCursor()
+        return res
+
+    def _view_signed(self, tab, info):
+        data = signing.signed_revision(tab.original_bytes, info)
+        if data:
+            self.open_bytes(data, f"Versão assinada por {info['signer'].split(':')[0]}.pdf")
+
     def tool_validate_sigs(self, tab, **kw):
-        data = open(tab.path, "rb").read() if tab.path and not tab.modified else tab.doc.tobytes()
-        dialogs.SignaturesDialog(self, signing.validate(data)).exec()
+        dialogs.SignaturesDialog(self, self._sig_results(tab), lambda i: self._view_signed(tab, i)).exec()
+
+    def tool_signature_info(self, tab, field=None, **kw):
+        res = self._sig_results(tab, field)
+        if not res:
+            QMessageBox.information(self, APP, "Este campo de assinatura ainda não foi assinado.")
+            return
+        dialogs.SignatureInfoDialog(self, res[0], lambda i: self._view_signed(tab, i)).exec()
 
     # --- edição
     def tool_edit_span(self, tab, page, point, **kw):

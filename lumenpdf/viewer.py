@@ -113,6 +113,7 @@ class PdfView(QGraphicsView):
         self._words.clear()
         self._links.clear()
         self._pages = {}
+        self._sigs = {}
         self.sel = None
         self.sel_rects = {}
         self.sel_annot = None
@@ -311,6 +312,7 @@ class PdfView(QGraphicsView):
             self._timer.start()
 
     def refresh(self, pages=None):
+        self.__dict__["_sigs"] = {}
         if pages is None:
             self.cache.clear()
             self._words.clear()
@@ -394,6 +396,26 @@ class PdfView(QGraphicsView):
                 ws.append((pymupdf.Rect(w[:4]) * m, w[4], w[5], w[6]))
             self._words[i] = ws
         return self._words[i]
+
+    def sig_fields(self, i):
+        """Campos de assinatura da página (retângulo em coordenadas de exibição, nome do campo)."""
+        cache = self.__dict__.setdefault("_sigs", {})
+        if i not in cache:
+            page = self._page(i)
+            out = []
+            try:
+                for w in page.widgets(types=[pymupdf.PDF_WIDGET_TYPE_SIGNATURE]) or []:
+                    out.append(((w.rect * page.rotation_matrix).normalize(), w.field_name))
+            except Exception:
+                pass
+            cache[i] = out
+        return cache[i]
+
+    def sig_at(self, i, pt):
+        for r, name in self.sig_fields(i):
+            if r.contains(pt):
+                return name
+        return None
 
     def links(self, i):
         if i not in self._links:
@@ -613,6 +635,11 @@ class PdfView(QGraphicsView):
         self._press = (i, pt, None)
         m = self.mode
         if m == "select":
+            name = self.sig_at(i, pt)
+            if name and not (e.modifiers() & Qt.ShiftModifier):
+                self.request_tool("signature_info", field=name)
+                self._press = None
+                return
             # link?
             for ln in self.links(i):
                 if ln["from"].contains(pt) and not (e.modifiers() & Qt.ShiftModifier):
@@ -657,7 +684,9 @@ class PdfView(QGraphicsView):
             return super().mouseMoveEvent(e)
         i, pt = self.hit(e.position().toPoint())
         if self.mode == "select" and not self._press and i is not None:
-            over_link = any(ln["from"].contains(pt) for ln in self.links(i))
+            over_sig = self.sig_at(i, pt)
+            self.viewport().setToolTip("Clique para ver a validação desta assinatura" if over_sig else "")
+            over_link = over_sig or any(ln["from"].contains(pt) for ln in self.links(i))
             self.viewport().setCursor(Qt.PointingHandCursor if over_link else (
                 Qt.SizeAllCursor if self.annot_at(i, pt) else Qt.IBeamCursor))
         if not self._press or self.mode == "hand":

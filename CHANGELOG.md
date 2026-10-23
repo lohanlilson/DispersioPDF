@@ -2,6 +2,14 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.0.8
+- Clique sobre uma assinatura digital para ver a validação completa dela: signatário, CPF/CNPJ, data,
+  motivo, integridade, alterações posteriores e dados do certificado.
+- Faixa no topo de documentos assinados informando se as assinaturas são válidas.
+- Botão "Ver versão assinada": abre o documento exatamente como estava quando foi assinado.
+- A confiança no certificado usa as cadeias instaladas no Windows (ICP-Brasil, quando instaladas).
+- Corrigido erro ao aplicar duas assinaturas seguidas no mesmo documento.
+
 ## 1.0.7
 - Verifica atualizações sozinho toda vez que o programa abre (e a cada 4 horas aberto).
 - Abre sempre maximizado.
