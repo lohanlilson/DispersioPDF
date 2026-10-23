@@ -58,6 +58,13 @@ jobs:
             gh release download "$PREV" -p manifest.json -D "releases/$P" && echo "ANTERIOR=$P" >> $GITHUB_ENV || true
           fi
 
+      - name: Teste de inicialização
+        if: steps.versao.outputs.publicar == 'sim'
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/smoke_test.py
+
       - name: Gerar executável, instalador e patch
         if: steps.versao.outputs.publicar == 'sim'
         shell: bash

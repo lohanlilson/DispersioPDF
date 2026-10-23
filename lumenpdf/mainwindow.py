@@ -623,6 +623,38 @@ class MainWindow(QMainWindow):
         box.setTextFormat(Qt.RichText)
         box.exec()
 
+    def bring_to_front(self):
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def check_default_app(self, force=False):
+        """Pergunta (no primeiro uso) se o Lumen PDF deve ser o leitor padrão de PDF."""
+        if not system.IS_WINDOWS:
+            return
+        if not force and (self.settings.value("ask_default", "true") == "false" or system.is_default_pdf()):
+            return
+        if system.is_default_pdf():
+            QMessageBox.information(self, APP, "O Lumen PDF já é o seu leitor de PDF padrão.")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(APP)
+        box.setIconPixmap(QIcon(resource("assets", "logo.png")).pixmap(64, 64))
+        box.setText("<b>Usar o Lumen PDF como leitor de PDF padrão?</b>")
+        box.setInformativeText("O Windows vai abrir a tela de Aplicativos padrão. Escolha <b>Lumen PDF</b> "
+                               "para a extensão <b>.pdf</b> e clique em <b>Definir padrão</b>.")
+        yes = box.addButton("Definir como padrão", QMessageBox.AcceptRole)
+        box.addButton("Agora não", QMessageBox.RejectRole)
+        from PySide6.QtWidgets import QCheckBox
+        never = QCheckBox("Não perguntar novamente")
+        box.setCheckBox(never)
+        box.exec()
+        if never.isChecked():
+            self.settings.setValue("ask_default", "false")
+        if box.clickedButton() is yes:
+            system.open_default_apps_settings()
+
     # ------------------------------------------------------------ execução de ferramentas
     def _pages_from(self, text, tab):
         return ops.parse_ranges(text, tab.doc.page_count)
