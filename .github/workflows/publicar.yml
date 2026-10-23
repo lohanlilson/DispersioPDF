@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: publicar
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   publicar:
