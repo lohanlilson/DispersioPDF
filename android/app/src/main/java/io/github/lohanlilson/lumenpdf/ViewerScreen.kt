@@ -317,6 +317,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                             onTap = { p ->
                                 scope.launch {
                                     val hit = pageAt(d, g, p)
+                                    android.util.Log.i("LumenPdf", "toque $p -> $hit ferramenta=${d.tool} edição=${d.editing}")
                                     val field = hit?.let { (pg, fx, fy) ->
                                         d.fields.firstOrNull { (f, r) -> f.page == pg && fx in r.l..r.r && fy in r.t..r.b && !f.readOnly }?.first
                                     }

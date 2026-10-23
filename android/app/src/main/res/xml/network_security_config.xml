@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Carimbo de tempo (RFC 3161) usa HTTP; a resposta é assinada pela autoridade e conferida pelo app. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">timestamp.digicert.com</domain>
+        <domain includeSubdomains="false">timestamp.sectigo.com</domain>
+    </domain-config>
+</network-security-config>
