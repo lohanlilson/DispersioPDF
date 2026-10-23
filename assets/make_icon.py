@@ -1,6 +1,6 @@
 """Identidade visual do Lumen PDF (lumen = luz).
 
-Marca: o Prisma — a luz branca atravessa um prisma e se abre em violeta e dourado, com um brilho no centro.
+Marca: o Prisma — a luz branca atravessa um prisma e se abre em violeta e dourado.
 Gera: logo.png (1024), lumenpdf.png (256), lumenpdf.ico (programa) e pdfdoc.ico (arquivos .pdf).
 """
 import math
@@ -108,7 +108,7 @@ def _put(img, m, color, clip=None):
 
 
 def app_icon(s=S):
-    """Prisma suave: a luz branca entra, atravessa o prisma e se abre em violeta e dourado, com um brilho (lúmen)."""
+    """Prisma suave: a luz branca entra, atravessa o prisma e se abre em violeta e dourado."""
     u = s / 1024
     P = lambda *pts: [(x * u, y * u) for x, y in pts]  # noqa: E731
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
@@ -139,12 +139,6 @@ def app_icon(s=S):
     sh.paste(tri, (0, int(20 * u)))
     _put(img, sh.filter(ImageFilter.GaussianBlur(24 * u)).point(lambda v: int(v * 0.45)), (16, 0, 50), clip)
     _put(img, tri, linear((s, s), [(0, (255, 255, 255)), (1, (226, 212, 255))], 100).convert("RGBA"))
-    # o lúmen: brilho dourado no ponto em que a luz se abre
-    cx, cy = 610 * u, 520 * u
-    img.alpha_composite(radial((s, s), (cx, cy), 170 * u, (255, 200, 90), 0.95))
-    d = ImageDraw.Draw(img)
-    star4(d, cx, cy, 110 * u, (255, 205, 100, 255))
-    star4(d, cx, cy, 60 * u, (255, 245, 210, 255))
     return img
 
 

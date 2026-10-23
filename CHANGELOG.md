@@ -2,6 +2,9 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.3.2
+- Ícone do Prisma sem o brilho dourado (mais limpo), no programa e nos arquivos PDF.
+
 ## 1.3.1
 - **Novo ícone: o Prisma** — a luz branca atravessa o prisma e se abre em violeta e dourado, com um brilho no
   centro. Aplicado ao programa, à barra de tarefas, à tela Início, ao carimbo das assinaturas e ao ícone dos
