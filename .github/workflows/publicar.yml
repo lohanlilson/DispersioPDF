@@ -1,10 +1,12 @@
-# Ao enviar uma tag "vX.Y.Z", gera no Windows o executável, o instalador, o patch da versão anterior e o
-# versao.json, e publica tudo como Release. O Lumen PDF instalado detecta a nova versão sozinho.
+# Quando __version__ (lumenpdf/__init__.py) muda na branch main, gera no Windows o executável, o instalador,
+# o patch da versão anterior e o versao.json, e publica tudo como Release "vX.Y.Z".
+# O Lumen PDF instalado detecta a nova versão sozinho.
 name: Publicar versão
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["lumenpdf/__init__.py", ".github/workflows/publicar.yml"]
   workflow_dispatch:
 
 permissions:
@@ -30,16 +32,21 @@ jobs:
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
 
       - name: Conferir versão
+        id: versao
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           V=$(python -c "import re;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"',open('lumenpdf/__init__.py',encoding='utf-8').read()).group(1))")
-          echo "Versão do código: $V  |  tag: $GITHUB_REF_NAME"
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "v$V" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::A tag $GITHUB_REF_NAME não bate com __version__ ($V)"; exit 1
-          fi
           echo "VERSAO=$V" >> $GITHUB_ENV
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "A versão $V já foi publicada — nada a fazer."; echo "publicar=nao" >> $GITHUB_OUTPUT
+          else
+            echo "Publicando a versão $V"; echo "publicar=sim" >> $GITHUB_OUTPUT
+          fi
 
       - name: Base para o patch (versão anterior publicada)
+        if: steps.versao.outputs.publicar == 'sim'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -52,12 +59,14 @@ jobs:
           fi
 
       - name: Gerar executável, instalador e patch
+        if: steps.versao.outputs.publicar == 'sim'
         shell: bash
         run: |
           if [ -n "$ANTERIOR" ]; then python build.py --publicar --patch-from "$ANTERIOR"; else python build.py --publicar; fi
           ls -la Saida
 
       - name: Publicar Release
+        if: steps.versao.outputs.publicar == 'sim'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

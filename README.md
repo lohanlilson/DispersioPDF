@@ -16,7 +16,16 @@ criar atalho na Área de Trabalho, registra o programa para abrir .pdf e, ao fin
 defini-lo como leitor padrão (o Windows 10/11 exige que o usuário confirme). Aparece em "Adicionar ou remover
 programas" com desinstalador.
 
-## Atualizações por patch
+## Atualização automática (GitHub)
+
+O programa consulta a última Release de `UPDATE_REPO` (em `lumenpdf/__init__.py`) e oferece a atualização.
+Para publicar uma versão nova:
+
+1. Aumente `__version__` em `lumenpdf/__init__.py` e descreva as novidades no `CHANGELOG.md` (`## 1.0.1`).
+2. Envie para a branch `main`. O GitHub Actions (`.github/workflows/publicar.yml`) gera no Windows o
+   instalador, o patch da versão anterior e o `versao.json`, e cria a Release `v1.0.1`.
+
+## Atualizações por patch (manual)
 
 1. Aumente `__version__` em `lumenpdf/__init__.py` (ex.: 1.0.0 → 1.0.1).
 2. Rode `gerar_patch.bat` e informe a versão anterior (ex.: 1.0.0).
