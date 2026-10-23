@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.4.1
+- A atualização automática não mostra mais a janela preta de prompt (CMD): aparece só a barra de
+  progresso da instalação, e o programa reabre sozinho ao terminar.
+
 ## 1.4.0
 - **Impressão rápida pelo Windows e pelo Outlook**: “Impressão rápida” de anexos no Outlook e “Imprimir” no
   botão direito do Explorer agora imprimem direto na impressora padrão, sem abrir o programa.

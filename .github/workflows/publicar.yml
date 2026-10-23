@@ -116,12 +116,18 @@ jobs:
           $p = Start-Process "anterior\LumenPDF-Setup-$env:ANTERIOR.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS="assocpdf"' -PassThru; $p.WaitForExit()
           if ($p.ExitCode -ne 0) { throw "Falha ao instalar a versão anterior ($($p.ExitCode))" }
           Start-Sleep 5; Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 2
-          $patch = "Saida\LumenPDF-Atualizacao-$env:ANTERIOR-para-$env:VERSAO.exe"
-          $p = Start-Process $patch -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -PassThru; $p.WaitForExit()
-          if ($p.ExitCode -ne 0) { throw "O patch falhou (código $($p.ExitCode))" }
-          Start-Sleep 5; Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force
+          $patch = Join-Path $PWD "Saida\LumenPDF-Atualizacao-$env:ANTERIOR-para-$env:VERSAO.exe"
           $key = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{792033AC-5BB3-4C63-8E0C-D8EFE3BA162C}_is1"
-          $v = (Get-ItemProperty $key).DisplayVersion
+          # mesmo caminho da atualização automática: o próprio programa (versão nova) dispara o patch em segundo plano
+          $helper = Join-Path $PWD "dist\LumenPDF\LumenPDF.exe"
+          Start-Process $helper -ArgumentList "--run-update", "`"$patch`"", "0" | Out-Null
+          $v = ""
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep 2
+            $v = (Get-ItemProperty $key).DisplayVersion
+            if ($v -eq $env:VERSAO -and -not (Get-Process -Name "LumenPDF-Atualizacao*" -ErrorAction SilentlyContinue)) { break }
+          }
+          Start-Sleep 5; Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force
           Write-Host "Versão instalada após o patch: $v"
           if ($v -ne $env:VERSAO) { throw "Versão esperada $env:VERSAO, encontrada $v" }
           $exe = Join-Path (Get-ItemProperty $key).InstallLocation "LumenPDF.exe"

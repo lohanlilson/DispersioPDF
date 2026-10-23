@@ -323,7 +323,8 @@ def office_to_pdf(path, out_path):
                            "Arquivos .docx, .xlsx, .csv e .txt são convertidos mesmo sem eles.")
     outdir = tempfile.mkdtemp()
     subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", outdir, path],
-                   check=True, timeout=180, capture_output=True)
+                   check=True, timeout=180, capture_output=True,
+                   creationflags=0x08000000 if sys.platform == "win32" else 0)  # sem janela de console
     produced = os.path.join(outdir, os.path.splitext(os.path.basename(path))[0] + ".pdf")
     shutil.move(produced, out_path)
     return out_path

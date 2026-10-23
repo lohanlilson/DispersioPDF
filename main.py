@@ -90,6 +90,9 @@ def app_icon():
 
 
 def main():
+    if "--run-update" in sys.argv:  # auxiliar da atualização automática (sem janela, sem trava de instância)
+        from lumenpdf.updater import run_update_helper
+        return run_update_helper(sys.argv)
     if "--selftest" in sys.argv:  # usado pelo build para conferir o executável gerado
         from lumenpdf import selftest
         i = sys.argv.index("--selftest")

@@ -83,12 +83,35 @@ class DownloadThread(QThread):
             self.done.emit("", str(e))
 
 
+UPDATE_ARGS = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]
+
+
 def run_package(path):
-    """Executa o patch/instalador em modo silencioso depois que o programa fechar (ele reabre o programa)."""
-    args = f'"{path}" /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS'
-    # espera ~3 s para o Lumen PDF terminar de fechar e então executa
-    subprocess.Popen(f'cmd /c ping -n 4 127.0.0.1 >nul & start "" {args}',
-                     shell=True, creationflags=0x00000008 | 0x08000000)  # DETACHED | NO_WINDOW
+    """Agenda o patch/instalador para depois que o programa fechar (ele reabre o programa ao terminar).
+    O próprio LumenPDF.exe faz a espera em segundo plano — nenhuma janela de prompt aparece."""
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        subprocess.Popen([path] + UPDATE_ARGS)
+        return
+    subprocess.Popen([sys.executable, "--run-update", path, str(os.getpid())], close_fds=True,
+                     creationflags=0x00000008 | 0x00000200)  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+
+def run_update_helper(argv):
+    """Executado como LumenPDF.exe --run-update <instalador> <pid>: espera o programa fechar e inicia a atualização."""
+    i = argv.index("--run-update")
+    path = argv[i + 1]
+    pid = int(argv[i + 2]) if len(argv) > i + 2 else 0
+    if sys.platform == "win32" and pid:
+        import ctypes
+        SYNCHRONIZE = 0x00100000
+        h = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if h:
+            ctypes.windll.kernel32.WaitForSingleObject(h, 60000)
+            ctypes.windll.kernel32.CloseHandle(h)
+    import time
+    time.sleep(0.5)
+    subprocess.Popen([path] + UPDATE_ARGS, close_fds=True)
+    return 0
 
 
 class UpdateDialog(QDialog):
