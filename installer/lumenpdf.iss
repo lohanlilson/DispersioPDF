@@ -64,6 +64,7 @@ Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: s
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\print\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assocpdf
 Root: HKA; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assocpdf
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: assocpdf
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\pdfdoc.ico"; Tasks: assocpdf
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".pdf"; ValueData: ""; Tasks: assocpdf
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assocpdf
 ; Aparecer em Configurações > Aplicativos padrão
@@ -78,6 +79,8 @@ Filename: "{app}\{#AppExe}"; Parameters: "--set-default"; Description: "Definir 
 Filename: "{app}\{#AppExe}"; Description: "Abrir o Lumen PDF agora"; Flags: nowait postinstall skipifsilent unchecked
 
 Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
+
+Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait; StatusMsg: "Atualizando ícones…"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\_internal"

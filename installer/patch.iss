@@ -47,12 +47,15 @@ WelcomeLabel2=Este assistente vai atualizar o Lumen PDF da versão {#FromVersion
 [Files]
 Source: "..\build\patch\files\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
+Source: "..\assets\pdfdoc.ico"; DestDir: "{app}"; Flags: ignoreversion
+
 #include "..\build\patch\delete.iss"
 
 [Registry]
 Root: HKA; Subkey: "Software\LumenPDF"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"
 
 [Run]
+Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait
 Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [Code]

@@ -2,6 +2,11 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.0.5
+- A pergunta para tornar o Lumen PDF o leitor padrão aparece só uma vez (continua disponível em Ajuda).
+- Reconhece corretamente quando o Lumen PDF já é o padrão (inclusive escolhido pelo "Abrir com").
+- Arquivos PDF passam a mostrar o ícone atual do Lumen PDF; o cache de ícones do Windows é atualizado na instalação.
+
 ## 1.0.4
 - OCR em português e inglês já incluído — não precisa mais instalar o Tesseract.
 - Abrir/converter .docx, .xlsx, .csv e .txt em PDF funciona mesmo sem Office ou LibreOffice.

@@ -11,18 +11,29 @@ def is_frozen():
     return getattr(sys, "frozen", False)
 
 
+def default_pdf_progid():
+    """ProgId que o Windows usa hoje para abrir .pdf (UserChoiceLatest no Windows 11 24H2+, senão UserChoice)."""
+    if not IS_WINDOWS:
+        return ""
+    import winreg
+    base = r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.pdf"
+    for sub in (r"\UserChoiceLatest", r"\UserChoice"):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base + sub) as k:
+                prog, _ = winreg.QueryValueEx(k, "ProgId")
+                if prog:
+                    return prog
+        except OSError:
+            pass
+    return ""
+
+
 def is_default_pdf():
-    """True se o Windows abre .pdf com o Lumen PDF (escolha do usuário)."""
+    """True se o Windows abre .pdf com o Lumen PDF (por ProgId ou escolhido via 'Abrir com')."""
     if not IS_WINDOWS:
         return True
-    try:
-        import winreg
-        key = r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.pdf\UserChoice"
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as k:
-            prog, _ = winreg.QueryValueEx(k, "ProgId")
-        return prog == PROG_ID
-    except OSError:
-        return False
+    prog = default_pdf_progid().lower()
+    return prog in (PROG_ID.lower(), r"applications\lumenpdf.exe") or "lumenpdf" in prog
 
 
 def is_registered():

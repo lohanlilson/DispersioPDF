@@ -38,7 +38,9 @@ def main():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"{APP_ID}.App")
         main._mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "LumenPDF_Running")
         if "--set-default" in sys.argv:  # chamado pelo instalador
+            from PySide6.QtCore import QSettings
             from lumenpdf import system
+            QSettings(APP_ID, APP_ID).setValue("default_asked", "true")  # o programa não pergunta de novo
             system.open_default_apps_settings()
             return 0
     app = QApplication(sys.argv)

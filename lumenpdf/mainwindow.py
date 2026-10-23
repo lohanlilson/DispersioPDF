@@ -633,8 +633,11 @@ class MainWindow(QMainWindow):
         """Pergunta (no primeiro uso) se o Lumen PDF deve ser o leitor padrão de PDF."""
         if not system.IS_WINDOWS:
             return
-        if not force and (self.settings.value("ask_default", "true") == "false" or system.is_default_pdf()):
-            return
+        if not force:
+            # pergunta uma única vez (no primeiro uso); depois só pelo menu Ajuda
+            if self.settings.value("default_asked", "false") == "true" or system.is_default_pdf():
+                return
+            self.settings.setValue("default_asked", "true")
         if system.is_default_pdf():
             QMessageBox.information(self, APP, "O Lumen PDF já é o seu leitor de PDF padrão.")
             return
