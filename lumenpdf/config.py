@@ -27,6 +27,7 @@ DEFAULTS = {
     "invert_pages": False,
     "remember_position": True,
     "wheel_zoom": False,                 # roda do mouse dá zoom sem Ctrl
+    "middle_autoscroll": True,           # botão do meio ativa a rolagem automática
     "page_shadow": True,
     # Comentários
     "color_highlight": "#ffd400",

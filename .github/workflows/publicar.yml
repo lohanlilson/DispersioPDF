@@ -71,6 +71,7 @@ jobs:
         run: |
           python tests/smoke_test.py
           python tests/features_test.py
+          python tests/autoscroll_test.py
 
       - name: Gerar executável, instalador e patch
         if: steps.versao.outputs.publicar == 'sim'

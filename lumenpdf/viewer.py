@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal, QUrl
 from PySide6.QtGui import (QColor, QImage, QPainter, QPainterPath, QPen, QPixmap, QBrush, QCursor,
                            QDesktopServices, QGuiApplication, QKeySequence)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsScene, QGraphicsView, QMenu, QInputDialog,
-                               QFileDialog, QMessageBox)
+                               QFileDialog, QMessageBox, QWidget)
 
 from . import ops, theme
 
@@ -38,6 +38,39 @@ class PageItem(QGraphicsItem):
         self.view.paint_page(self, painter)
 
 
+class AutoScrollMarker(QWidget):
+    """Marcador da rolagem automática (botão do meio): círculo com setas no ponto de origem."""
+    SIZE = 34
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(1.5, 1.5, self.SIZE - 3, self.SIZE - 3)
+        p.setPen(QPen(QColor(60, 60, 70, 200), 1.5))
+        p.setBrush(QColor(255, 255, 255, 225))
+        p.drawEllipse(r)
+        c = self.SIZE / 2
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(40, 40, 50))
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            tip = QPointF(c + dx * 12, c + dy * 12)
+            base = QPointF(c + dx * 6, c + dy * 6)
+            ox, oy = -dy * 4, dx * 4
+            path = QPainterPath(tip)
+            path.lineTo(base.x() + ox, base.y() + oy)
+            path.lineTo(base.x() - ox, base.y() - oy)
+            path.closeSubpath()
+            p.drawPath(path)
+        p.drawEllipse(QPointF(c, c), 2, 2)
+        p.end()
+
+
 class PdfView(QGraphicsView):
     pageChanged = Signal(int, int)
     zoomChanged = Signal(float)
@@ -56,6 +89,14 @@ class PdfView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
+        # rolagem automática com o botão do meio do mouse
+        self.middle_autoscroll = True
+        self._as_active = False
+        self._as_origin = None
+        self._as_pos = None
+        self._as_carry = [0.0, 0.0]
+        self._as_marker = AutoScrollMarker(self.viewport())
+        self._as_timer = QTimer(self, interval=16, timeout=self._autoscroll_tick)
         self.doc = None
         self.items = []
         self.zoom = 1.0
@@ -614,8 +655,73 @@ class PdfView(QGraphicsView):
         annot.set_opacity(self.opacity if kind != "highlight" else min(self.opacity, 1.0))
         annot.set_info(title=self.author)
 
+    # ------------------------------------------------------------ rolagem automática (botão do meio)
+    AS_DEAD = 12  # zona morta em pixels ao redor da origem
+
+    def start_autoscroll(self, pos):
+        self._as_active = True
+        self._as_origin = QPointF(pos)
+        self._as_pos = QPointF(pos)
+        self._as_moved = False
+        self._as_t0 = __import__("time").monotonic()
+        self._as_carry = [0.0, 0.0]
+        m = self._as_marker
+        m.move(int(pos.x() - m.width() / 2), int(pos.y() - m.height() / 2))
+        m.show()
+        m.raise_()
+        self.viewport().setCursor(Qt.SizeAllCursor)
+        self.viewport().grabMouse()
+        self._as_timer.start()
+
+    def stop_autoscroll(self):
+        if not self._as_active:
+            return
+        self._as_active = False
+        self._as_timer.stop()
+        self._as_marker.hide()
+        self.viewport().releaseMouse()
+        cursors = {"select": Qt.IBeamCursor, "hand": Qt.OpenHandCursor, "edittext": Qt.IBeamCursor,
+                   "note": Qt.PointingHandCursor, "addtext": Qt.IBeamCursor, "stamp": Qt.PointingHandCursor}
+        self.viewport().setCursor(cursors.get(self.mode, Qt.CrossCursor if self.mode not in TEXT_MARKUP_MODES
+                                              else Qt.IBeamCursor))
+
+    def _as_speed(self, d):
+        a = abs(d) - self.AS_DEAD
+        if a <= 0:
+            return 0.0
+        v = min((a ** 1.35) / 9.0, 160.0)  # px por quadro (~60 fps)
+        return v if d > 0 else -v
+
+    def _autoscroll_tick(self):
+        if not self._as_active or self._as_pos is None:
+            return
+        d = self._as_pos - self._as_origin
+        for k, (bar, delta) in enumerate(((self.horizontalScrollBar(), d.x()), (self.verticalScrollBar(), d.y()))):
+            self._as_carry[k] += self._as_speed(delta)
+            step = int(self._as_carry[k])
+            if step:
+                self._as_carry[k] -= step
+                bar.setValue(bar.value() + step)
+        dx, dy = d.x(), d.y()
+        if abs(dx) <= self.AS_DEAD and abs(dy) <= self.AS_DEAD:
+            cur = Qt.SizeAllCursor
+        elif abs(dy) >= abs(dx):
+            cur = Qt.SizeVerCursor
+        else:
+            cur = Qt.SizeHorCursor
+        if self.viewport().cursor().shape() != cur:
+            self.viewport().setCursor(cur)
+
+    def focusOutEvent(self, e):
+        self.stop_autoscroll()
+        super().focusOutEvent(e)
+
     # ------------------------------------------------------------ eventos do mouse
     def wheelEvent(self, e):
+        if self._as_active:
+            self.stop_autoscroll()
+            e.accept()
+            return
         zoom_key = not (e.modifiers() & Qt.ControlModifier) if getattr(self, "wheel_zoom", False) else \
             bool(e.modifiers() & Qt.ControlModifier)
         if zoom_key:
@@ -626,6 +732,14 @@ class PdfView(QGraphicsView):
 
     def mousePressEvent(self, e):
         self.setFocus()
+        if self._as_active:  # qualquer clique encerra a rolagem automática
+            self.stop_autoscroll()
+            e.accept()
+            return
+        if e.button() == Qt.MiddleButton and self.middle_autoscroll and self.doc:
+            self.start_autoscroll(e.position())
+            e.accept()
+            return
         if e.button() != Qt.LeftButton or self.mode == "hand" or not self.doc:
             super().mousePressEvent(e)
             return
@@ -683,6 +797,13 @@ class PdfView(QGraphicsView):
         self.viewport().update()
 
     def mouseMoveEvent(self, e):
+        if self._as_active:
+            self._as_pos = QPointF(e.position())
+            d = self._as_pos - self._as_origin
+            if abs(d.x()) > self.AS_DEAD or abs(d.y()) > self.AS_DEAD:
+                self._as_moved = True
+            e.accept()
+            return
         if not self.doc:
             return super().mouseMoveEvent(e)
         i, pt = self.hit(e.position().toPoint())
@@ -715,6 +836,14 @@ class PdfView(QGraphicsView):
         self.viewport().update()
 
     def mouseReleaseEvent(self, e):
+        if self._as_active:
+            if e.button() == Qt.MiddleButton:
+                import time
+                # segurou e arrastou: para ao soltar; clique rápido: continua até o próximo clique
+                if self._as_moved or time.monotonic() - self._as_t0 > 0.45:
+                    self.stop_autoscroll()
+            e.accept()
+            return
         if not self._press or self.mode == "hand":
             self._press = None
             return super().mouseReleaseEvent(e)
@@ -953,6 +1082,8 @@ class PdfView(QGraphicsView):
             self.select_all()
         elif e.key() in (Qt.Key_Delete, Qt.Key_Backspace) and self.sel_annot:
             self.delete_selected_annot()
+        elif e.key() == Qt.Key_Escape and self._as_active:
+            self.stop_autoscroll()
         elif e.key() == Qt.Key_Escape:
             self.clear_selection()
             self.sel_annot = None

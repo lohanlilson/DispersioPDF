@@ -2,6 +2,12 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.4.3
+
+- **Rolagem automática com o botão do meio do mouse:** clique com a rodinha e mova o mouse para cima ou para baixo. Quanto mais longe do ponto de origem, mais rápido o documento rola. Qualquer clique, a tecla Esc ou girar a roda encerram a rolagem.
+- Também dá para segurar a rodinha e arrastar: o documento rola enquanto você segura e para quando você solta.
+- A rolagem automática pode ser desligada em Preferências › Documentos.
+
 ## 1.4.2
 - Corrigido: ao imprimir vários PDFs de uma vez pelo botão direito, alguns podiam demorar ou ficar presos.
   Agora cada arquivo é confirmado pela fila de impressão e todos saem uma única vez.

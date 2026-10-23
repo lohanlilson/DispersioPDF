@@ -154,6 +154,7 @@ class DocTab(QWidget):
         v.stroke_width = cfg.get("stroke_width")
         v.opacity = cfg.get("annot_opacity") / 100
         v.wheel_zoom = cfg.get("wheel_zoom")
+        v.middle_autoscroll = cfg.get("middle_autoscroll")
         v.page_shadow = cfg.get("page_shadow")
         self.rail.setVisible(cfg.get("show_quick_rail"))
         self.sig_bar_enabled = cfg.get("show_sig_bar")
