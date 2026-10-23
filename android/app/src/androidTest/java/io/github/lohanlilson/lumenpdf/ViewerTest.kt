@@ -178,6 +178,10 @@ class ViewerTest {
             val annots = doc.getPage(0).annotations.map { it.subtype }
             Log.i("LumenTest", "anotações na página 1: $annots")
             assertTrue("destaque não foi gravado: $annots", "Highlight" in annots)
+            // o ✓ é desenhado no conteúdo da página (fluxo acrescentado)
+            val streams = doc.getPage(0).contentStreams.asSequence().count()
+            Log.i("LumenTest", "fluxos de conteúdo na página 1: $streams")
+            assertTrue("✓ não foi gravado", streams > 1)
         }
     }
 }
