@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.0.1
+- O instalador agora instala em Arquivos de Programas (C:\Program Files\Lumen PDF) por padrão, para todos
+  os usuários, mantendo a opção de escolher outra pasta.
+
 ## 1.0.0
 - Primeira versão: leitura, comentários, edição, organização de páginas, conversão, OCR, proteção,
   ocultação, formulários e assinatura digital (certificados do Windows, A1 e A3).
