@@ -1,0 +1,7 @@
+.venv/
+dist/
+build/
+Saida/
+__pycache__/
+releases/
+*.spec

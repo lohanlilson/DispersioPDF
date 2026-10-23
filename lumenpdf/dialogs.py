@@ -1,0 +1,678 @@
+"""Diálogos das ferramentas."""
+import io
+import os
+
+import pymupdf
+from PySide6.QtCore import Qt, QPointF, QRectF, QBuffer, QByteArray, QIODevice, QSize
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QFontDatabase, QIcon
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit, QSpinBox,
+                               QDoubleSpinBox, QComboBox, QCheckBox, QDialogButtonBox, QPlainTextEdit,
+                               QPushButton, QColorDialog, QTabWidget, QWidget, QFileDialog, QListWidget,
+                               QListWidgetItem, QRadioButton, QButtonGroup, QTableWidget, QTableWidgetItem,
+                               QTextBrowser, QSlider, QGroupBox, QHeaderView, QAbstractItemView, QMessageBox)
+
+from . import ops, icons
+
+
+class ColorButton(QPushButton):
+    def __init__(self, color="#000000"):
+        super().__init__()
+        self.setFixedSize(46, 28)
+        self.set_color(color)
+        self.clicked.connect(self.pick)
+
+    def set_color(self, c):
+        self.color = c
+        self.setStyleSheet(f"background:{c}; border:1px solid #888; border-radius:6px;")
+
+    def pick(self):
+        c = QColorDialog.getColor(QColor(self.color), self, "Cor")
+        if c.isValid():
+            self.set_color(c.name())
+
+
+class FormDialog(QDialog):
+    """Diálogo de formulário simples: título, linhas (rótulo, widget) e OK/Cancelar."""
+
+    def __init__(self, parent, title, rows, ok_text="OK", intro=None, width=420):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(width)
+        lay = QVBoxLayout(self)
+        if intro:
+            lb = QLabel(intro)
+            lb.setWordWrap(True)
+            lb.setObjectName("Muted")
+            lay.addWidget(lb)
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight)
+        for label, w in rows:
+            if label is None:
+                form.addRow(w)
+            else:
+                form.addRow(label, w)
+        lay.addLayout(form)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText(ok_text)
+        bb.button(QDialogButtonBox.Ok).setObjectName("Primary")
+        bb.button(QDialogButtonBox.Cancel).setText("Cancelar")
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+
+def spin(v, lo, hi, dec=False, suffix=""):
+    w = QDoubleSpinBox() if dec else QSpinBox()
+    w.setRange(lo, hi)
+    w.setValue(v)
+    if suffix:
+        w.setSuffix(suffix)
+    return w
+
+
+def combo(items, current=None):
+    w = QComboBox()
+    w.addItems(items)
+    if current:
+        w.setCurrentText(current)
+    return w
+
+
+def line(text="", placeholder="", password=False):
+    w = QLineEdit(text)
+    w.setPlaceholderText(placeholder)
+    if password:
+        w.setEchoMode(QLineEdit.Password)
+    return w
+
+
+# ---------------------------------------------------------------- edição de texto
+class EditTextDialog(FormDialog):
+    def __init__(self, parent, span):
+        self.text = QPlainTextEdit(span["text"])
+        self.text.setFixedHeight(80)
+        self.size = spin(round(span["size"], 1), 4, 200, dec=True, suffix=" pt")
+        self.font = combo(list(ops.BASE_FONTS))
+        guess = ops.guess_font(span)
+        self.font.setCurrentText(next(k for k, v in ops.BASE_FONTS.items() if v == guess))
+        c = span.get("color", 0)
+        self.colorb = ColorButton("#%06x" % c)
+        super().__init__(parent, "Editar texto", [("Texto:", self.text), ("Fonte:", self.font),
+                                                   ("Tamanho:", self.size), ("Cor:", self.colorb)],
+                         intro="O trecho original será substituído. Fontes incorporadas são aproximadas pelas fontes padrão.")
+
+    def values(self):
+        return (self.text.toPlainText(), self.size.value(), ops.hex_to_rgb(self.colorb.color),
+                ops.BASE_FONTS[self.font.currentText()])
+
+
+class AddTextDialog(FormDialog):
+    def __init__(self, parent):
+        self.text = QPlainTextEdit()
+        self.text.setFixedHeight(90)
+        self.size = spin(12, 4, 200, dec=True, suffix=" pt")
+        self.font = combo(list(ops.BASE_FONTS))
+        self.colorb = ColorButton("#000000")
+        super().__init__(parent, "Adicionar texto", [("Texto:", self.text), ("Fonte:", self.font),
+                                                       ("Tamanho:", self.size), ("Cor:", self.colorb)])
+
+    def values(self):
+        return (self.text.toPlainText(), self.size.value(), ops.BASE_FONTS[self.font.currentText()],
+                ops.hex_to_rgb(self.colorb.color))
+
+
+# ---------------------------------------------------------------- assinatura (preencher e assinar)
+class SignaturePad(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(460, 170)
+        self.paths = []
+        self.setStyleSheet("background:white; border:1px solid #ccc; border-radius:8px;")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+
+    def mousePressEvent(self, e):
+        self.paths.append([e.position()])
+
+    def mouseMoveEvent(self, e):
+        if self.paths:
+            self.paths[-1].append(e.position())
+            self.update()
+
+    def clear(self):
+        self.paths = []
+        self.update()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(QPen(QColor("#cccccc"), 1, Qt.DashLine))
+        p.drawLine(20, self.height() - 35, self.width() - 20, self.height() - 35)
+        self._draw(p, QColor("#0b2a6f"))
+
+    def _draw(self, p, col, offset=QPointF(0, 0)):
+        p.setPen(QPen(col, 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        for pts in self.paths:
+            if len(pts) < 2:
+                continue
+            path = QPainterPath(pts[0] - offset)
+            for pt in pts[1:]:
+                path.lineTo(pt - offset)
+            p.drawPath(path)
+
+    def image(self, color):
+        if not self.paths:
+            return None
+        xs = [pt.x() for ps in self.paths for pt in ps]
+        ys = [pt.y() for ps in self.paths for pt in ps]
+        box = QRectF(min(xs) - 6, min(ys) - 6, max(xs) - min(xs) + 12, max(ys) - min(ys) + 12)
+        img = QImage(int(box.width() * 3), int(box.height() * 3), QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.scale(3, 3)
+        self._draw(p, QColor(color), box.topLeft())
+        p.end()
+        return img
+
+
+def _png_bytes(img):
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.WriteOnly)
+    img.save(buf, "PNG")
+    return bytes(ba)
+
+
+class SignatureDialog(QDialog):
+    """Criar assinatura: desenhar, digitar ou importar imagem. Retorna PNG transparente."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Criar assinatura")
+        self.png = None
+        lay = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        # digitar
+        tw = QWidget()
+        tl = QVBoxLayout(tw)
+        self.name = line(placeholder="Digite seu nome")
+        self.font = QComboBox()
+        fams = QFontDatabase.families()
+        cursive = [f for f in fams if any(k in f.lower() for k in ("script", "hand", "brush", "segoe print",
+                                                                     "mistral", "vivaldi", "lucida hand",
+                                                                     "dancing", "pacifico", "great vibes",
+                                                                     "kalam", "caveat", "z003", "chancery"))]
+        self.font.addItems(cursive or ["Segoe Script", "Brush Script MT", "serif"])
+        self.preview = QLabel()
+        self.preview.setMinimumHeight(110)
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setStyleSheet("background:white; border:1px solid #ccc; border-radius:8px;")
+        self.name.textChanged.connect(self._upd)
+        self.font.currentTextChanged.connect(self._upd)
+        tl.addWidget(self.name)
+        tl.addWidget(self.font)
+        tl.addWidget(self.preview)
+        self.tabs.addTab(tw, "Digitar")
+        # desenhar
+        dw = QWidget()
+        dl = QVBoxLayout(dw)
+        self.pad = SignaturePad()
+        dl.addWidget(self.pad)
+        clr = QPushButton("Limpar")
+        clr.clicked.connect(self.pad.clear)
+        dl.addWidget(clr, alignment=Qt.AlignRight)
+        self.tabs.addTab(dw, "Desenhar")
+        # imagem
+        iw = QWidget()
+        il = QVBoxLayout(iw)
+        self.img_label = QLabel("Nenhuma imagem selecionada")
+        self.img_label.setAlignment(Qt.AlignCenter)
+        self.img_label.setMinimumHeight(120)
+        b = QPushButton("Selecionar imagem…")
+        b.clicked.connect(self._pick)
+        self.remove_white = QCheckBox("Remover fundo branco")
+        self.remove_white.setChecked(True)
+        il.addWidget(self.img_label)
+        il.addWidget(self.remove_white)
+        il.addWidget(b, alignment=Qt.AlignLeft)
+        self.img_path = None
+        self.tabs.addTab(iw, "Imagem")
+        lay.addWidget(self.tabs)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Cor:"))
+        self.colorb = ColorButton("#0b2a6f")
+        row.addWidget(self.colorb)
+        row.addStretch()
+        lay.addLayout(row)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Salvar assinatura")
+        bb.button(QDialogButtonBox.Ok).setObjectName("Primary")
+        bb.button(QDialogButtonBox.Cancel).setText("Cancelar")
+        bb.accepted.connect(self._ok)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    def _typed_image(self):
+        txt = self.name.text().strip()
+        if not txt:
+            return None
+        f = QFont(self.font.currentText(), 64)
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(f)
+        w, h = fm.horizontalAdvance(txt) + 40, fm.height() + 20
+        img = QImage(w, h, QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setFont(f)
+        p.setPen(QColor(self.colorb.color))
+        p.drawText(QRectF(0, 0, w, h), Qt.AlignCenter, txt)
+        p.end()
+        return img
+
+    def _upd(self):
+        img = self._typed_image()
+        self.preview.setPixmap(QPixmap.fromImage(img).scaledToHeight(90, Qt.SmoothTransformation) if img else QPixmap())
+
+    def _pick(self):
+        fn, _ = QFileDialog.getOpenFileName(self, "Imagem da assinatura", "", "Imagens (*.png *.jpg *.jpeg *.bmp)")
+        if fn:
+            self.img_path = fn
+            self.img_label.setPixmap(QPixmap(fn).scaledToHeight(110, Qt.SmoothTransformation))
+
+    def _ok(self):
+        t = self.tabs.currentIndex()
+        img = None
+        if t == 0:
+            img = self._typed_image()
+        elif t == 1:
+            img = self.pad.image(self.colorb.color)
+        elif self.img_path:
+            img = QImage(self.img_path).convertToFormat(QImage.Format_ARGB32)
+            if self.remove_white.isChecked():
+                for y in range(img.height()):
+                    for x in range(img.width()):
+                        c = img.pixelColor(x, y)
+                        if c.red() > 225 and c.green() > 225 and c.blue() > 225:
+                            img.setPixelColor(x, y, QColor(0, 0, 0, 0))
+        if img is None:
+            QMessageBox.warning(self, "Assinatura", "Crie a assinatura antes de salvar.")
+            return
+        self.png = _png_bytes(img)
+        self.accept()
+
+
+# ---------------------------------------------------------------- assinatura digital
+class CertSignDialog(FormDialog):
+    KINDS = ["Certificado instalado no Windows (A1 ou A3/token)", "Certificado A1 em arquivo (.pfx/.p12)",
+             "Token A3 via biblioteca PKCS#11 (avançado)"]
+
+    def __init__(self, parent, last_pfx="", last_cert="", last_kind=0):
+        from . import wincert
+        self.wincert = wincert
+        self.kind = combo(self.KINDS)
+        # certificados do Windows
+        self.certs = []
+        self.cert_combo = QComboBox()
+        self.cert_combo.setMinimumWidth(420)
+        refresh = QPushButton("Atualizar")
+        refresh.setToolTip("Recarregar (ex.: depois de conectar o token)")
+        refresh.clicked.connect(self._load_certs)
+        self.cert_row = QWidget()
+        cl = QHBoxLayout(self.cert_row)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.addWidget(self.cert_combo, 1)
+        cl.addWidget(refresh)
+        self.show_expired = QCheckBox("Mostrar vencidos")
+        self.show_expired.toggled.connect(self._load_certs)
+        # arquivo / biblioteca
+        self.pfx = line(last_pfx, "Selecione o arquivo do certificado")
+        bpick = QPushButton("…")
+        bpick.setFixedWidth(36)
+        bpick.clicked.connect(self._pick)
+        self.file_row = QWidget()
+        rl = QHBoxLayout(self.file_row)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.addWidget(self.pfx)
+        rl.addWidget(bpick)
+        self.pwd = line(password=True, placeholder="Senha do arquivo / PIN do token")
+        self.reason = line("Concordo com o conteúdo deste documento")
+        self.location = line("Goiânia/GO")
+        super().__init__(parent, "Assinar com certificado digital", [
+            ("Tipo:", self.kind), ("Certificado:", self.cert_row), ("", self.show_expired),
+            ("Arquivo / biblioteca:", self.file_row), ("Senha / PIN:", self.pwd),
+            ("Motivo:", self.reason), ("Local:", self.location)],
+            ok_text="Assinar", width=620,
+            intro="Assinatura no padrão PAdES (compatível com ICP-Brasil), salva como um novo PDF. "
+                  "Com certificado instalado, o Windows ou o driver do token pede o PIN quando necessário.")
+        self.form = self.findChild(QFormLayout)
+        self._last_cert = last_cert
+        self._load_certs()
+        if not wincert.IS_WINDOWS and last_kind == 0:
+            last_kind = 1
+        self.kind.setCurrentIndex(int(last_kind or 0))
+        self.kind.currentIndexChanged.connect(self._kind)
+        self._kind(self.kind.currentIndex())
+
+    def _load_certs(self):
+        self.cert_combo.clear()
+        try:
+            self.certs = self.wincert.list_certificates(include_expired=self.show_expired.isChecked())
+        except Exception as e:
+            self.certs = []
+            self.cert_combo.addItem(f"Erro ao ler certificados: {e}")
+            return
+        if not self.certs:
+            self.cert_combo.addItem("Nenhum certificado com chave privada encontrado" if self.wincert.IS_WINDOWS
+                                    else "Disponível apenas no Windows")
+            return
+        for i, c in enumerate(self.certs):
+            self.cert_combo.addItem(c.label())
+            if c.der.hex()[-40:] == self._last_cert:
+                self.cert_combo.setCurrentIndex(i)
+
+    def _set_row(self, widget, visible):
+        widget.setVisible(visible)
+        lb = self.form.labelForField(widget)
+        if lb:
+            lb.setVisible(visible)
+
+    def _kind(self, i):
+        self._set_row(self.cert_row, i == 0)
+        self._set_row(self.show_expired, i == 0)
+        self._set_row(self.file_row, i != 0)
+        self._set_row(self.pwd, i != 0)
+        if i == 2 and not self.pfx.text().lower().endswith((".dll", ".so", ".dylib")):
+            self.pfx.setText(r"C:\Windows\System32\eTPKCS11.dll" if os.name == "nt" else "/usr/lib/libeToken.so")
+        if i == 1 and self.pfx.text().lower().endswith((".dll", ".so", ".dylib")):
+            self.pfx.clear()
+        self.adjustSize()
+
+    def selected_cert(self):
+        i = self.cert_combo.currentIndex()
+        return self.certs[i] if 0 <= i < len(self.certs) else None
+
+    def _pick(self):
+        flt = "Certificado (*.pfx *.p12)" if self.kind.currentIndex() == 1 else "Biblioteca PKCS#11 (*.dll *.so *.dylib)"
+        fn, _ = QFileDialog.getOpenFileName(self, "Certificado", "", flt)
+        if fn:
+            self.pfx.setText(fn)
+
+
+class SignaturesDialog(QDialog):
+    def __init__(self, parent, results):
+        super().__init__(parent)
+        self.setWindowTitle("Painel de assinaturas")
+        self.resize(720, 300)
+        lay = QVBoxLayout(self)
+        if not results:
+            lay.addWidget(QLabel("Este documento não possui assinaturas digitais."))
+        t = QTableWidget(len(results), 5)
+        t.setHorizontalHeaderLabels(["Campo", "Signatário", "Data", "Integridade", "Situação"])
+        for r, info in enumerate(results):
+            ok = info["intact"] and info["valid"]
+            vals = [info["field"], info["signer"], info["time"].strftime("%d/%m/%Y %H:%M") if info["time"] else "—",
+                    "Íntegra" if info["intact"] else "ALTERADA",
+                    ("Válida" + (" e confiável" if info["trusted"] else " (cadeia não verificada)")) if ok else
+                    (info.get("error") or "Inválida")]
+            for c, v in enumerate(vals):
+                it = QTableWidgetItem(str(v))
+                if c >= 3:
+                    it.setForeground(QColor("#2d9d78" if ok else "#d7373f"))
+                t.setItem(r, c, it)
+        t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        t.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        lay.addWidget(t)
+        note = QLabel("A confiança na cadeia ICP-Brasil exige os certificados raiz instalados; a integridade "
+                      "confirma que o conteúdo não foi alterado após a assinatura.")
+        note.setWordWrap(True)
+        note.setObjectName("Muted")
+        lay.addWidget(note)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.button(QDialogButtonBox.Close).setText("Fechar")
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+
+# ---------------------------------------------------------------- páginas e documento
+class SplitDialog(FormDialog):
+    def __init__(self, parent):
+        self.mode = combo(["A cada N páginas", "Por intervalos (ex.: 1-3;4-10)", "Por marcadores de nível 1",
+                           "Por tamanho máximo (MB)"])
+        self.value = line("1")
+        super().__init__(parent, "Dividir documento", [("Dividir:", self.mode), ("Valor:", self.value)],
+                         ok_text="Dividir")
+
+    def values(self):
+        return ["every", "ranges", "bookmarks", "size"][self.mode.currentIndex()], self.value.text()
+
+
+class WatermarkDialog(FormDialog):
+    def __init__(self, parent, page_count):
+        self.text = line("CONFIDENCIAL")
+        self.image = line(placeholder="(opcional) imagem no lugar do texto")
+        b = QPushButton("…")
+        b.setFixedWidth(36)
+        b.clicked.connect(lambda: self.image.setText(QFileDialog.getOpenFileName(self, "Imagem", "", "Imagens (*.png *.jpg)")[0]))
+        row = QWidget()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.addWidget(self.image)
+        rl.addWidget(b)
+        self.size = spin(60, 8, 300)
+        self.angle = spin(45, -90, 90, suffix="°")
+        self.opacity = spin(20, 2, 100, suffix=" %")
+        self.colorb = ColorButton("#d7373f")
+        self.pages = line(placeholder=f"Todas (1-{page_count})")
+        super().__init__(parent, "Adicionar marca d'água", [
+            ("Texto:", self.text), ("Imagem:", row), ("Tamanho:", self.size), ("Rotação:", self.angle),
+            ("Opacidade:", self.opacity), ("Cor:", self.colorb), ("Páginas:", self.pages)], ok_text="Aplicar")
+
+
+class PageNumberDialog(FormDialog):
+    def __init__(self, parent, page_count):
+        self.fmt = combo(["Página {n} de {total}", "{n}", "{n}/{total}", "- {n} -", "Fls. {n}", "(sem número)"])
+        self.fmt.setEditable(True)
+        self.pos = combo(["inferior-centro", "inferior-direita", "inferior-esquerda", "superior-centro",
+                          "superior-direita", "superior-esquerda"])
+        self.start = spin(1, 1, 99999)
+        self.size = spin(10, 5, 48)
+        self.header = line(placeholder="Cabeçalho (opcional) – aceita {n} e {total}")
+        self.footer = line(placeholder="Rodapé à esquerda (opcional)")
+        self.pages = line(placeholder=f"Todas (1-{page_count})")
+        super().__init__(parent, "Cabeçalho, rodapé e numeração", [
+            ("Formato:", self.fmt), ("Posição:", self.pos), ("Começar em:", self.start), ("Tamanho:", self.size),
+            ("Cabeçalho:", self.header), ("Rodapé:", self.footer), ("Páginas:", self.pages)], ok_text="Aplicar",
+            intro="Use também para numeração Bates (ex.: formato \"NS-{n}\" e início 1001).")
+
+
+class ProtectDialog(FormDialog):
+    def __init__(self, parent):
+        self.user = line(password=True, placeholder="Exigida para abrir (opcional)")
+        self.owner = line(password=True, placeholder="Exigida para alterar permissões")
+        self.checks = {}
+        box = QGroupBox("Permitir")
+        bl = QVBoxLayout(box)
+        for k, (label, _) in ops.PERM_LABELS.items():
+            cb = QCheckBox(label)
+            cb.setChecked(k in ("print", "print_hq", "copy"))
+            self.checks[k] = cb
+            bl.addWidget(cb)
+        super().__init__(parent, "Proteger com senha", [("Senha de abertura:", self.user),
+                                                         ("Senha de permissões:", self.owner), (None, box)],
+                         ok_text="Proteger", intro="Criptografia AES de 256 bits.")
+
+    def values(self):
+        return self.user.text(), self.owner.text(), [k for k, cb in self.checks.items() if cb.isChecked()]
+
+
+class RedactSearchDialog(FormDialog):
+    def __init__(self, parent):
+        self.text = line(placeholder="Palavra ou frase")
+        self.preset = combo(["(texto livre)"] + list(ops.PATTERNS))
+        self.apply_now = QCheckBox("Aplicar a ocultação imediatamente (irreversível ao salvar)")
+        super().__init__(parent, "Localizar e ocultar texto", [("Procurar:", self.text), ("Padrão:", self.preset),
+                                                                (None, self.apply_now)], ok_text="Marcar")
+
+
+class CompressDialog(FormDialog):
+    def __init__(self, parent):
+        self.level = combo(["Baixa compressão (alta qualidade)", "Média (recomendado)", "Alta compressão (menor arquivo)"])
+        self.level.setCurrentIndex(1)
+        super().__init__(parent, "Comprimir PDF", [("Nível:", self.level)], ok_text="Comprimir")
+
+    def value(self):
+        return ["baixa", "media", "alta"][self.level.currentIndex()]
+
+
+class OcrDialog(FormDialog):
+    def __init__(self, parent, langs, page_count, default="por"):
+        self.lang = combo(langs or ["por"], default if default in langs else None)
+        self.dpi = combo(["200", "300", "400"], "300")
+        self.pages = line(placeholder=f"Todas (1-{page_count})")
+        self.force = QCheckBox("Reconhecer também páginas que já possuem texto")
+        super().__init__(parent, "Reconhecer texto (OCR)", [("Idioma:", self.lang), ("Resolução (dpi):", self.dpi),
+                                                            ("Páginas:", self.pages), (None, self.force)],
+                         ok_text="Reconhecer texto",
+                         intro=None if langs else "Tesseract OCR não encontrado. Instale-o (com o idioma Português) para usar o OCR.")
+
+
+class ImageExportDialog(FormDialog):
+    def __init__(self, parent, page_count):
+        self.fmt = combo(["png", "jpg", "tiff"])
+        self.dpi = combo(["72", "150", "200", "300", "600"], "200")
+        self.pages = line(placeholder=f"Todas (1-{page_count})")
+        super().__init__(parent, "Exportar como imagem", [("Formato:", self.fmt), ("Resolução (dpi):", self.dpi),
+                                                          ("Páginas:", self.pages)], ok_text="Exportar")
+
+
+class PropertiesDialog(QDialog):
+    FIELDS = [("title", "Título"), ("author", "Autor"), ("subject", "Assunto"), ("keywords", "Palavras-chave"),
+              ("creator", "Aplicativo"), ("producer", "Produtor")]
+
+    def __init__(self, parent, doc, path, size):
+        super().__init__(parent)
+        self.setWindowTitle("Propriedades do documento")
+        self.setMinimumWidth(480)
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+        md = doc.metadata or {}
+        self.edits = {}
+        for k, label in self.FIELDS:
+            e = line(md.get(k) or "")
+            self.edits[k] = e
+            form.addRow(label + ":", e)
+        info = [("Arquivo:", path or "(não salvo)"), ("Tamanho:", f"{size / 1024:.1f} KB"),
+                ("Páginas:", str(doc.page_count)), ("Versão PDF:", md.get("format", "")),
+                ("Criado em:", _pdfdate(md.get("creationDate"))), ("Modificado em:", _pdfdate(md.get("modDate"))),
+                ("Tamanho da página:", f"{doc[0].rect.width / 72 * 25.4:.0f} × {doc[0].rect.height / 72 * 25.4:.0f} mm" if doc.page_count else ""),
+                ("Criptografia:", md.get("encryption") or "Nenhuma"),
+                ("Formulário:", "Sim" if doc.is_form_pdf else "Não"),
+                ("Fontes:", ", ".join(sorted({f[3] for p in doc for f in p.get_fonts()}))[:300])]
+        for a, b in info:
+            lb = QLabel(b)
+            lb.setWordWrap(True)
+            lb.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            form.addRow(a, lb)
+        lay.addLayout(form)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Salvar metadados")
+        bb.button(QDialogButtonBox.Cancel).setText("Fechar")
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    def metadata(self):
+        return {k: e.text() for k, e in self.edits.items()}
+
+
+def _pdfdate(s):
+    if not s or len(s) < 10:
+        return s or ""
+    s = s.replace("D:", "")
+    return f"{s[6:8]}/{s[4:6]}/{s[0:4]} {s[8:10]}:{s[10:12]}"
+
+
+class FormFillDialog(QDialog):
+    def __init__(self, parent, fields):
+        super().__init__(parent)
+        self.setWindowTitle("Preencher formulário")
+        self.resize(560, 420)
+        lay = QVBoxLayout(self)
+        self.table = QTableWidget(len(fields), 3)
+        self.table.setHorizontalHeaderLabels(["Campo", "Tipo", "Valor"])
+        self.fields = fields
+        self.editors = []
+        for r, f in enumerate(fields):
+            self.table.setItem(r, 0, QTableWidgetItem(f"{f['name']} (p.{f['page'] + 1})"))
+            self.table.setItem(r, 1, QTableWidgetItem(f["type_name"]))
+            if f["type"] in (pymupdf.PDF_WIDGET_TYPE_CHECKBOX, pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON):
+                ed = QCheckBox()
+                ed.setChecked(f["value"] not in (None, "", "Off", False))
+            elif f["type"] in (pymupdf.PDF_WIDGET_TYPE_COMBOBOX, pymupdf.PDF_WIDGET_TYPE_LISTBOX):
+                ed = combo([str(c if not isinstance(c, (list, tuple)) else c[-1]) for c in (f["choices"] or [])], str(f["value"] or ""))
+            elif f["type"] == pymupdf.PDF_WIDGET_TYPE_TEXT:
+                ed = line(str(f["value"] or ""))
+            else:
+                ed = QLabel("—")
+            self.editors.append(ed)
+            self.table.setCellWidget(r, 2, ed)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        lay.addWidget(self.table)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Aplicar")
+        bb.button(QDialogButtonBox.Cancel).setText("Cancelar")
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    def values(self):
+        out = []
+        for f, ed in zip(self.fields, self.editors):
+            if isinstance(ed, QCheckBox):
+                out.append((f, ed.isChecked()))
+            elif isinstance(ed, QComboBox):
+                out.append((f, ed.currentText()))
+            elif isinstance(ed, QLineEdit):
+                out.append((f, ed.text()))
+        return out
+
+
+class HtmlDialog(QDialog):
+    def __init__(self, parent, title, html, save_name=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(820, 600)
+        lay = QVBoxLayout(self)
+        tb = QTextBrowser()
+        tb.setHtml(html)
+        lay.addWidget(tb)
+        row = QHBoxLayout()
+        row.addStretch()
+        if save_name:
+            b = QPushButton("Salvar relatório…")
+            b.clicked.connect(lambda: self._save(html, save_name))
+            row.addWidget(b)
+        c = QPushButton("Fechar")
+        c.clicked.connect(self.accept)
+        row.addWidget(c)
+        lay.addLayout(row)
+
+    def _save(self, html, name):
+        fn, _ = QFileDialog.getSaveFileName(self, "Salvar relatório", name, "HTML (*.html)")
+        if fn:
+            with open(fn, "w", encoding="utf-8") as f:
+                f.write(f"<meta charset='utf-8'>{html}")
+
+
+class PreferencesDialog(FormDialog):
+    def __init__(self, parent, settings, langs):
+        self.author = line(settings.value("author", "Usuário"))
+        self.ocr = combo(langs or ["por"], settings.value("ocr_lang", "por"))
+        self.zoom = combo(["Ajustar largura", "Ajustar página", "100%"], settings.value("default_zoom", "Ajustar largura"))
+        self.tess = line(settings.value("tessdata", ""), "Pasta tessdata (opcional)")
+        super().__init__(parent, "Preferências", [("Nome do autor (comentários):", self.author),
+                                                   ("Idioma do OCR:", self.ocr), ("Zoom inicial:", self.zoom),
+                                                   ("Tessdata:", self.tess)], ok_text="Salvar")

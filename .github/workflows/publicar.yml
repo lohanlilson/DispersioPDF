@@ -1,0 +1,66 @@
+# Ao enviar uma tag "vX.Y.Z", gera no Windows o executável, o instalador, o patch da versão anterior e o
+# versao.json, e publica tudo como Release. O Lumen PDF instalado detecta a nova versão sozinho.
+name: Publicar versão
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependências
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Inno Setup
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
+      - name: Conferir versão
+        shell: bash
+        run: |
+          V=$(python -c "import re;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"',open('lumenpdf/__init__.py',encoding='utf-8').read()).group(1))")
+          echo "Versão do código: $V  |  tag: $GITHUB_REF_NAME"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "v$V" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::A tag $GITHUB_REF_NAME não bate com __version__ ($V)"; exit 1
+          fi
+          echo "VERSAO=$V" >> $GITHUB_ENV
+
+      - name: Base para o patch (versão anterior publicada)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          if [ -n "$PREV" ] && [ "$PREV" != "v$VERSAO" ]; then
+            P=${PREV#v}
+            mkdir -p "releases/$P"
+            gh release download "$PREV" -p manifest.json -D "releases/$P" && echo "ANTERIOR=$P" >> $GITHUB_ENV || true
+          fi
+
+      - name: Gerar executável, instalador e patch
+        shell: bash
+        run: |
+          if [ -n "$ANTERIOR" ]; then python build.py --publicar --patch-from "$ANTERIOR"; else python build.py --publicar; fi
+          ls -la Saida
+
+      - name: Publicar Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSAO" Saida/*.exe Saida/versao.json Saida/manifest.json \
+            --title "Lumen PDF $VERSAO" --notes-file Saida/NOTAS.md --latest
