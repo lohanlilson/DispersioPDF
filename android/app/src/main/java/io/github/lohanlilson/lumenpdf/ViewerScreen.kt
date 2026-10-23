@@ -288,6 +288,41 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 }
             }
 
+
+            fun onPageTap(pg: Int, fx: Float, fy: Float) {
+                scope.launch {
+                    val hit = Triple(pg, fx, fy)
+                    android.util.Log.i("LumenPdf", "toque $hit ferramenta=${d.tool} edição=${d.editing}")
+                    val field = d.fields.firstOrNull { (f, r) -> f.page == pg && fx in r.l..r.r && fy in r.t..r.b && !f.readOnly }?.first
+                    when {
+                        d.editing && d.tool == Tool.CERT -> {
+                            val sz = d.pdf.sizes[pg]
+                            val w = 190f / sz.w
+                            val h = 56f / sz.w
+                            val pts = vm.engine.pdfPoints(d.pdf, pg, listOf((fx - w / 2) to (fy - h / 2), (fx + w / 2) to (fy + h / 2)))
+                            certSign = Triple(pg, android.graphics.RectF(minOf(pts[0], pts[2]), maxOf(pts[1], pts[3]),
+                                maxOf(pts[0], pts[2]), minOf(pts[1], pts[3])), null)
+                        }
+                        d.editing && d.tool in setOf(Tool.CHECK, Tool.CROSS, Tool.SIGN) ->
+                            placeNow(ctx, vm, d, d.tool, pg, Offset(fx, fy)) { signPad = true }
+                        d.editing && d.tool in setOf(Tool.NOTE, Tool.TEXT) -> pendingTap = Triple(d.tool, pg, Offset(fx, fy))
+                        field != null && field.kind == FormField.Kind.CHECK ->
+                            vm.edit(d, "marcar o campo") { Editor.setField(it, field.name, if (field.value.isEmpty() || field.value == "Off") "on" else "") }
+                        field != null && field.kind == FormField.Kind.SIGNATURE ->
+                            if (field.value.isEmpty()) certSign = Triple(field.page, field.rect, field.name) else sigSheet = true
+                        field != null -> editField = field
+                        handleLinkTap(ctx, vm, d, pg, fx, fy, list) -> Unit
+                        d.selection != null -> d.selection = null
+                        else -> bars = !bars
+                    }
+                }
+            }
+
+            fun onPageDoubleTap(pg: Int, fx: Float, fy: Float) {
+                val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == pg } ?: return
+                val pw = g.pageWidth(d.zoom)
+                commitZoom(if (d.zoom > 1.2f) 1f else 2.5f, Offset(fx * pw + side - hs.value, item.offset + fy * pw))
+            }
             val contentW = (vw * d.zoom).roundToInt()
             Box(
                 Modifier.fillMaxSize()
@@ -311,44 +346,6 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                             if (scale != 1f) commitZoom(d.zoom * gesture, lastPivot)
                         }
                     }
-                    .pointerInput(d) {
-                        detectTapGestures(
-                            onDoubleTap = { p -> commitZoom(if (d.zoom > 1.2f) 1f else 2.5f, p) },
-                            onTap = { p ->
-                                scope.launch {
-                                    val hit = pageAt(d, g, p)
-                                    android.util.Log.i("LumenPdf", "toque $p -> $hit ferramenta=${d.tool} edição=${d.editing}")
-                                    val field = hit?.let { (pg, fx, fy) ->
-                                        d.fields.firstOrNull { (f, r) -> f.page == pg && fx in r.l..r.r && fy in r.t..r.b && !f.readOnly }?.first
-                                    }
-                                    when {
-                                        hit != null && d.editing && d.tool == Tool.CERT -> {
-                                            val (pg, fx, fy) = hit
-                                            val sz = d.pdf.sizes[pg]
-                                            val w = 190f / sz.w
-                                            val h = 56f / sz.w
-                                            val pts = vm.engine.pdfPoints(d.pdf, pg, listOf((fx - w / 2) to (fy - h / 2), (fx + w / 2) to (fy + h / 2)))
-                                            certSign = Triple(pg, android.graphics.RectF(minOf(pts[0], pts[2]), maxOf(pts[1], pts[3]),
-                                                maxOf(pts[0], pts[2]), minOf(pts[1], pts[3])), null)
-                                        }
-                                        hit != null && d.editing && d.tool in setOf(Tool.CHECK, Tool.CROSS, Tool.SIGN) ->
-                                            placeNow(ctx, vm, d, d.tool, hit.first, Offset(hit.second, hit.third)) { signPad = true }
-                                        hit != null && d.editing && d.tool in setOf(Tool.NOTE, Tool.TEXT) ->
-                                            pendingTap = Triple(d.tool, hit.first, Offset(hit.second, hit.third))
-                                        field != null && field.kind == FormField.Kind.CHECK ->
-                                            vm.edit(d, "marcar o campo") { Editor.setField(it, field.name, if (field.value.isEmpty() || field.value == "Off") "on" else "") }
-                                        field != null && field.kind == FormField.Kind.SIGNATURE ->
-                                            if (field.value.isEmpty()) certSign = Triple(field.page, field.rect, field.name)
-                                            else sigSheet = true
-                                        field != null -> editField = field
-                                        handleLinkTap(ctx, vm, d, g, p) -> Unit
-                                        d.selection != null -> d.selection = null
-                                        else -> bars = !bars
-                                    }
-                                }
-                            },
-                        )
-                    }
                     .horizontalScroll(hs, enabled = d.zoom > 1.01f)
             ) {
                 LazyColumn(
@@ -366,7 +363,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                     verticalArrangement = Arrangement.spacedBy(PAGE_GAP),
                 ) {
                     itemsIndexed(d.pdf.sizes, key = { i, _ -> i }) { i, sz ->
-                        PageView(vm, d, i, sz, g.pageWidth(d.zoom))
+                        PageView(vm, d, i, sz, g.pageWidth(d.zoom), ::onPageTap, ::onPageDoubleTap)
                     }
                 }
             }
@@ -453,7 +450,8 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
 }
 
 @Composable
-private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int) {
+private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
+                     onTap: (Int, Float, Float) -> Unit, onDoubleTap: (Int, Float, Float) -> Unit) {
     val density = LocalDensity.current
     val pageH = (pageW * sz.ratio).roundToInt()
     val renderW = min(pageW, MAX_RENDER_PX)
@@ -471,6 +469,13 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int) 
             Modifier.size(with(density) { pageW.toDp() }, with(density) { pageH.toDp() })
                 .shadow(3.dp)
                 .background(if (d.night) Color.Black else Color.White)
+                .pointerInput(d, pageW) {
+                    detectTapGestures(
+                        onTap = { o -> onTap(i, o.x / pageW, o.y / pageW) },
+                        onDoubleTap = { o -> onDoubleTap(i, o.x / pageW, o.y / pageW) },
+                        onLongPress = { },
+                    )
+                }
                 .pointerInput(d, d.tool, pageW) {
                     if (d.tool == Tool.INK) {
                         // desenho à mão livre
@@ -595,17 +600,12 @@ private fun pageAt(d: ViewerDoc, g: ViewerGeom, p: Offset): Triple<Int, Float, F
 }
 
 /** Toque num link: vai para a página de destino ou abre o endereço. */
-private suspend fun handleLinkTap(ctx: Context, vm: AppVm, d: ViewerDoc, g: ViewerGeom, p: Offset): Boolean {
-    val item = g.list.layoutInfo.visibleItemsInfo.firstOrNull { p.y >= it.offset && p.y <= it.offset + it.size } ?: return false
-    val pw = g.pageWidth(d.zoom)
-    val x = (p.x + g.hs.value - g.sidePx) / pw
-    val y = (p.y - item.offset) / pw
-    val link = vm.engine.links(d.pdf, item.index).firstOrNull { x in it.area.l..it.area.r && y in it.area.t..it.area.b }
-        ?: return false
+private suspend fun handleLinkTap(ctx: Context, vm: AppVm, d: ViewerDoc, page: Int, x: Float, y: Float, list: LazyListState): Boolean {
+    val link = vm.engine.links(d.pdf, page).firstOrNull { x in it.area.l..it.area.r && y in it.area.t..it.area.b } ?: return false
     val target = link.page
     val uri = link.uri
     when {
-        target != null && target >= 0 -> g.list.animateScrollToItem(target)
+        target != null && target >= 0 -> list.animateScrollToItem(target)
         !uri.isNullOrBlank() -> runCatching {
             ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.onFailure { Toast.makeText(ctx, "Não foi possível abrir o link", Toast.LENGTH_SHORT).show() }
