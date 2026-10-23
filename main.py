@@ -13,17 +13,67 @@ from lumenpdf import APP_NAME, APP_ID, __version__, resource
 SERVER = f"{APP_ID}-{os.environ.get('USERNAME') or os.environ.get('USER') or 'user'}"
 
 
-def send_to_running(paths):
-    """Se o programa já está aberto, entrega os arquivos para ele e retorna True."""
+def parse_args(argv):
+    """Interpreta a linha de comando.
+    LumenPDF.exe arquivo.pdf …            abre
+    LumenPDF.exe /p arquivo.pdf …         imprime na impressora padrão, sem janela (Outlook, botão direito)
+    LumenPDF.exe /pt arquivo.pdf "Impressora" [driver] [porta]   imprime numa impressora específica
+    """
+    cmd, files, printer = "open", [], ""
+    args = list(argv[1:])
+    i = 0
+    while i < len(args):
+        a = args[i]
+        low = a.lower()
+        if low in ("/p", "-p", "--print", "/print"):
+            cmd = "print"
+        elif low in ("/pt", "-pt", "--printto", "/printto"):
+            cmd = "print"
+            rest = list(args[i + 1:])
+            if rest:
+                files.append(os.path.abspath(rest[0]))
+                printer = rest[1] if len(rest) > 1 else ""
+            break
+        elif low.startswith(("--", "/")) and not os.path.exists(a):
+            pass  # outras opções
+        elif os.path.exists(a):
+            files.append(os.path.abspath(a))
+        i += 1
+    return dict(cmd=cmd, files=files, printer=printer)
+
+
+def send_to_running(msg, wait_ms=400):
+    """Se o programa já está aberto, entrega o pedido para ele e retorna True."""
     sock = QLocalSocket()
     sock.connectToServer(SERVER)
-    if not sock.waitForConnected(400):
+    if not sock.waitForConnected(wait_ms):
         return False
-    sock.write(json.dumps(paths).encode("utf-8"))
+    sock.write(json.dumps(msg).encode("utf-8"))
     sock.flush()
-    sock.waitForBytesWritten(1000)
+    sock.waitForBytesWritten(2000)
     sock.disconnectFromServer()
     return True
+
+
+def become_server_or_forward(msg):
+    """Garante uma única instância, mesmo quando o Windows abre vários processos ao mesmo tempo
+    (ex.: “Imprimir” com 30 PDFs selecionados). Retorna o trava (QLockFile) se esta instância for a principal."""
+    import time
+    from PySide6.QtCore import QLockFile, QDir
+    lock = QLockFile(os.path.join(QDir.tempPath(), SERVER + ".lock"))
+    lock.setStaleLockTime(0)
+    deadline = time.time() + 15
+    while True:
+        if send_to_running(msg):
+            return None
+        if lock.tryLock(100):
+            return lock
+        if time.time() > deadline:
+            lock.removeStaleLockFile()
+            if lock.tryLock(100):
+                return lock
+            return None
+        time.sleep(0.2)
 
 
 def app_icon():
@@ -62,8 +112,11 @@ def main():
     app.setOrganizationName(APP_ID)
     app.setWindowIcon(app_icon())
 
-    paths = [os.path.abspath(a) for a in sys.argv[1:] if os.path.exists(a)]
-    if send_to_running(paths):
+    req = parse_args(sys.argv)
+    paths = req["files"]
+    headless = req["cmd"] == "print"
+    main._lock = become_server_or_forward(req)
+    if main._lock is None:
         return 0
 
     from lumenpdf.mainwindow import MainWindow
@@ -74,23 +127,71 @@ def main():
     server = QLocalServer()
     QLocalServer.removeServer(SERVER)
     server.listen(SERVER)
+    state = {"shown": False}
+
+    def show_window():
+        if state["shown"]:
+            win.bring_to_front()
+            return
+        state["shown"] = True
+        _show(win, app)
+
+    def handle(msg):
+        if isinstance(msg, list):  # formato antigo
+            msg = dict(cmd="open", files=msg, printer="")
+        if msg.get("cmd") == "print":
+            win.enqueue_print(msg.get("files", []), msg.get("printer", ""))
+            return
+        show_window()
+        for f in msg.get("files", []):
+            win.open_path(f)
 
     def incoming():
         conn = server.nextPendingConnection()
         if conn is None:
             return
+        buf = bytearray()
 
         def read():
+            buf.extend(bytes(conn.readAll()))
+
+        def done():
+            read()
             try:
-                files = json.loads(bytes(conn.readAll()).decode("utf-8") or "[]")
+                msg = json.loads(bytes(buf).decode("utf-8") or "{}")
             except ValueError:
-                files = []
-            for f in files:
-                win.open_path(f)
-            win.bring_to_front()
+                return
+            handle(msg)
         conn.readyRead.connect(read)
+        conn.disconnected.connect(done)
     server.newConnection.connect(incoming)
 
+    if headless:
+        # só imprime: sem janela; encerra sozinho quando a fila acabar (a menos que o usuário abra um PDF)
+        def idle():
+            if not state["shown"]:
+                QTimer.singleShot(5000, lambda: (not state["shown"] and not getattr(win, "_printing", False)
+                                                 and not getattr(win, "_print_queue", None) and app.quit()))
+        win.on_print_idle = idle
+        win.enqueue_print(paths, req["printer"])
+        return app.exec()
+
+    state["shown"] = True
+    _show(win, app)
+    from lumenpdf.config import cfg
+    if not paths and cfg.get("startup") == "last_session":
+        session = cfg.qs.value("session", []) or []
+        for p in ([session] if isinstance(session, str) else session):
+            if os.path.exists(p):
+                win.open_path(p)
+    for p in paths:
+        win.open_path(p)
+    QTimer.singleShot(1200, win.check_default_app)
+    QTimer.singleShot(4000, win.updater.auto_check)
+    return app.exec()
+
+
+def _show(win, app):
     from lumenpdf.config import cfg
     win.setWindowIcon(app.windowIcon())
     mode = cfg.get("window_mode")
@@ -108,19 +209,9 @@ def main():
         app.styleHints().colorSchemeChanged.connect(win._on_system_theme)
     except Exception:
         pass
-    if not paths and cfg.get("startup") == "last_session":
-        session = cfg.qs.value("session", []) or []
-        for p in ([session] if isinstance(session, str) else session):
-            if os.path.exists(p):
-                win.open_path(p)
     import threading
     from lumenpdf import ops
     threading.Thread(target=ops.system_fonts, daemon=True).start()  # prepara a edição de texto com fontes originais
-    for p in paths:
-        win.open_path(p)
-    QTimer.singleShot(1200, win.check_default_app)
-    QTimer.singleShot(4000, win.updater.auto_check)
-    return app.exec()
 
 
 if __name__ == "__main__":

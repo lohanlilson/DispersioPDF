@@ -58,12 +58,19 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "
 
 [Registry]
 Root: HKA; Subkey: "Software\LumenPDF"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"
+#define AssocCond "Check: AssocInstalled"
+#include "assoc.iss"
 
 [Run]
 Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait
 Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [Code]
+function AssocInstalled(): Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'Software\Classes\{#ProgId}') or RegKeyExists(HKCU, 'Software\Classes\{#ProgId}');
+end;
+
 function DesktopIconExists(): Boolean;
 begin
   Result := FileExists(ExpandConstant('{autodesktop}\{#AppName}.lnk'));

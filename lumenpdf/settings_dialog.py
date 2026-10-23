@@ -48,7 +48,8 @@ class SettingsDialog(QDialog):
         root.addLayout(body, 1)
         for title, ic, builder in [("Geral", "home", self._general), ("Aparência", "moon", self._appearance),
                                    ("Documentos", "fit_page", self._documents), ("Comentários", "comments", self._comments),
-                                   ("Assinatura", "certificate", self._signature), ("OCR e conversão", "ocr", self._convert),
+                                   ("Assinatura", "certificate", self._signature),
+                                   ("Impressão", "print", self._printing), ("OCR e conversão", "ocr", self._convert),
                                    ("Avançado", "gear", self._advanced)]:
             self.nav.addItem(QListWidgetItem(icons.icon(ic), title))
             page = QWidget()
@@ -224,6 +225,20 @@ class SettingsDialog(QDialog):
         sig = QPushButton("Criar ou alterar minha assinatura…")
         sig.clicked.connect(lambda: self.win.run_tool("create_signature"))
         f.addRow("Preencher e assinar:", sig)
+
+    def _printing(self, f):
+        info = QLabel("A impressão rápida é usada quando você clica em “Impressão rápida” no Outlook, em "
+                      "“Imprimir” no botão direito do Windows (inclusive com vários PDFs selecionados) ou ao "
+                      "arrastar um PDF para uma impressora. Ela imprime direto, sem abrir janela.")
+        info.setWordWrap(True)
+        info.setObjectName("Muted")
+        f.addRow(info)
+        self.w["quick_print_mode"] = _combo([("Padrão (impressora padrão, ajustar à folha, colorido)", "default"),
+                                             ("Últimas opções usadas no gerenciador de impressão", "last")],
+                                            cfg.get("quick_print_mode"))
+        f.addRow("Impressão rápida usa:", self.w["quick_print_mode"])
+        self.w["quick_print_notify"] = _check("Mostrar aviso na área de notificação ao imprimir", "quick_print_notify")
+        f.addRow(self.w["quick_print_notify"])
 
     def _convert(self, f):
         langs = ops.ocr_languages() or ["por"]

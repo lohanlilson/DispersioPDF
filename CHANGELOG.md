@@ -2,6 +2,16 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.4.0
+- **Impressão rápida pelo Windows e pelo Outlook**: “Impressão rápida” de anexos no Outlook e “Imprimir” no
+  botão direito do Explorer agora imprimem direto na impressora padrão, sem abrir o programa.
+- **Vários PDFs de uma vez**: selecione quantos arquivos quiser, botão direito › Imprimir — todos entram numa
+  fila única e saem em sequência.
+- Novo item **“Imprimir com Lumen PDF”** no botão direito de qualquer PDF.
+- Arrastar um PDF para uma impressora do Windows imprime nela.
+- Aviso na área de notificação ao enviar para a impressora (pode desligar em Preferências › Impressão).
+- Preferências › Impressão: escolher se a impressão rápida usa o padrão ou as últimas opções do gerenciador.
+
 ## 1.3.4
 - O nome do usuário passa a vir do Windows (nome de exibição da conta): aparece na saudação da tela
   Início e como autor dos comentários. Para usar outro nome, defina em Preferências › Geral.

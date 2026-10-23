@@ -586,6 +586,68 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    # ------------------------------------------------------------ impressão rápida (Outlook / botão direito)
+    def enqueue_print(self, files, printer=""):
+        q = self.__dict__.setdefault("_print_queue", [])
+        for f in files:
+            if os.path.exists(f):
+                q.append((f, printer))
+        self._print_total = getattr(self, "_print_total", 0) + len(files)
+        if not getattr(self, "_printing", False):
+            QTimer.singleShot(0, self._print_next)
+
+    def _tray(self):
+        from PySide6.QtWidgets import QSystemTrayIcon
+        if getattr(self, "_tray_icon", None) is None and QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray_icon = QSystemTrayIcon(QApplication.instance().windowIcon(), self)
+            self._tray_icon.setToolTip(APP)
+        return getattr(self, "_tray_icon", None)
+
+    def _notify(self, title, text, error=False):
+        self.statusBar().showMessage(f"{title} — {text}", 8000)
+        if not cfg.get("quick_print_notify") and not error:
+            return
+        tray = self._tray()
+        if tray is not None:
+            from PySide6.QtWidgets import QSystemTrayIcon
+            tray.show()
+            tray.showMessage(title, text, QSystemTrayIcon.Critical if error else QSystemTrayIcon.Information, 5000)
+
+    def _print_next(self):
+        from .print_manager import quick_print, Source
+        q = self.__dict__.setdefault("_print_queue", [])
+        if not q:
+            self._printing = False
+            done, total = getattr(self, "_print_done", 0), getattr(self, "_print_total", 0)
+            if total:
+                self._notify(APP, f"{done} de {total} arquivo(s) enviado(s) para a impressora.")
+            self._print_done = self._print_total = 0
+            QTimer.singleShot(6000, lambda: getattr(self, "_tray_icon", None) and not self._printing
+                              and self._tray_icon.hide())
+            cb = getattr(self, "on_print_idle", None)
+            if cb:
+                cb()
+            return
+        self._printing = True
+        path, printer = q.pop(0)
+        name = os.path.basename(path)
+        try:
+            doc = pymupdf.open(path)
+            if not doc.is_pdf:
+                doc = pymupdf.open("pdf", doc.convert_to_pdf())
+            if doc.needs_pass:
+                raise RuntimeError("o arquivo está protegido por senha")
+            if q or self._print_total > 1:
+                self.statusBar().showMessage(f"Imprimindo {name}…")
+            sheets, dest = quick_print([Source(name, doc)], printer)
+            self._print_done = getattr(self, "_print_done", 0) + 1
+            if self._print_total == 1:
+                self._notify(APP, f"“{name}” enviado para {dest} ({sheets} folha(s)).")
+        except Exception as e:
+            errors.write_log(errors.build_report(f"Impressão rápida de {name}: {e}", str(e), "Impressão rápida"))
+            self._notify(APP, f"Não foi possível imprimir “{name}”: {e}", error=True)
+        QTimer.singleShot(50, self._print_next)
+
     def check_default_app(self, force=False):
         """Pergunta (no primeiro uso) se o Lumen PDF deve ser o leitor padrão de PDF."""
         if not system.IS_WINDOWS:

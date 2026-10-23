@@ -88,6 +88,22 @@ jobs:
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { Write-Error "Autoteste do executável falhou"; exit 1 }
 
+      - name: Teste da impressão rápida (/p, vários arquivos ao mesmo tempo)
+        if: steps.versao.outputs.publicar == 'sim'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD "impressos"; New-Item -ItemType Directory -Force $out | Out-Null
+          $env:LUMEN_PRINT_TO_PDF = $out
+          $src = Join-Path $PWD "teste_impressao.pdf"
+          python -c "import pymupdf; d=pymupdf.open(); [d.new_page().insert_text((72,72),'Pagina %d' % (i+1)) for i in range(3)]; d.save(r'$src')"
+          $procs = 1..3 | ForEach-Object { Copy-Item $src "arq$_.pdf"; Start-Process "dist\LumenPDF\LumenPDF.exe" -ArgumentList "/p", (Join-Path $PWD "arq$_.pdf") -PassThru }
+          $procs | ForEach-Object { $_.WaitForExit(120000) | Out-Null }
+          Start-Sleep 8
+          Get-ChildItem $out
+          if ((Get-ChildItem $out -Filter *.pdf).Count -ne 3) { throw "A impressão rápida não gerou os 3 arquivos" }
+          Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force
+
       - name: Teste de atualização (instala a versão anterior e aplica o patch)
         if: steps.versao.outputs.publicar == 'sim' && env.ANTERIOR != ''
         timeout-minutes: 15

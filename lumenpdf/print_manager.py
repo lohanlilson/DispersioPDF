@@ -1167,3 +1167,87 @@ class PrintManager(QDialog):
 def icons_size():
     from PySide6.QtCore import QSize
     return QSize(22, 22)
+
+
+# ====================================================================== impressão rápida (sem janela)
+def quick_print_options():
+    """Opções da impressão rápida: padrão ou as últimas usadas no gerenciador (Preferências › Impressão)."""
+    o = dict(DEFAULT_OPTS)
+    if cfg.get("quick_print_mode") == "last":
+        try:
+            o.update(json.loads(cfg.qs.value("print/last", "{}") or "{}"))
+        except ValueError:
+            pass
+    o.update(pages="all", range_text="", subset="all", copies=max(1, int(o.get("copies") or 1)))
+    if o.get("duplex") == "manual":
+        o["duplex"] = "none"
+    return o
+
+
+def find_printer(name=""):
+    if name:
+        for info in QPrinterInfo.availablePrinters():
+            if info.printerName().lower() == name.lower():
+                return info
+    info = QPrinterInfo.defaultPrinter()
+    if info.isNull():
+        avail = QPrinterInfo.availablePrinters()
+        if avail:
+            return avail[0]
+        raise RuntimeError("Nenhuma impressora instalada no Windows.")
+    return info
+
+
+def quick_print(sources, printer_name="", opts=None, printer=None):
+    """Imprime direto, sem mostrar janela (usado pelo Outlook, pelo botão direito do Windows e pelo /p)."""
+    o = opts or quick_print_options()
+    test_dir = os.environ.get("LUMEN_PRINT_TO_PDF")  # testes automatizados: "imprime" em arquivo PDF
+    if printer is None and test_dir:
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(os.path.join(test_dir, os.path.splitext(sources[0].name)[0] + "_impresso.pdf"))
+    if printer is None:
+        info = find_printer(printer_name)
+        printer = QPrinter(info, QPrinter.HighResolution)
+        name = info.printerName()
+    else:
+        name = printer.printerName() or "PDF"
+    if o.get("paper"):
+        try:
+            printer.setPageSize(QPageSize(QPageSize.PageSizeId(int(o["paper"]))))
+        except Exception:
+            pass
+    items = page_list(sources, o)
+    orientation = decide_orientation(sources, items, o)
+    printer.setPageOrientation(QPageLayout.Landscape if orientation == "landscape" else QPageLayout.Portrait)
+    printer.setColorMode(QPrinter.GrayScale if o["gray"] else QPrinter.Color)
+    dup = {"long": QPrinter.DuplexLongSide, "short": QPrinter.DuplexShortSide}.get(o["duplex"], QPrinter.DuplexNone)
+    printer.setDuplex(dup)
+    printer.setCopyCount(1)
+    printer.setFullPage(False)
+    printer.setResolution(int(o.get("quality") or 300))
+    printer.setDocName(", ".join(s.name for s in sources)[:120])
+    paint = printer.pageLayout().paintRectPoints()
+    m = o["extra_margin"] * MM
+    area = QRectF(paint).adjusted(m, m, -m, -m)
+    sheets = impose(sources, o, area.width(), area.height())
+    if not sheets:
+        return 0, name
+    seq = []
+    copies = o["copies"]
+    seq = [s for _ in range(copies) for s in sheets] if o["collate"] or copies == 1 else \
+        [s for s in sheets for _ in range(copies)]
+    k = printer.resolution() / 72
+    origin = ((area.x() - paint.x()) * k, (area.y() - paint.y()) * k)
+    painter = QPainter()
+    if not painter.begin(printer):
+        raise RuntimeError(f"Não foi possível imprimir em “{name}”.")
+    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+    for n, sh in enumerate(seq):
+        if n:
+            printer.newPage()
+        draw_sheet(painter, sh, sources, o, k, origin, area.width(), area.height(),
+                   sheet_no=sheets.index(sh) + 1, total=len(sheets))
+        QApplication.processEvents()
+    painter.end()
+    return len(seq), name

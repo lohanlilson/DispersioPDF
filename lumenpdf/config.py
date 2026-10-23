@@ -46,6 +46,9 @@ DEFAULTS = {
     "sign_ltv": True,
     "save_copies": "ask",                # ask | same_folder
     "sign_suffix": "_assinado",
+    # Impressão
+    "quick_print_mode": "default",       # default | last  (impressão rápida: Outlook / botão direito)
+    "quick_print_notify": True,
     # OCR e conversão
     "ocr_lang": "por",
     "ocr_dpi": 300,
