@@ -444,7 +444,7 @@ SIG_SYMBOL = {"ok": "✔", "warn": "⚠", "bad": "✖"}
 class SignatureInfoDialog(QDialog):
     """Validação individual de uma assinatura (equivalente às 'Propriedades da assinatura' do Acrobat)."""
 
-    def __init__(self, parent, info, on_view_signed=None):
+    def __init__(self, parent, info, on_view_signed=None, on_changes=None):
         from . import signing
         super().__init__(parent)
         self.setWindowTitle("Validação da assinatura")
@@ -524,6 +524,11 @@ class SignatureInfoDialog(QDialog):
             b.setToolTip("Abre o documento exatamente como estava no momento desta assinatura")
             b.clicked.connect(lambda: (on_view_signed(info), self.accept()))
             row.addWidget(b)
+        if on_changes and info.get("revision_end") and info.get("later_changes"):
+            b = QPushButton("O que mudou depois desta assinatura")
+            b.setToolTip("Compara a versão assinada com a versão atual e destaca cada alteração")
+            b.clicked.connect(lambda: (self.accept(), on_changes(info)))
+            row.addWidget(b)
         row.addStretch()
         close = QPushButton("Fechar")
         close.setObjectName("Primary")
@@ -538,26 +543,30 @@ def html_escape(t):
 
 
 class SignaturesDialog(QDialog):
-    def __init__(self, parent, results, on_view_signed=None):
+    def __init__(self, parent, results, on_view_signed=None, on_changes=None):
         from . import signing
         super().__init__(parent)
         self.setWindowTitle("Painel de assinaturas")
-        self.resize(760, 320)
-        self.results, self.on_view_signed = results, on_view_signed
+        self.resize(820, 320)
+        self.results, self.on_view_signed, self.on_changes = results, on_view_signed, on_changes
         lay = QVBoxLayout(self)
         if not results:
             lay.addWidget(QLabel("Este documento não possui assinaturas digitais."))
-        t = QTableWidget(len(results), 4)
-        t.setHorizontalHeaderLabels(["", "Signatário", "Data", "Situação"])
+        t = QTableWidget(len(results), 5)
+        t.setHorizontalHeaderLabels(["", "Signatário", "Data", "Depois desta assinatura", "Situação"])
         for r, info in enumerate(results):
             lvl, title = signing.status_of(info)
-            vals = [SIG_SYMBOL[lvl], info["signer"], _fmt_dt(info["time"])[:16], title]
+            later = sum(1 for o in results if (o.get("revision_end") or 0) > (info.get("revision_end") or 0))
+            after = ("Sem alterações" if not info.get("later_changes") else
+                     (f"{later} assinatura(s) e alterações" if later else "Houve alterações"))
+            vals = [SIG_SYMBOL[lvl], info["signer"], _fmt_dt(info["time"])[:16], after, title]
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(str(v))
-                if c in (0, 3):
+                if c in (0, 4):
                     it.setForeground(QColor(SIG_COLORS[lvl]))
                 t.setItem(r, c, it)
-        t.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        t.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        t.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         t.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         t.setColumnWidth(0, 30)
         t.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -569,6 +578,11 @@ class SignaturesDialog(QDialog):
         note = QLabel("Clique duas vezes em uma assinatura para ver a validação completa.")
         note.setObjectName("Muted")
         row.addWidget(note, 1)
+        if on_changes:
+            chg = QPushButton("O que mudou depois…")
+            chg.setToolTip("Compara a versão assinada selecionada com a versão atual")
+            chg.clicked.connect(self._changes)
+            row.addWidget(chg)
         det = QPushButton("Detalhes…")
         det.clicked.connect(lambda: self._details(t.currentRow()))
         row.addWidget(det)
@@ -579,7 +593,22 @@ class SignaturesDialog(QDialog):
 
     def _details(self, r):
         if 0 <= r < len(self.results):
-            SignatureInfoDialog(self, self.results[r], self.on_view_signed).exec()
+            SignatureInfoDialog(self, self.results[r], self.on_view_signed, self.on_changes).exec()
+
+    def _changes(self):
+        r = self.table.currentRow()
+        if not (0 <= r < len(self.results)):
+            r = 0 if len(self.results) == 1 else -1
+        if r < 0:
+            QMessageBox.information(self, "Painel de assinaturas", "Selecione uma assinatura na lista.")
+            return
+        info = self.results[r]
+        if not info.get("later_changes"):
+            QMessageBox.information(self, "Painel de assinaturas",
+                                    "Nada foi alterado no documento depois desta assinatura.")
+            return
+        self.accept()
+        self.on_changes(info)
 
 
 # ---------------------------------------------------------------- páginas e documento

@@ -110,6 +110,8 @@ class PdfView(QGraphicsView):
         self._words = {}
         self._links = {}
         self._pages = {}
+        self._sizes = {}
+        self.marks = {}  # página -> [(retângulo na exibição, QColor, destaque atual?, "fill"|"caret")]
         self.mode = "select"
         self.color = "#ffd400"
         self.colors = {"highlight": "#ffd400", "underline": "#2d9d78", "strikeout": "#d7373f",
@@ -154,7 +156,9 @@ class PdfView(QGraphicsView):
         self._words.clear()
         self._links.clear()
         self._pages = {}
+        self._sizes = {}
         self._sigs = {}
+        self._fields = {}
         self.sel = None
         self.sel_rects = {}
         self.sel_annot = None
@@ -170,6 +174,28 @@ class PdfView(QGraphicsView):
         return self.zoom * self.base
 
     def page_size(self, i):
+        sz = self._sizes.get(i)
+        if sz is None:
+            sz = self._sizes[i] = self._fast_size(i)
+        return sz
+
+    def _fast_size(self, i):
+        """Tamanho exibido da página lido da estrutura do PDF, sem carregar a página (abre PDFs grandes rápido)."""
+        try:
+            d = self.doc
+            if d.is_pdf:
+                r = d.page_cropbox(i)
+                xref = d.page_xref(i)
+                rot = 0
+                for key in ("Rotate", "Parent/Rotate", "Parent/Parent/Rotate"):
+                    t, v = d.xref_get_key(xref, key)
+                    if t == "int":
+                        rot = int(v)
+                        break
+                w, h = abs(r.width), abs(r.height)
+                return (h, w) if rot % 180 else (w, h)
+        except Exception:
+            pass
         r = self._page(i).rect
         return r.width, r.height
 
@@ -354,6 +380,7 @@ class PdfView(QGraphicsView):
 
     def refresh(self, pages=None):
         self.__dict__["_sigs"] = {}
+        self.__dict__["_fields"] = {}
         if pages is None:
             self.cache.clear()
             self._words.clear()
@@ -399,6 +426,31 @@ class PdfView(QGraphicsView):
         for k, hr in enumerate(self.search_hits.get(item.index, [])):
             cur = self.hit_list and self.hit_pos >= 0 and self.hit_list[self.hit_pos] == (item.index, k)
             p.fillRect(qr(hr), QColor(255, 140, 0, 130) if cur else QColor(255, 220, 0, 110))
+        if cached and getattr(self, "highlight_fields", True):
+            for fr, ftype, signed in self.form_fields(item.index):
+                if ftype == pymupdf.PDF_WIDGET_TYPE_SIGNATURE:
+                    if not signed:  # campo de assinatura vazio: indica onde assinar
+                        p.setPen(QPen(QColor(theme.current["accent"]), 1.2, Qt.DashLine))
+                        p.setBrush(QColor(109, 60, 240, 22))
+                        p.drawRect(qr(fr))
+                        f = p.font()
+                        f.setPixelSize(max(9, min(14, int(fr.height * s * 0.28))))
+                        p.setFont(f)
+                        p.setPen(QColor(theme.current["accent"]))
+                        p.drawText(qr(fr), Qt.AlignCenter, "✍ Clique para assinar")
+                    continue
+                p.fillRect(qr(fr), QColor(204, 215, 255, 95))
+        for mr, col, cur, style in self.marks.get(item.index, []):
+            if style == "caret":
+                x = mr.x1 * s + 1
+                p.setPen(QPen(col, 2.2 if not cur else 3.2))
+                p.drawLine(QPointF(x, mr.y0 * s - 2), QPointF(x, mr.y1 * s + 2))
+                continue
+            p.fillRect(qr(mr).adjusted(-1, -1, 1, 1), col)
+            if cur:
+                p.setPen(QPen(col.darker(160), 1.6))
+                p.setBrush(Qt.NoBrush)
+                p.drawRect(qr(mr).adjusted(-2.5, -2.5, 2.5, 2.5))
         for sr in self.sel_rects.get(item.index, []):
             p.fillRect(qr(sr), QColor(20, 115, 230, 70))
         if self.sel_annot and self.sel_annot[0] == item.index:
@@ -465,6 +517,22 @@ class PdfView(QGraphicsView):
             try:
                 for w in page.widgets(types=[pymupdf.PDF_WIDGET_TYPE_SIGNATURE]) or []:
                     out.append(((w.rect * page.rotation_matrix).normalize(), w.field_name))
+            except Exception:
+                pass
+            cache[i] = out
+        return cache[i]
+
+    def form_fields(self, i):
+        """Campos de formulário da página para o destaque na tela: (retângulo de exibição, tipo, assinado?)."""
+        cache = self.__dict__.setdefault("_fields", {})
+        if i not in cache:
+            page = self._page(i)
+            out = []
+            try:
+                if self.doc.is_form_pdf:
+                    for w in page.widgets() or []:
+                        signed = bool(getattr(w, "is_signed", False)) if w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE else False
+                        out.append(((w.rect * page.rotation_matrix).normalize(), w.field_type, signed))
             except Exception:
                 pass
             cache[i] = out

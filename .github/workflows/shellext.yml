@@ -1,0 +1,43 @@
+# Compila e testa a LumenShell.dll (miniaturas e painel de visualização do Explorador) no Windows.
+name: Extensão do Explorador
+
+on:
+  push:
+    branches: [shellext-dev]
+  workflow_dispatch:
+
+jobs:
+  shellext:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Compilar
+        shell: cmd
+        run: call shellext\build.bat
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: PDF de teste
+        shell: bash
+        run: |
+          python -m pip install pymupdf pillow
+          python tests/make_shellext_pdf.py teste_shell.pdf
+      - name: Testar como o Explorador
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force saida_shell | Out-Null
+          & build\shellext\test_shellext.exe (Resolve-Path build\shellext\LumenShell.dll) (Resolve-Path teste_shell.pdf) (Resolve-Path saida_shell)
+          $code = $LASTEXITCODE
+          python -c "from PIL import Image; import glob; [Image.open(f).save(f[:-4]+'.png') for f in glob.glob('saida_shell/*.bmp')]"
+          if ($code -ne 0) { exit $code }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shellext
+          path: |
+            saida_shell/*.png
+            build/shellext/LumenShell.dll

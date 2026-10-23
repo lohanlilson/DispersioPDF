@@ -247,7 +247,7 @@ def _ltv_context(signer):
 
 
 def sign_pdf_bytes(pdf_bytes, signer, page_index, unrot_rect, page_height, reason="", location="",
-                   field_name=None, visible=True, tsa_url=None, ltv=False, report=None):
+                   field_name=None, visible=True, tsa_url=None, ltv=False, report=None, existing_field=False):
     """Assina em PAdES. Com tsa_url aplica carimbo de tempo; com ltv embute os dados de validação de longo prazo.
     Se a internet/servidor falhar, assina com o que for possível e descreve o resultado em report."""
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
@@ -261,7 +261,9 @@ def sign_pdf_bytes(pdf_bytes, signer, page_index, unrot_rect, page_height, reaso
 
     def attempt(use_tsa, use_ltv):
         w = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes), strict=False)
-        if visible:
+        if existing_field:
+            pass  # campo de assinatura vazio já existe no documento (preparado antes): assina nele
+        elif visible:
             append_signature_field(w, SigFieldSpec(sig_field_name=field_name, on_page=page_index,
                                                    box=_box_pdf_coords(page_height, unrot_rect)))
         else:

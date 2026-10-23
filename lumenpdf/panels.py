@@ -78,6 +78,7 @@ CATALOG = [
         ("validate_sigs", "certificate", "Validar assinaturas"),
     ]),
     ("Formulários", [
+        ("detect_fields", "form", "Detectar campos automaticamente"),
         ("form_fill", "form", "Preencher formulário"), ("field_text", "textfield", "Campo de texto"),
         ("field_check", "checkbox", "Caixa de seleção"), ("field_combo", "form", "Lista suspensa"),
     ]),
@@ -369,6 +370,7 @@ class ThumbnailPanel(QWidget):
         lay.addWidget(self.list)
         self._pending = []
         self._t = QTimer(self, interval=0, timeout=self._render_some)
+        self.list.verticalScrollBar().valueChanged.connect(lambda _: self._pending and self._t.start())
 
     def selected_pages(self):
         return sorted(it.data(Qt.UserRole) for it in self.list.selectedItems())
@@ -392,13 +394,35 @@ class ThumbnailPanel(QWidget):
                 self._pending.insert(0, p)
         self._t.start()
 
+    def _visible_rows(self):
+        vp = self.list.viewport()
+        first = self.list.indexAt(vp.rect().topLeft())
+        last = self.list.indexAt(vp.rect().bottomRight())
+        a = first.row() if first.isValid() else 0
+        b = last.row() if last.isValid() else min(a + 12, self.list.count() - 1)
+        return range(max(0, a - 2), min(self.list.count(), b + 3))
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self._pending:
+            self._t.start()
+
     def _render_some(self):
+        """Renderiza primeiro as miniaturas visíveis; pausa enquanto o painel está fechado (PDFs grandes)."""
         doc = self.tab.doc
+        if not self.isVisible():
+            self._t.stop()
+            return
+        pend = set(self._pending)
         for _ in range(3):
             if not self._pending:
                 self._t.stop()
                 return
-            i = self._pending.pop(0)
+            i = next((r for r in self._visible_rows() if r in pend), None)
+            if i is None:
+                i = self._pending[0]
+            self._pending.remove(i)
+            pend.discard(i)
             if i < doc.page_count and i < self.list.count():
                 self.list.item(i).setIcon(QIcon(render_thumb(doc[i], self.tw)))
 
@@ -551,6 +575,11 @@ class CommentsPanel(QWidget):
         lay.addWidget(self.list)
 
     def rebuild(self):
+        # só lê as anotações (que exige abrir cada página) quando o painel estiver visível
+        if not self.isVisible():
+            self._dirty = True
+            return
+        self._dirty = False
         self.list.clear()
         f = self.filter.text().lower()
         items = [a for a in list_annots(self.tab.doc) if not f or f in (a["content"] + a["author"] + a["name"]).lower()]
@@ -562,6 +591,11 @@ class CommentsPanel(QWidget):
             it = QListWidgetItem(icons.icon(ANNOT_ICON.get(a["type"], "comments")), txt)
             it.setData(Qt.UserRole, (a["page"], a["xref"]))
             self.list.addItem(it)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if getattr(self, "_dirty", True):
+            self.rebuild()
 
     def _go(self, it):
         p, xref = it.data(Qt.UserRole)

@@ -153,12 +153,13 @@ class MainWindow(QMainWindow):
         for ic, tip, fn in [("undo", "Desfazer (Ctrl+Z)", self.undo), ("redo", "Refazer (Ctrl+Y)", self.redo),
                             ("save", "Salvar (Ctrl+S)", self.save), ("print", "Imprimir (Ctrl+P)", lambda: self.run_tool("print")),
                             ("speaker", "Ler em voz alta", lambda: self.run_tool("read_aloud")),
+                            ("split", "Dividir tela (Ctrl+\\)", lambda: self.cur() and self.cur().toggle_split()),
                             ("readmode", "Modo de leitura (Ctrl+H)", self.toggle_read_mode),
                             ("moon", "Tema claro/escuro", self.toggle_dark),
                             ("gear", "Preferências (Ctrl+K)", lambda: self.preferences())]:
             b = tool_button(ic, tip)
             b.clicked.connect(fn)
-            if ic in ("speaker", "readmode", "moon", "redo"):
+            if ic in ("speaker", "readmode", "moon", "redo", "split"):
                 self._narrow_hide.append(b)
             lay.addWidget(b)
         return bar
@@ -228,6 +229,8 @@ class MainWindow(QMainWindow):
         act(m, "Comentários", lambda: self.cur() and self.cur().side.show_panel(2), None, "comments")
         act(m, "Anexos", lambda: self.cur() and self.cur().side.show_panel(3), None, "attach")
         act(m, "Painel de ferramentas", lambda: self.tools.setVisible(not self.tools.isVisible()), "Shift+F4", "tools")
+        m.addSeparator()
+        act(m, "Dividir tela", lambda: self.cur() and self.cur().toggle_split(), "Ctrl+\\", "split")
         m.addSeparator()
         act(m, "Modo de leitura", self.toggle_read_mode, "Ctrl+H", "readmode")
         act(m, "Tela cheia", self.toggle_fullscreen, "F11", "fullscreen")
@@ -343,6 +346,7 @@ class MainWindow(QMainWindow):
             if r == QMessageBox.Cancel or (r == QMessageBox.Save and not tab.save()):
                 return False
         tab.save_position()
+        tab.cleanup()
         self.tabbar.removeTab(i)
         self.tab_widgets.pop(i)
         self.docs.removeWidget(tab)
@@ -765,7 +769,7 @@ class MainWindow(QMainWindow):
         tab.set_mode("certsign")
         self.tools.set_tab("sign")
 
-    def tool_rect_certsign(self, tab, page, rect, **kw):
+    def tool_rect_certsign(self, tab, page, rect, field=None, **kw):
         tab.set_mode("select")
         d = dialogs.CertSignDialog(self, self.settings.value("last_pfx", ""), self.settings.value("last_cert", ""),
                                    int(self.settings.value("last_sign_kind", 0)))
@@ -796,7 +800,8 @@ class MainWindow(QMainWindow):
         unrot = ops.to_unrot(pg, rect)
         # Assina sempre como revisão incremental sobre os bytes exatos do arquivo: regravar o PDF
         # (tobytes) reorganiza os objetos e invalida as assinaturas que já existem nele.
-        if tab.has_signatures or not tab.modified:
+        really_signed = b"/ByteRange" in tab.original_bytes  # campos vazios não contam como assinatura
+        if really_signed or not tab.modified:
             if tab.modified and QMessageBox.question(
                     self, APP, "Este documento já tem assinatura e possui alterações não salvas.\n\n"
                                "Para manter as assinaturas anteriores válidas, a nova assinatura será aplicada sobre a "
@@ -816,7 +821,8 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         try:
             out = signing.sign_pdf_bytes(data, signer, page, tuple(unrot), pg.mediabox.height,
-                                         d.reason.text(), d.location.text(), tsa_url=tsa_url, ltv=ltv, report=rep)
+                                         d.reason.text(), d.location.text(), tsa_url=tsa_url, ltv=ltv, report=rep,
+                                         field_name=field, existing_field=bool(field))
         except Exception as e:
             QApplication.restoreOverrideCursor()
             errors.report(self, f"A assinatura não foi concluída: {e}", e, "Assinar com certificado")
@@ -858,15 +864,57 @@ class MainWindow(QMainWindow):
         if data:
             self.open_bytes(data, f"Versão assinada por {info['signer'].split(':')[0]}.pdf")
 
+    def _changes_after(self, tab, info):
+        """Mostra lado a lado a versão assinada e a atual, destacando o que mudou depois da assinatura."""
+        from .compare import open_compare
+        signed = signing.signed_revision(tab.original_bytes, info)
+        if not signed:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            a = pymupdf.open("pdf", signed)
+            b = pymupdf.open("pdf", tab.original_bytes)
+            na, fa = ops.annots_summary(a)
+            nb, fb = ops.annots_summary(b)
+        finally:
+            QApplication.restoreOverrideCursor()
+        later = [o for o in (tab.sig_results or []) if (o.get("revision_end") or 0) > info["revision_end"]]
+        filled = [k for k, (t, v) in fb.items() if t != pymupdf.PDF_WIDGET_TYPE_SIGNATURE and fa.get(k, (t, ""))[1] != v]
+        new_fields = [k for k in fb if k not in fa and fb[k][0] != pymupdf.PDF_WIDGET_TYPE_SIGNATURE]
+        parts = []
+        if later:
+            parts.append(f"{len(later)} assinatura(s) posterior(es): " + ", ".join(o["signer"].split(":")[0] for o in later))
+        if nb != na:
+            parts.append(f"{nb - na:+d} comentário(s)")
+        if filled:
+            parts.append(f"{len(filled)} campo(s) de formulário preenchido(s)/alterado(s)")
+        if new_fields:
+            parts.append(f"{len(new_fields)} campo(s) de formulário novo(s)")
+        who = info["signer"].split(":")[0]
+        intro = (f"<b>Depois da assinatura de {who}:</b> " + ("; ".join(parts) if parts else "sem comentários, campos ou assinaturas novos")
+                 + ". À esquerda, o documento como foi assinado; à direita, a versão atual.")
+        self._compare_win = open_compare(self, a, f"Versão assinada por {who}", b, "Versão atual",
+                                         "Alterações após a assinatura", intro)
+
     def tool_validate_sigs(self, tab, **kw):
-        dialogs.SignaturesDialog(self, self._sig_results(tab), lambda i: self._view_signed(tab, i)).exec()
+        dialogs.SignaturesDialog(self, self._sig_results(tab), lambda i: self._view_signed(tab, i),
+                                 lambda i: self._changes_after(tab, i)).exec()
 
     def tool_signature_info(self, tab, field=None, **kw):
         res = self._sig_results(tab, field)
         if not res:
-            QMessageBox.information(self, APP, "Este campo de assinatura ainda não foi assinado.")
+            loc = next(((i, (w.rect * pg.rotation_matrix).normalize()) for i, pg in enumerate(tab.doc)
+                        for w in (pg.widgets(types=[pymupdf.PDF_WIDGET_TYPE_SIGNATURE]) or [])
+                        if w.field_name == field), None)
+            if loc and QMessageBox.question(
+                    self, APP, f"O campo de assinatura “{field}” está vazio.\n\n"
+                               "Deseja assiná-lo agora com o seu certificado digital?") == QMessageBox.Yes:
+                self.tool_rect_certsign(tab, loc[0], loc[1], field=field)
+            elif not loc:
+                QMessageBox.information(self, APP, "Este campo de assinatura ainda não foi assinado.")
             return
-        dialogs.SignatureInfoDialog(self, res[0], lambda i: self._view_signed(tab, i)).exec()
+        dialogs.SignatureInfoDialog(self, res[0], lambda i: self._view_signed(tab, i),
+                                    lambda i: self._changes_after(tab, i)).exec()
 
     # --- edição
     def tool_edit_span(self, tab, page, point, **kw):
@@ -946,6 +994,28 @@ class MainWindow(QMainWindow):
         tab.checkpoint()
         ops.add_field(tab.doc[page], rect, kind, name, choices)
         tab.changed([page])
+
+    def tool_detect_fields(self, tab, **kw):
+        """Transforma o PDF em formulário preenchível: acha linhas ____, pontilhados, caixas, ( ) e linhas de assinatura."""
+        tab.checkpoint()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            n = ops.create_detected_fields(tab.doc)
+        finally:
+            QApplication.restoreOverrideCursor()
+        total = sum(n.values())
+        if not total:
+            tab.undo_stack.pop()
+            QMessageBox.information(self, APP, "Nenhum campo novo foi encontrado neste documento.\n\n"
+                                               "Dica: para PDFs escaneados, aplique o OCR antes.")
+            return
+        tab.has_signatures = tab._detect_signatures()
+        tab.changed(list(range(tab.doc.page_count)))
+        parts = [f"{n['text']} campo(s) de texto", f"{n['check']} caixa(s) de seleção",
+                 f"{n['signature']} campo(s) de assinatura"]
+        QMessageBox.information(self, APP, f"{total} campo(s) criado(s): " + ", ".join(p for p in parts if not p.startswith("0 "))
+                                + ".\n\nOs campos aparecem destacados em azul. Clique em um campo de assinatura para assinar."
+                                "\nPara desfazer, use Ctrl+Z.")
 
     def tool_rect_field_text(self, tab, page, rect, **kw):
         self._field(tab, page, rect, "text")
@@ -1272,17 +1342,23 @@ class MainWindow(QMainWindow):
 
     # --- outros
     def tool_compare(self, tab=None, **kw):
-        a_doc, a_name = (tab.doc, os.path.basename(tab.path or "Atual")) if tab else (None, None)
-        if a_doc is None:
-            fa, _ = QFileDialog.getOpenFileName(self, "Arquivo original", "", "PDF (*.pdf)")
+        """Comparação visual lado a lado (original × revisada), com as alterações destacadas e navegáveis."""
+        from .compare import open_compare
+        start = self.settings.value("last_dir", os.path.expanduser("~"))
+        if tab:
+            a_doc, a_name = pymupdf.open("pdf", tab.doc.tobytes()), os.path.basename(tab.path or "Documento atual")
+        else:
+            fa, _ = QFileDialog.getOpenFileName(self, "Comparar — versão original", start, "PDF (*.pdf)")
             if not fa:
                 return
             a_doc, a_name = pymupdf.open(fa), os.path.basename(fa)
-        fb, _ = QFileDialog.getOpenFileName(self, "Comparar com (versão revisada)", "", "PDF (*.pdf)")
+        fb, _ = QFileDialog.getOpenFileName(self, f"Comparar “{a_name}” com (versão revisada)", start, "PDF (*.pdf)")
         if not fb:
             return
-        html, n = ops.compare(a_doc, pymupdf.open(fb), a_name, os.path.basename(fb))
-        dialogs.HtmlDialog(self, "Comparar arquivos", html, "comparacao.html").exec()
+        try:
+            self._compare_win = open_compare(self, a_doc, a_name, pymupdf.open(fb), os.path.basename(fb))
+        except Exception as e:
+            errors.report(self, f"Não foi possível comparar os arquivos: {e}", e, "Comparar arquivos")
 
     def tool_print(self, tab, **kw):
         from .print_manager import PrintManager, Source

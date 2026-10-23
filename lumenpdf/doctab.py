@@ -117,7 +117,12 @@ class DocTab(QWidget):
         view_col.setSpacing(6)
         self.sig_bar = SignatureBar(self)
         view_col.addWidget(self.sig_bar)
-        view_col.addWidget(self.view, 1)
+        from PySide6.QtWidgets import QSplitter
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(self.view)
+        self.pane = None
+        view_col.addWidget(self.splitter, 1)
         cl.addLayout(view_col, 1)
         lay.addWidget(center, 1)
         self.side = SidePanel(self)
@@ -155,6 +160,7 @@ class DocTab(QWidget):
         v.opacity = cfg.get("annot_opacity") / 100
         v.wheel_zoom = cfg.get("wheel_zoom")
         v.middle_autoscroll = cfg.get("middle_autoscroll")
+        v.highlight_fields = cfg.get("highlight_fields")
         v.page_shadow = cfg.get("page_shadow")
         self.rail.setVisible(cfg.get("show_quick_rail"))
         self.sig_bar_enabled = cfg.get("show_sig_bar")
@@ -229,6 +235,8 @@ class DocTab(QWidget):
         try:
             if self.doc.get_sigflags() > 0:
                 return True
+            if not self.doc.is_form_pdf:  # sem formulário não há campo de assinatura (evita abrir todas as páginas)
+                return False
             return any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE
                        for p in self.doc for w in (p.widgets() or []))
         except Exception:
@@ -256,6 +264,7 @@ class DocTab(QWidget):
     def changed(self, pages=None, structure=False):
         self.modified = True
         self.view._pages.clear()
+        self.view._sizes.clear()
         if structure:
             self.view.set_document(self.doc, keep_position=True)
             self.side.rebuild()
@@ -263,12 +272,38 @@ class DocTab(QWidget):
             self.view.refresh(pages)
             self.side.thumbs.refresh(pages if pages is not None else list(range(self.doc.page_count)))
             self.side.comments.rebuild()
+        if self.pane:
+            self.pane.document_changed(structure, pages)
         self.titleChanged.emit()
 
     def _load_bytes(self, data, structure=True):
         self.doc = ops.open_bytes(data, self.password)
         self.view.set_document(self.doc, keep_position=True)
         self.side.rebuild()
+        if self.pane:
+            self.pane.document_changed(True)
+
+    # ------------------------------------------------------------ divisão de tela
+    def toggle_split(self, on=None):
+        on = (self.pane is None) if on is None else on
+        if on and self.pane is None:
+            from .split import SplitPane
+            self.pane = SplitPane(self)
+            self.pane.closed.connect(lambda: self.toggle_split(False))
+            self.splitter.addWidget(self.pane)
+            n = self.splitter.width()
+            self.splitter.setSizes([n // 2, n - n // 2])
+        elif not on and self.pane is not None:
+            self.pane.cleanup()
+            self.pane.hide()
+            self.pane.setParent(None)
+            self.pane.deleteLater()
+            self.pane = None
+        return self.pane is not None
+
+    def cleanup(self):
+        if self.pane:
+            self.pane.cleanup()
 
     def undo(self):
         if not self.undo_stack:

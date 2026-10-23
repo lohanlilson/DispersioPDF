@@ -174,7 +174,8 @@ class SettingsDialog(QDialog):
         self.w["invert_pages"] = _check("Inverter cores das páginas (leitura noturna)", "invert_pages")
         self.w["wheel_zoom"] = _check("Roda do mouse aplica zoom (rolar com Ctrl + roda)", "wheel_zoom")
         self.w["middle_autoscroll"] = _check("Botão do meio do mouse ativa a rolagem automática", "middle_autoscroll")
-        for k in ("two_page", "remember_position", "invert_pages", "wheel_zoom", "middle_autoscroll"):
+        self.w["highlight_fields"] = _check("Destacar campos de formulário em azul (não aparece na impressão)", "highlight_fields")
+        for k in ("two_page", "remember_position", "invert_pages", "wheel_zoom", "middle_autoscroll", "highlight_fields"):
             f.addRow(self.w[k])
 
     def _comments(self, f):

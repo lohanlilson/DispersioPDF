@@ -51,6 +51,7 @@ _P = {
     "form": '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M7 8h10M7 12h4"/><rect x="13" y="11" width="4" height="4"/><path d="M7 17h10"/>',
     "textfield": '<rect x="3" y="7" width="18" height="10" rx="1"/><path d="M7 10v4"/>',
     "checkbox": '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/>',
+    "split": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/><path d="M6 9h3M6 12h3M15 9h3M15 12h3"/>',
     "compare": '<path d="M3 4h7v16H3zM14 4h7v16h-7z"/><path d="M5 8h3M5 11h3M16 8h3M16 11h3M16 14h3"/>',
     "watermark": '<path d="M12 3s6 7 6 11a6 6 0 01-12 0c0-4 6-11 6-11z"/>',
     "pagenum": '<path d="M5 3h10l4 4v14H5z"/><path d="M10 10l-1 8M14 10l-1 8M8 12.5h7.5M7.5 15.5h7.5"/>',
@@ -100,8 +101,19 @@ def _svg(name, color):
             f'stroke="{color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">{body}</svg>')
 
 
+_icon_cache = {}
+
+
 def icon(name, color=None, size=48):
     color = color or _color
+    key = (name, color, size)
+    ic = _icon_cache.get(key)
+    if ic is None:
+        ic = _icon_cache[key] = _make_icon(name, color, size)
+    return ic
+
+
+def _make_icon(name, color, size):
     renderer = QSvgRenderer(QByteArray(_svg(name, color).encode()))
     pm = QPixmap(QSize(size, size))
     pm.fill(Qt.transparent)

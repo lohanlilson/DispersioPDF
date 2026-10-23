@@ -28,6 +28,7 @@ DEFAULTS = {
     "remember_position": True,
     "wheel_zoom": False,                 # roda do mouse dá zoom sem Ctrl
     "middle_autoscroll": True,           # botão do meio ativa a rolagem automática
+    "highlight_fields": True,            # destaca campos de formulário na tela (não sai na impressão)
     "page_shadow": True,
     # Comentários
     "color_highlight": "#ffd400",

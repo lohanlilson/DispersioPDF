@@ -818,6 +818,248 @@ def add_field(page, disp_rect, kind, name, choices=None):
     page.add_widget(w)
 
 
+# ---------------------------------------------------------------- detecção automática de formulário
+
+SIG_WORDS = re.compile(r"assinatura|cedente|cession[aá]ri|contratante|contratad|testemunha|devedor|credor|avalista|"
+                       r"fiador|locador|locat[aá]ri|comprador|vendedor|outorgante|outorgad|promitente|signat[aá]ri|"
+                       r"respons[aá]vel|representante|declarante|requerente|interveniente|anuente|emitente|s[oó]cio",
+                       re.I)
+FILL_RUN = re.compile(r"_{3,}|\.{6,}|…{2,}")
+BOX_RUN = re.compile(r"[\(\[]\s{0,3}[\)\]]|[☐□❑❒▢]")
+
+
+def _lines_with_chars(page):
+    """Linhas de texto com o retângulo de cada caractere (para localizar ____ e ( ) com precisão)."""
+    out = []
+    raw = page.get_text("rawdict", flags=pymupdf.TEXT_PRESERVE_WHITESPACE)
+    for b in raw.get("blocks", []):
+        for ln in b.get("lines", []):
+            chars, size = [], 0
+            for sp in ln.get("spans", []):
+                size = max(size, sp.get("size", 0))
+                for ch in sp.get("chars", []):
+                    chars.append((ch["c"], pymupdf.Rect(ch["bbox"])))
+            if chars:
+                out.append((chars, size or 10))
+    return out
+
+
+def _label_left(words, rect, max_words=5):
+    """Texto à esquerda do campo, na mesma linha (o rótulo, ex.: "Nome completo:")."""
+    cy = (rect.y0 + rect.y1) / 2
+    same = [w for w in words if w[3] < rect.y1 + 3 and w[1] > rect.y0 - 6 and w[2] <= rect.x0 + 1
+            and abs((w[1] + w[3]) / 2 - cy) < max(8, rect.height)]
+    same.sort(key=lambda w: w[0])
+    lab = []
+    for w in reversed(same):
+        if lab and FILL_RUN.search(w[4]):
+            break
+        lab.insert(0, w[4])
+        if len(lab) >= max_words or (len(lab) > 1 and w[4].endswith((".", ";"))):
+            break
+    txt = " ".join(lab)
+    txt = FILL_RUN.sub("", txt)
+    return re.sub(r"[:\s]+$", "", txt).strip(" ._-")
+
+
+def _label_right(words, r, size=10):
+    cy = (r.y0 + r.y1) / 2
+    nxt = [w for w in words if w[0] >= r.x1 - 1 and abs((w[1] + w[3]) / 2 - cy) < max(size, 6)]
+    nxt.sort(key=lambda w: w[0])
+    lab, last_x = [], r.x1
+    for w in nxt:
+        if len(lab) >= 5 or w[0] - last_x > (40 if not lab else 12) or BOX_RUN.search(w[4]) or w[4] in ("(", ")", "[", "]"):
+            break
+        lab.append(w[4])
+        last_x = w[2]
+    return " ".join(lab)
+
+
+def _label_above(words, r):
+    up = [w for w in words if r.y0 - 18 <= w[3] <= r.y0 + 1 and w[0] < r.x0 + r.width * 0.5 and w[2] > r.x0 - 4]
+    up.sort(key=lambda w: (round(w[1]), w[0]))
+    txt = " ".join(w[4] for w in up[:5])
+    return re.sub(r"[:\s]+$", "", txt).strip(" ._-")
+
+
+def _label_below(words, rect):
+    below = [w for w in words if rect.y1 - 1 <= w[1] <= rect.y1 + 16 and w[0] < rect.x1 and w[2] > rect.x0]
+    below.sort(key=lambda w: (round(w[1]), w[0]))
+    return " ".join(w[4] for w in below[:6]).strip()
+
+
+def detect_fields(page):
+    """Procura campos para preencher: linhas ____ / ....., linhas desenhadas vazias, caixas vazias e ( ) / ☐.
+    Linhas com "Assinatura", "Cedente", "Testemunha"… logo abaixo viram campos de assinatura.
+    Retorna [(tipo, retângulo sem rotação, rótulo)] com tipo em text | check | signature."""
+    words = page.get_text("words", sort=True)
+    found = []
+
+    def has_text(r):
+        return any(pymupdf.Rect(w[:4]).intersects(r) and not FILL_RUN.fullmatch(w[4]) and w[4].strip() for w in words)
+
+    def add(kind, r, label):
+        r = pymupdf.Rect(r).normalize()
+        if r.is_empty or r.width < 4:
+            return
+        for k2, r2, _ in found:  # descarta duplicados (ex.: ____ desenhado e também como linha)
+            inter = pymupdf.Rect(r) & r2
+            if not inter.is_empty and inter.get_area() > 0.4 * min(r.get_area(), r2.get_area()):
+                return
+        found.append((kind, r, label))
+
+    # 1) sequências de sublinhado / pontilhado e ( ) [ ] ☐ no texto
+    for chars, size in _lines_with_chars(page):
+        s = "".join(c for c, _ in chars)
+        for m in FILL_RUN.finditer(s):
+            seg = [r for _, r in chars[m.start():m.end()]]
+            r = pymupdf.Rect(seg[0])
+            for x in seg[1:]:
+                r |= x
+            h = max(size * 1.3, 11)
+            fr = pymupdf.Rect(r.x0, r.y1 - h, r.x1, r.y1 + 1)
+            below = _label_below(words, pymupdf.Rect(r.x0, r.y1, r.x1, r.y1))
+            if SIG_WORDS.search(below) and r.width > 90:
+                add("signature", pymupdf.Rect(r.x0, r.y1 - 34, r.x1, r.y1), below)
+            else:
+                add("text", fr, _label_left(words, fr))
+        for m in BOX_RUN.finditer(s):
+            seg = [r for _, r in chars[m.start():m.end()]]
+            r = pymupdf.Rect(seg[0])
+            for x in seg[1:]:
+                r |= x
+            side = max(min(r.height, size) * 0.8, 7)
+            cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+            box = pymupdf.Rect(cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
+            add("check", box, _label_right(words, r, size))
+
+    # 2) linhas desenhadas (ou retângulos finos) sem texto logo acima; 3) caixas vazias
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        drawings = []
+    hlines, boxes = [], []
+    for d in drawings:
+        for it in d.get("items", []):
+            if it[0] == "l":
+                p1, p2 = it[1], it[2]
+                if abs(p1.y - p2.y) < 0.8 and abs(p2.x - p1.x) >= 36:
+                    hlines.append(pymupdf.Rect(min(p1.x, p2.x), p1.y, max(p1.x, p2.x), p1.y))
+            elif it[0] == "re":
+                r = pymupdf.Rect(it[1]).normalize()
+                if r.height <= 1.6 and r.width >= 36:
+                    hlines.append(pymupdf.Rect(r.x0, r.y1, r.x1, r.y1))
+                elif 5.5 <= r.width <= 18 and 5.5 <= r.height <= 18 and abs(r.width - r.height) < 2.5:
+                    boxes.append(("check", r))
+                elif r.width >= 40 and 12 <= r.height <= 60:
+                    boxes.append(("text", r))
+    pw = page.rect.width
+    for ln in hlines:
+        if ln.width > pw * 0.8:  # linha divisória da página inteira
+            continue
+        above = pymupdf.Rect(ln.x0 + 1, ln.y0 - 13, ln.x1 - 1, ln.y0 - 0.8)
+        if has_text(above):
+            continue
+        below = _label_below(words, ln)
+        if SIG_WORDS.search(below) and ln.width > 90:
+            add("signature", pymupdf.Rect(ln.x0, ln.y0 - 34, ln.x1, ln.y0), below)
+        else:
+            add("text", pymupdf.Rect(ln.x0, ln.y0 - 14, ln.x1, ln.y0 + 1), _label_left(words, pymupdf.Rect(ln.x0, ln.y0 - 14, ln.x1, ln.y0)))
+    for kind, r in boxes:
+        inner = r + (1.5, 1.5, -1.5, -1.5)
+        if has_text(inner):
+            continue
+        if kind == "text":
+            add(kind, inner, _label_left(words, r) or _label_above(words, r))
+        else:
+            add(kind, r, _label_right(words, r))
+
+    # descarta o que já é campo
+    existing = [w.rect for w in (page.widgets() or [])]
+    out = []
+    for kind, r, label in found:
+        if any((r & e).get_area() > 0.3 * r.get_area() for e in existing if not (r & e).is_empty):
+            continue
+        out.append((kind, r, label))
+    return out
+
+
+def _field_name(label, kind, used, page_no):
+    base = re.sub(r"\s+", " ", re.sub(r"[^\w\s/º°ª-]", "", label or "")).strip()[:40]
+    if not base:
+        base = {"text": "Campo", "check": "Opção", "signature": "Assinatura"}[kind] + f" pág {page_no + 1}"
+    elif kind == "signature" and not base.lower().startswith("assinatura"):
+        base = f"Assinatura {base}"
+    name, n = base, 2
+    while name in used:
+        name, n = f"{base} {n}", n + 1
+    used.add(name)
+    return name
+
+
+def create_detected_fields(doc, pages=None):
+    """Cria os campos detectados (sem borda nem fundo: o documento continua igual na impressão).
+    Retorna {"text": n, "check": n, "signature": n}."""
+    used = set()
+    for pg in doc:
+        for w in pg.widgets() or []:
+            used.add(w.field_name)
+    count = {"text": 0, "check": 0, "signature": 0}
+    for pno in (pages if pages is not None else range(doc.page_count)):
+        page = doc[pno]
+        for kind, r, label in detect_fields(page):
+            w = pymupdf.Widget()
+            w.rect = r
+            w.field_name = _field_name(label, kind, used, pno)
+            w.field_label = label or w.field_name
+            w.field_type = {"text": pymupdf.PDF_WIDGET_TYPE_TEXT, "check": pymupdf.PDF_WIDGET_TYPE_CHECKBOX,
+                            "signature": pymupdf.PDF_WIDGET_TYPE_SIGNATURE}[kind]
+            if kind == "text":
+                w.text_fontsize = 0
+                w.text_font = "Helv"
+            if kind == "check":
+                w.field_value = False
+            w.border_color = None
+            w.border_width = 0
+            w.fill_color = None
+            page.add_widget(w)
+            if kind == "signature":
+                _blank_appearance(doc, w.xref)
+            count[kind] += 1
+    return count
+
+
+def _empty_sig_widgets(page):
+    return [w for w in (page.widgets(types=[pymupdf.PDF_WIDGET_TYPE_SIGNATURE]) or [])
+            if not getattr(w, "is_signed", False)]
+
+
+def has_empty_signature_fields(doc):
+    try:
+        return bool(doc.is_form_pdf) and any(_empty_sig_widgets(p) for p in doc)
+    except Exception:
+        return False
+
+
+def remove_empty_signature_fields(doc):
+    for page in doc:
+        for w in _empty_sig_widgets(page):
+            try:
+                page.delete_widget(w)
+            except Exception:
+                pass
+
+
+def _blank_appearance(doc, xref):
+    """Tira a etiqueta "SIGN" que o MuPDF desenha no campo de assinatura vazio (não deve sair na impressão)."""
+    try:
+        t, v = doc.xref_get_key(xref, "AP/N")
+        if t == "xref":
+            doc.update_stream(int(v.split()[0]), b" ")
+    except Exception:
+        pass
+
+
 def flatten(doc):
     doc.bake(annots=True, widgets=True)
 
@@ -854,6 +1096,83 @@ def compare(doc_a, doc_b, name_a="Original", name_b="Revisado"):
     if not parts:
         return head + "<p>Nenhuma diferença de texto encontrada.</p>", 0
     return head + f"<p>{changed} página(s) com diferenças.</p>" + "".join(parts), changed
+
+def _doc_words(doc):
+    """Palavras do documento em ordem de leitura: (texto, página, retângulo na exibição, chave da linha)."""
+    out = []
+    for pno in range(doc.page_count):
+        pg = doc[pno]
+        m = pg.rotation_matrix
+        # o carimbo visível das assinaturas não é conteúdo do documento
+        skip = [w.rect for w in (pg.widgets() or []) if w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE]
+        for x0, y0, x1, y1, w, b, ln, _ in pg.get_text("words", sort=True):
+            r = pymupdf.Rect(x0, y0, x1, y1)
+            if skip and any(sr.contains((r.tl + r.br) / 2) for sr in skip):
+                continue
+            out.append((w, pno, r * m, (pno, b, ln)))
+    return out
+
+
+def _line_rects(words):
+    """Une palavras vizinhas da mesma linha num único retângulo (destaque contínuo)."""
+    out = {}
+    cur_key, cur = None, None
+    for _, pno, r, key in words:
+        if key == cur_key and cur is not None:
+            cur |= r
+        else:
+            if cur is not None:
+                out.setdefault(cur_key[0], []).append(cur)
+            cur_key, cur = key, pymupdf.Rect(r)
+    if cur is not None:
+        out.setdefault(cur_key[0], []).append(cur)
+    return out
+
+
+def compare_docs(doc_a, doc_b, max_words=120000):
+    """Compara o texto de dois documentos palavra a palavra (o texto pode mudar de página entre as versões).
+    Retorna a lista de alterações com as páginas/retângulos em cada documento, para destacar e navegar."""
+    wa, wb = _doc_words(doc_a), _doc_words(doc_b)
+    if len(wa) + len(wb) > max_words:  # documentos enormes: compara página a página (mais rápido)
+        blocks = []
+        for p in range(max(doc_a.page_count, doc_b.page_count)):
+            blocks.append(([w for w in wa if w[1] == p], [w for w in wb if w[1] == p]))
+    else:
+        blocks = [(wa, wb)]
+    changes = []
+    for A, B in blocks:
+        sm = difflib.SequenceMatcher(None, [w[0] for w in A], [w[0] for w in B], autojunk=False)
+        for op, a0, a1, b0, b1 in sm.get_opcodes():
+            if op == "equal":
+                continue
+            ra, rb = A[a0:a1], B[b0:b1]
+            # posição de referência no outro documento (onde o trecho entraria/sairia)
+            anchor_a = (A[a0] if a0 < len(A) else (A[-1] if A else None))
+            anchor_b = (B[b0] if b0 < len(B) else (B[-1] if B else None))
+            kind = {"replace": "alterado", "delete": "removido", "insert": "inserido"}[op]
+            changes.append(dict(
+                kind=kind,
+                text_a=" ".join(w[0] for w in ra), text_b=" ".join(w[0] for w in rb),
+                page_a=ra[0][1] if ra else (anchor_a[1] if anchor_a else 0),
+                page_b=rb[0][1] if rb else (anchor_b[1] if anchor_b else 0),
+                rects_a=_line_rects(ra), rects_b=_line_rects(rb),
+                anchor_a=(anchor_a[1], anchor_a[2]) if anchor_a and not ra else None,
+                anchor_b=(anchor_b[1], anchor_b[2]) if anchor_b and not rb else None))
+    return dict(changes=changes, pages_a=doc_a.page_count, pages_b=doc_b.page_count,
+                words_a=len(wa), words_b=len(wb))
+
+
+def annots_summary(doc):
+    """Contagem de comentários e campos preenchidos (para mostrar o que mudou depois de uma assinatura)."""
+    n_annots, fields = 0, {}
+    for pg in doc:
+        for a in pg.annots() or []:
+            if a.type[0] not in (pymupdf.PDF_ANNOT_POPUP, pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_WIDGET):
+                n_annots += 1
+        for w in pg.widgets() or []:
+            fields[w.field_name] = (w.field_type, str(w.field_value or ""))
+    return n_annots, fields
+
 
 # ---------------------------------------------------------------- anexos
 

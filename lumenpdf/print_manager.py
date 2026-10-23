@@ -57,8 +57,18 @@ class Source:
                     for a in list(page.annots() or []):
                         page.delete_annot(a)
                 self._variants["forms"] = d
-            return self._variants["forms"]
-        return self.doc
+            base = self._variants["forms"]
+        else:
+            base = self.doc
+        if content != "doc" and ops.has_empty_signature_fields(base):
+            # o MuPDF desenha uma etiqueta "SIGN" em campos de assinatura vazios; no papel eles saem em branco
+            key = content + "_nosig"
+            if key not in self._variants:
+                d = pymupdf.open("pdf", base.tobytes())
+                ops.remove_empty_signature_fields(d)
+                self._variants[key] = d
+            return self._variants[key]
+        return base
 
 
 def page_list(sources, o):
