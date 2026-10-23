@@ -823,7 +823,8 @@ class HtmlDialog(QDialog):
 
 class PreferencesDialog(FormDialog):
     def __init__(self, parent, settings, langs):
-        self.author = line(settings.value("author", "Usuário"))
+        from .config import cfg as _cfg
+        self.author = line(_cfg.get("author"))
         self.ocr = combo(langs or ["por"], settings.value("ocr_lang", "por"))
         self.zoom = combo(["Ajustar largura", "Ajustar página", "100%"], settings.value("default_zoom", "Ajustar largura"))
         self.tess = line(settings.value("tessdata", ""), "Pasta tessdata (opcional)")

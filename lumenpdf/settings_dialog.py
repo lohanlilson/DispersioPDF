@@ -87,7 +87,11 @@ class SettingsDialog(QDialog):
 
     # ------------------------------------------------------------ páginas
     def _general(self, f):
-        self.w["author"] = QLineEdit(cfg.get("author"))
+        from .config import windows_user_name
+        saved = str(cfg.qs.value("author", "") or "")
+        self.w["author"] = QLineEdit("" if saved in ("", "Usuário") else saved)
+        self.w["author"].setPlaceholderText(f"{windows_user_name()} (usuário do Windows)")
+        self.w["author"].setToolTip("Deixe em branco para usar o nome do usuário do Windows")
         f.addRow("Seu nome (comentários e boas-vindas):", self.w["author"])
         self.w["window_mode"] = _combo([("Sempre maximizada", "maximized"), ("Tamanho e posição da última vez", "last"),
                                         ("Janela normal", "normal")], cfg.get("window_mode"))
@@ -282,7 +286,7 @@ class SettingsDialog(QDialog):
         for key, w in self.w.items():
             v = self._value(key, w)
             if key == "author" and not v:
-                v = DEFAULTS["author"]
+                v = ""  # usa o usuário do Windows
             cfg.set(key, v)
         cfg.set("canvas_color", "" if self.canvas_default.isChecked() else self.canvas_btn.color)
         self.win.apply_settings()

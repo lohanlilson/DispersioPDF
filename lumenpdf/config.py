@@ -5,7 +5,7 @@ from . import APP_ID
 
 DEFAULTS = {
     # Geral
-    "author": "Usuário",
+    "author": "",                        # vazio = nome do usuário do Windows
     "window_mode": "maximized",          # maximized | last | normal
     "startup": "home",                   # home | last_session
     "recent_max": 20,
@@ -55,6 +55,39 @@ DEFAULTS = {
     "tessdata": "",
 }
 
+def windows_user_name():
+    """Nome de exibição do usuário logado no Windows (ex.: “Lohan Lopes”); senão o login."""
+    import os
+    import sys
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            fn = ctypes.windll.secur32.GetUserNameExW
+            for fmt in (3, 2):  # NameDisplay, NameSamCompatible
+                size = wintypes.ULONG(0)
+                fn(fmt, None, ctypes.byref(size))
+                if size.value:
+                    buf = ctypes.create_unicode_buffer(size.value)
+                    if fn(fmt, buf, ctypes.byref(size)) and buf.value.strip():
+                        name = buf.value.strip()
+                        return name.split("\\")[-1] if fmt == 2 else name
+        except Exception:
+            pass
+        try:  # conta Microsoft: nome completo do perfil
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Office\Common\UserInfo") as k:
+                name, _ = winreg.QueryValueEx(k, "UserName")
+                if name.strip():
+                    return name.strip()
+        except OSError:
+            pass
+    for env in ("USERNAME", "USER", "LOGNAME"):
+        if os.environ.get(env):
+            return os.environ[env]
+    return "Usuário"
+
+
 UI_FONT_PX = {"small": 12, "normal": 13, "large": 15}
 
 
@@ -67,6 +100,13 @@ class Config:
             self.qs.setValue("brand_v2", "true")
 
     def get(self, key):
+        if key == "author":
+            v = str(self.qs.value("author", "") or "").strip()
+            if not v or v == "Usuário":
+                if not hasattr(self, "_win_user"):
+                    self._win_user = windows_user_name()
+                return self._win_user
+            return v
         default = DEFAULTS.get(key)
         raw = self.qs.value(key, None)
         if raw is None:
