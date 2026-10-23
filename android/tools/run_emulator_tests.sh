@@ -7,7 +7,7 @@ adb install -r "$APK/androidTest/debug/app-debug-androidTest.apk"
 adb logcat -c || true
 sleep 8
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS || true
-adb shell am instrument -w -r -e class io.github.lohanlilson.lumenpdf.ViewerTest io.github.lohanlilson.lumenpdf.test/androidx.test.runner.AndroidJUnitRunner | tee instr.txt
+adb shell am instrument -w -r io.github.lohanlilson.lumenpdf.test/androidx.test.runner.AndroidJUnitRunner | tee instr.txt
 adb logcat -d | grep -E "LumenTest" | tail -60
 mkdir -p capturas
 adb pull /sdcard/Android/data/io.github.lohanlilson.lumenpdf/files/capturas/. capturas/ || true

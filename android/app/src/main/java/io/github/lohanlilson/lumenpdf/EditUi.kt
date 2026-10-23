@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledTonalIconButton
@@ -109,6 +110,7 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 Tool.CHECK -> "Toque para marcar ✓"
                 Tool.CROSS -> "Toque para marcar ✗"
                 Tool.SIGN -> "Toque onde quer colocar sua rubrica"
+                Tool.CERT -> "Toque onde a assinatura digital deve ficar"
             }
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
@@ -127,6 +129,7 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 ToolButton(Icons.Filled.Check, "Marcar ✓", d.tool == Tool.CHECK) { pick(Tool.CHECK) }
                 ToolButton(Icons.Filled.Close, "Marcar ✗", d.tool == Tool.CROSS) { pick(Tool.CROSS) }
                 ToolButton(Icons.Filled.Draw, "Rubrica", d.tool == Tool.SIGN) { pick(Tool.SIGN); if (d.tool == Tool.SIGN) onSign() }
+                ToolButton(Icons.Filled.VerifiedUser, "Certificado", d.tool == Tool.CERT) { pick(Tool.CERT) }
                 ToolButton(Icons.AutoMirrored.Filled.Undo, "Desfazer", false, d.canUndo && !d.busy) { vm.undo(d) }
                 ToolButton(Icons.AutoMirrored.Filled.Redo, "Refazer", false, d.canRedo && !d.busy) { vm.redo(d) }
             }

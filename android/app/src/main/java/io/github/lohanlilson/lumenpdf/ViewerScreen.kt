@@ -162,6 +162,8 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var editField by remember { mutableStateOf<FormField?>(null) }
     var signPad by remember { mutableStateOf(false) }
     var nameDialog by remember { mutableStateOf(false) }
+    var certSign by remember { mutableStateOf<Triple<Int, android.graphics.RectF, String?>?>(null) }  // página, área (PDF), campo
+    var sigSheet by remember { mutableStateOf(false) }
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { u ->
         if (u != null) vm.saveAs(d, u)
     }
@@ -317,6 +319,15 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                         d.fields.firstOrNull { (f, r) -> f.page == pg && fx in r.l..r.r && fy in r.t..r.b && !f.readOnly }?.first
                                     }
                                     when {
+                                        hit != null && d.editing && d.tool == Tool.CERT -> {
+                                            val (pg, fx, fy) = hit
+                                            val sz = d.pdf.sizes[pg]
+                                            val w = 190f / sz.w
+                                            val h = 56f / sz.w
+                                            val pts = vm.engine.pdfPoints(d.pdf, pg, listOf((fx - w / 2) to (fy - h / 2), (fx + w / 2) to (fy + h / 2)))
+                                            certSign = Triple(pg, android.graphics.RectF(minOf(pts[0], pts[2]), maxOf(pts[1], pts[3]),
+                                                maxOf(pts[0], pts[2]), minOf(pts[1], pts[3])), null)
+                                        }
                                         hit != null && d.editing && d.tool in setOf(Tool.CHECK, Tool.CROSS, Tool.SIGN) ->
                                             placeNow(ctx, vm, d, d.tool, hit.first, Offset(hit.second, hit.third)) { signPad = true }
                                         hit != null && d.editing && d.tool in setOf(Tool.NOTE, Tool.TEXT) ->
@@ -324,8 +335,8 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                         field != null && field.kind == FormField.Kind.CHECK ->
                                             vm.edit(d, "marcar o campo") { Editor.setField(it, field.name, if (field.value.isEmpty() || field.value == "Off") "on" else "") }
                                         field != null && field.kind == FormField.Kind.SIGNATURE ->
-                                            Toast.makeText(ctx, if (field.value.isEmpty()) "Campo de assinatura: a assinatura com certificado chega na próxima versão."
-                                                else "Este campo já está assinado.", Toast.LENGTH_LONG).show()
+                                            if (field.value.isEmpty()) certSign = Triple(field.page, field.rect, field.name)
+                                            else sigSheet = true
                                         field != null -> editField = field
                                         handleLinkTap(ctx, vm, d, g, p) -> Unit
                                         d.selection != null -> d.selection = null
@@ -360,6 +371,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 SelectionBar(vm, d) { copyText(ctx, it) }
             }
             if (d.busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+            if (bars || d.signatures.any { !it.ok }) Box(Modifier.align(Alignment.TopCenter)) { SignatureBanner(d) { sigSheet = true } }
             // indicador de página
             Surface(
                 onClick = { gotoDialog = true },
@@ -409,6 +421,13 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
         d.tool = Tool.SIGN
         Toast.makeText(ctx, "Rubrica salva. Toque na página onde quer colocá-la.", Toast.LENGTH_LONG).show()
     }
+    certSign?.let { (pg, rect, fieldName) ->
+        CertSignDialog(vm, fieldName, onDismiss = { certSign = null }) { cert, reason, location, tsa ->
+            certSign = null
+            vm.signWithCert(d, cert, pg, rect, fieldName, reason, location, tsa)
+        }
+    }
+    if (sigSheet) SignaturesSheet(d) { sigSheet = false }
     if (nameDialog) TextInputDialog("Seu nome", "Aparece como autor dos comentários", vm.authorName(), multiline = false,
         onDismiss = { nameDialog = false }) { n, _ -> nameDialog = false; vm.setAuthorName(n) }
     if (vm.confirmClose) AlertDialog(
@@ -682,8 +701,14 @@ fun shareUri(ctx: Context, uriStr: String): Uri {
 
 private fun share(ctx: Context, d: ViewerDoc) {
     runCatching {
+        // com alterações não salvas, compartilha a versão editada (com o nome original)
+        val uri = d.work?.takeIf { d.dirty }?.let { w ->
+            val f = File(ctx.cacheDir, "compartilhar/${d.name}").apply { parentFile?.mkdirs() }
+            w.copyTo(f, overwrite = true)
+            FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
+        } ?: shareUri(ctx, d.uri)
         val i = Intent(Intent.ACTION_SEND).setType("application/pdf")
-            .putExtra(Intent.EXTRA_STREAM, shareUri(ctx, d.uri))
+            .putExtra(Intent.EXTRA_STREAM, uri)
             .putExtra(Intent.EXTRA_SUBJECT, d.name)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         ctx.startActivity(Intent.createChooser(i, "Compartilhar PDF"))

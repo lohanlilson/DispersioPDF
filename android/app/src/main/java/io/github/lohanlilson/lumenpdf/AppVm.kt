@@ -18,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Tool { NONE, INK, NOTE, TEXT, CHECK, CROSS, SIGN }
+enum class Tool { NONE, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT }
 
 /** Documento aberto no visualizador e o estado da tela dele. */
 class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int, val password: String?) {
@@ -50,6 +50,7 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var inkWidth by mutableFloatStateOf(2f)
     val strokes = mutableStateListOf<Pair<Int, List<Offset>>>()   // (página, pontos em frações da largura)
     var busy by mutableStateOf(false)
+    var signatures by mutableStateOf<List<SigInfo>>(emptyList())
     /** últimas imagens exibidas por página (marcador enquanto a nova renderização não fica pronta) */
     val lastBitmaps = android.util.LruCache<Int, androidx.compose.ui.graphics.ImageBitmap>(10)
 }
@@ -205,7 +206,61 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             }
         }.getOrDefault(emptyList())
         d.fields = list.filter { it.page < d.pageCount }.map { it to engine.fracOf(d.pdf, it.page, it.rect) }
+        d.signatures = if (list.any { it.kind == FormField.Kind.SIGNATURE && it.value.isNotEmpty() }) runCatching {
+            withContext(Dispatchers.IO) {
+                val bytes = d.work?.readBytes() ?: app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { it.readBytes() }
+                PdfSigner.validate(bytes)
+            }
+        }.getOrDefault(emptyList()) else emptyList()
     }
+
+    /** Assina com certificado digital (gravação incremental) e abre a versão assinada. */
+    fun signWithCert(d: ViewerDoc, cert: suspend () -> SigningCert, page: Int, rect: android.graphics.RectF, field: String?,
+                     reason: String, location: String, tsa: Boolean) = viewModelScope.launch {
+        if (d.busy) return@launch
+        d.busy = true
+        try {
+            val app = getApplication<Application>()
+            val sc = withContext(Dispatchers.IO) { cert() }
+            val src = d.work ?: withContext(Dispatchers.IO) {
+                val dir = editDir(d).apply { deleteRecursively(); mkdirs() }
+                File(dir, "v0.pdf").also { f ->
+                    app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { i -> f.outputStream().use { i.copyTo(it) } }
+                }
+            }
+            val res = withContext(Dispatchers.IO) { PdfSigner.sign(src, d.password, sc, page, rect, field, reason, location, tsa) }
+            d.version++
+            val dst = File(src.parentFile, "v${d.version}.pdf")
+            withContext(Dispatchers.IO) { dst.writeBytes(res.bytes) }
+            d.undo.addLast(src)
+            d.redo.clear()
+            d.work = dst
+            d.dirty = true
+            reopen(d, dst)
+            d.tool = Tool.NONE
+            toast = "Assinado por ${Certs.splitName(sc.subject).first}" +
+                (if (res.timestamp) " com carimbo de tempo" else "") + ". Toque em Salvar ou Compartilhar." +
+                (res.problem?.let { "\n($it)" } ?: "")
+        } catch (e: Exception) {
+            val msg = e.message ?: e.javaClass.simpleName
+            error = if (msg.contains("password", true) || msg.contains("mac", true) || msg.contains("pad block", true))
+                "Senha do certificado incorreta." else "Não foi possível assinar.\n$msg"
+        } finally {
+            d.busy = false
+            d.canUndo = d.undo.isNotEmpty()
+            d.canRedo = d.redo.isNotEmpty()
+        }
+    }
+
+    /** Copia um .pfx/.p12 escolhido para a pasta do app (para reutilizar sem procurar de novo). */
+    fun importPfx(u: Uri): File? = runCatching {
+        val app = getApplication<Application>()
+        val name = displayName(app, u)
+        val dir = File(app.filesDir, "certificados").apply { mkdirs() }
+        val f = File(dir, name)
+        app.contentResolver.openInputStream(u)!!.use { i -> f.outputStream().use { i.copyTo(it) } }
+        f
+    }.getOrNull()
 
     /** Grava a versão editada no arquivo original. Devolve false se o local não aceita gravação. */
     fun save(d: ViewerDoc, onNeedSaveAs: () -> Unit) = viewModelScope.launch {
