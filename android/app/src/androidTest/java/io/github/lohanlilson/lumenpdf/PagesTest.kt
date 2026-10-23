@@ -31,7 +31,7 @@ class PagesTest {
     }
 
     private fun order(f: File): List<String> = PDDocument.load(f).use { d ->
-        (1..d.numberOfPages).map { i -> PDFTextStripper().apply { startPage = i; endPage = i }.getText(d).trim() }
+        (1..d.numberOfPages).map { i -> PDFTextStripper().apply { startPage = i; endPage = i }.getText(d).replace(Regex("\\s"), "") }
     }
 
     @Test

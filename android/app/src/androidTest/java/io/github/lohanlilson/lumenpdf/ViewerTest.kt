@@ -167,7 +167,11 @@ class ViewerTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Salvar").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("Marcar ✓").performClick()
             compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.85f, height * 0.25f)) }
+            // o toque simples espera o tempo do toque duplo: avança o relógio da interface do teste
+            compose.mainClock.advanceTimeBy(1000)
+            compose.waitForIdle()
             Thread.sleep(6000)
+            compose.waitForIdle()
             shot("07_editado")
             compose.onNodeWithContentDescription("Salvar").performClick()
             compose.onNodeWithText("Salvar").performClick()
