@@ -2,6 +2,9 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.3.3
+- Novo ícone dos arquivos PDF: folha branca com o símbolo completo do Prisma e a etiqueta “PDF”.
+
 ## 1.3.2
 - Ícone do Prisma sem o brilho dourado (mais limpo), no programa e nos arquivos PDF.
 

@@ -142,11 +142,37 @@ def app_icon(s=S):
     return img
 
 
+def prism_symbol(s, cx, cy, scale, page_bg=(255, 255, 255)):
+    """O símbolo completo (feixe + prisma + leque de luz) desenhado direto sobre a folha, sem o quadrado de fundo."""
+    u = s / 1024 * scale
+    ox, oy = cx - 512 * u, cy - 512 * u
+    P = lambda *pts: [(ox + x * u, oy + y * u) for x, y in pts]  # noqa: E731
+    layer = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    beam = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(beam).line(P((60, 660), (430, 560)), fill=255, width=max(2, int(30 * u)))
+    _put(layer, beam, (109, 60, 240, 255))
+    apex = (ox + 600 * u, oy + 520 * u)
+    for (ex, ey), c in zip([(980, 380), (980, 520), (980, 660)],
+                           [(170, 140, 255, 255), (109, 60, 240, 255), (255, 176, 70, 255)]):
+        ex, ey = ox + ex * u, oy + ey * u
+        ang = math.atan2(ey - apex[1], ex - apex[0]) + math.pi / 2
+        dx, dy = math.cos(ang) * 40 * u, math.sin(ang) * 40 * u
+        m = Image.new("L", (s, s), 0)
+        ImageDraw.Draw(m).polygon([apex, (ex - dx, ey - dy), (ex + dx, ey + dy)], fill=255)
+        _put(layer, m, c)
+    tri = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(tri).polygon(P((500, 250), (730, 690), (270, 690)), fill=255)
+    tri = tri.filter(ImageFilter.GaussianBlur(26 * u)).point(lambda v: 255 if v > 150 else 0)
+    tri = tri.filter(ImageFilter.GaussianBlur(max(1, 2 * u)))
+    _put(layer, tri, linear((s, s), [(0, (124, 72, 250)), (1, (66, 28, 168))], 100).convert("RGBA"))
+    return layer
+
+
 def doc_icon(s=S):
-    """Ícone dos arquivos .pdf: folha branca moderna com o selo da marca (estilo dos leitores profissionais)."""
+    """Ícone dos arquivos .pdf (como o do Adobe): folha branca com o símbolo completo da marca e a etiqueta PDF."""
     u = s / 1024
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    x0, y0, x1, y1, f, r = 196 * u, 64 * u, 828 * u, 960 * u, 220 * u, 46 * u
+    x0, y0, x1, y1, f, r = 176 * u, 48 * u, 848 * u, 976 * u, 230 * u, 50 * u
     pm = page_mask((s, s), x0, y0, x1, y1, f, r)
     sh = Image.new("L", (s, s), 0)
     sh.paste(pm, (int(6 * u), int(18 * u)))
@@ -157,7 +183,7 @@ def doc_icon(s=S):
     img.paste(Image.new("RGBA", (s, s), (206, 202, 222, 255)), (0, 0), edge)
     img.paste(Image.new("RGBA", (s, s), (255, 255, 255, 255)), (0, 0), pm)
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([x1 - f, y0, x1, y0 + f], radius=34 * u, fill=(234, 229, 248, 255),
+    d.rounded_rectangle([x1 - f, y0, x1, y0 + f], radius=36 * u, fill=(236, 230, 252, 255),
                         outline=(206, 202, 222, 255), width=int(8 * u))
     corner = Image.new("L", (s, s), 0)
     ImageDraw.Draw(corner).polygon([(x1 - f + 6 * u, y0 - 6 * u), (x1 + 6 * u, y0 + f - 6 * u), (x1 + 6 * u, y0 - 6 * u)],
@@ -165,14 +191,26 @@ def doc_icon(s=S):
     img.paste(Image.new("RGBA", (s, s), (0, 0, 0, 0)), (0, 0), corner)
     d = ImageDraw.Draw(img)
     d.line([(x1 - f, y0 + 3 * u), (x1 - 3 * u, y0 + f)], fill=(206, 202, 222, 255), width=int(8 * u))
-    # linhas de texto
-    for k, w in enumerate((420, 470, 470, 330)):
-        yy = 300 * u + k * 72 * u
-        d.rounded_rectangle([x0 + 84 * u, yy, x0 + (84 + w) * u, yy + 30 * u], radius=15 * u,
-                            fill=(224, 221, 236, 255))
-    # selo da marca, sobressaindo da borda esquerda
-    badge = app_icon(s).resize((int(560 * u), int(560 * u)), Image.LANCZOS)
-    img.alpha_composite(badge, (int(70 * u), int(420 * u)))
+    # símbolo completo no centro da folha
+    sym = prism_symbol(s, 512 * u, 500 * u, 0.62)
+    m = ImageChops.multiply(sym.getchannel("A"), pm)
+    sym.putalpha(m)
+    img.alpha_composite(sym)
+    # etiqueta PDF
+    try:
+        from PIL import ImageFont
+        fnt = None
+        for fp in ("C:/Windows/Fonts/segoeuib.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
+            try:
+                fnt = ImageFont.truetype(fp, int(118 * u))
+                break
+            except OSError:
+                pass
+        if fnt:
+            d = ImageDraw.Draw(img)
+            d.text((512 * u, 820 * u), "PDF", font=fnt, fill=(80, 40, 190, 255), anchor="mm")
+    except Exception:
+        pass
     return img
 
 
