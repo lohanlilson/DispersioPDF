@@ -172,7 +172,13 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
 
     LaunchedEffect(d) {
         if (d.startPage > 0) list.scrollToItem(d.startPage)
-        snapshotFlow { list.firstVisibleItemIndex }.distinctUntilChanged().collect { d.page = it }
+        // página atual = a que ocupa o meio da tela
+        snapshotFlow {
+            val info = list.layoutInfo
+            val mid = (info.viewportStartOffset + info.viewportEndOffset) / 2
+            info.visibleItemsInfo.firstOrNull { mid >= it.offset && mid <= it.offset + it.size + 40 }?.index
+                ?: list.firstVisibleItemIndex
+        }.distinctUntilChanged().collect { d.page = it }
     }
 
     fun goToHit(i: Int) {

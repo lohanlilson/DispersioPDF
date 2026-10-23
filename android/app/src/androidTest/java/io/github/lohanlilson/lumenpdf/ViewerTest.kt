@@ -11,6 +11,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -18,6 +19,11 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.geometry.Offset
+import com.tom_roush.pdfbox.pdmodel.PDDocument
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -61,6 +67,11 @@ class ViewerTest {
     }
 
     private fun shot(name: String) {
+        // fecha avisos do próprio emulador ("Pixel Launcher isn't responding") que cobrem a tela
+        runCatching {
+            InstrumentationRegistry.getInstrumentation().uiAutomation
+                .executeShellCommand("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS").close()
+        }
         Thread.sleep(700)
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         val bmp: Bitmap = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot() ?: return
@@ -132,6 +143,40 @@ class ViewerTest {
         ActivityScenario.launch<MainActivity>(Intent(ctx, MainActivity::class.java)).use {
             compose.waitUntil(10_000) { compose.onAllNodesWithText("teste.pdf").fetchSemanticsNodes().isNotEmpty() }
             shot("04_recentes")
+        }
+    }
+
+    /** Edição: destacar texto, marcar ✓ e salvar; confere o arquivo gravado. */
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun editarESalvar() {
+        val f = makePdf()
+        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.fromFile(f), "application/pdf")
+            .setClass(ctx, MainActivity::class.java)
+        ActivityScenario.launch<MainActivity>(intent).use {
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("1 / 3").fetchSemanticsNodes().isNotEmpty() }
+            Thread.sleep(1500)
+            compose.onNodeWithContentDescription("Editar").performClick()
+            // toca e segura sobre o título da página 1 (y = 80 de 842 pontos)
+            compose.onNodeWithContentDescription("Página 1").performTouchInput {
+                longClick(Offset(width * 0.22f, height * 72f / 842f))
+            }
+            compose.waitUntil(8_000) { compose.onAllNodesWithContentDescription("Destacar").fetchSemanticsNodes().isNotEmpty() }
+            shot("06_selecao")
+            compose.onNodeWithContentDescription("Destacar").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Salvar").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithContentDescription("Marcar ✓").performClick()
+            compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.85f, height * 0.25f)) }
+            Thread.sleep(3000)
+            shot("07_editado")
+            compose.onNodeWithContentDescription("Salvar").performClick()
+            compose.onNodeWithText("Salvar").performClick()
+            Thread.sleep(2500)
+        }
+        PDDocument.load(f).use { doc ->
+            val annots = doc.getPage(0).annotations.map { it.subtype }
+            Log.i("LumenTest", "anotações na página 1: $annots")
+            assertTrue("destaque não foi gravado: $annots", "Highlight" in annots)
         }
     }
 }
