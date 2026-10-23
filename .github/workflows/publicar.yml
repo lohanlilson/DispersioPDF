@@ -82,6 +82,30 @@ jobs:
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { Write-Error "Autoteste do executável falhou"; exit 1 }
 
+      - name: Teste de atualização (instala a versão anterior e aplica o patch)
+        if: steps.versao.outputs.publicar == 'sim' && env.ANTERIOR != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh release download "v$env:ANTERIOR" -p "LumenPDF-Setup-$env:ANTERIOR.exe" -D anterior
+          $p = Start-Process "anterior\LumenPDF-Setup-$env:ANTERIOR.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS="assocpdf"' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Falha ao instalar a versão anterior ($($p.ExitCode))" }
+          Start-Sleep 5; Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 2
+          $patch = "Saida\LumenPDF-Atualizacao-$env:ANTERIOR-para-$env:VERSAO.exe"
+          $p = Start-Process $patch -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "O patch falhou (código $($p.ExitCode))" }
+          Start-Sleep 5; Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force
+          $key = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{792033AC-5BB3-4C63-8E0C-D8EFE3BA162C}_is1"
+          $v = (Get-ItemProperty $key).DisplayVersion
+          Write-Host "Versão instalada após o patch: $v"
+          if ($v -ne $env:VERSAO) { throw "Versão esperada $env:VERSAO, encontrada $v" }
+          $exe = Join-Path (Get-ItemProperty $key).InstallLocation "LumenPDF.exe"
+          $p = Start-Process $exe -ArgumentList "--selftest","selftest-instalado.txt" -Wait -PassThru
+          Get-Content selftest-instalado.txt
+          if ($p.ExitCode -ne 0) { throw "Autoteste do programa atualizado falhou" }
+
       - name: Publicar Release
         if: steps.versao.outputs.publicar == 'sim'
         shell: bash

@@ -60,13 +60,12 @@ Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilen
 
 [Code]
 function InstalledVersion(): String;
-var
-  Key: String;
 begin
+  { procura nas visões 64 e 32 bits do registro e na instalação por usuário }
   Result := '';
-  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#AppIdGuid}_is1';
-  if not RegQueryStringValue(HKLM, Key, 'DisplayVersion', Result) then
-    RegQueryStringValue(HKCU, Key, 'DisplayVersion', Result);
+  if not RegQueryStringValue(HKLM64, '{#AppUninstKey}', 'DisplayVersion', Result) then
+    if not RegQueryStringValue(HKLM32, '{#AppUninstKey}', 'DisplayVersion', Result) then
+      RegQueryStringValue(HKCU, '{#AppUninstKey}', 'DisplayVersion', Result);
 end;
 
 function InitializeSetup(): Boolean;

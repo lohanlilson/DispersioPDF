@@ -7,7 +7,10 @@
 #ifndef AppEmail
   #define AppEmail "lohanlilson@gmail.com"
 #endif
-#define AppIdGuid    "{{792033AC-5BB3-4C63-8E0C-D8EFE3BA162C}"
+#define AppGuid      "792033AC-5BB3-4C63-8E0C-D8EFE3BA162C"
+; "{{" é o escape do Inno para "{" nas seções [Setup]; no [Code] usar AppUninstKey
+#define AppIdGuid    "{{" + AppGuid + "}"
+#define AppUninstKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\{" + AppGuid + "}_is1"
 #define ProgId       "LumenPDF.Document"
 #ifndef AppVersion
   #define AppVersion "1.0.0"

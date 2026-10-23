@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.0.6
+- Corrigido o patch de atualização, que não encontrava o programa instalado.
+- Cada versão agora é testada instalando a anterior e aplicando o patch antes de ser publicada.
+
 ## 1.0.5
 - A pergunta para tornar o Lumen PDF o leitor padrão aparece só uma vez (continua disponível em Ajuda).
 - Reconhece corretamente quando o Lumen PDF já é o padrão (inclusive escolhido pelo "Abrir com").
