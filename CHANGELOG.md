@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.4.4
+
+- **Correção importante:** assinar um documento que já tinha assinatura fazia a assinatura anterior aparecer como inválida. Agora cada nova assinatura é adicionada como revisão incremental, e todas as assinaturas continuam válidas.
+
 ## 1.4.3
 
 - **Rolagem automática com o botão do meio do mouse:** clique com a rodinha e mova o mouse para cima ou para baixo. Quanto mais longe do ponto de origem, mais rápido o documento rola. Qualquer clique, a tecla Esc ou girar a roda encerram a rolagem.

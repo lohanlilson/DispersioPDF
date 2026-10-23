@@ -40,7 +40,17 @@ def run(log_path=None):
         out = signing.sign_pdf_bytes(data, signer, 0, (300, 600, 540, 680), 842, "Teste", "Goiânia")
         res = signing.validate(out)
         assert res and res[0]["intact"] and res[0]["valid"], res
-        print_("assinatura ok")
+        # segunda assinatura (outro certificado) não pode invalidar a primeira
+        k2 = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        n2 = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "SEGUNDO CI")])
+        c2 = (x509.CertificateBuilder().subject_name(n2).issuer_name(n2).public_key(k2.public_key()).serial_number(2)
+              .not_valid_before(datetime.datetime(2025, 1, 1)).not_valid_after(datetime.datetime(2035, 1, 1)).sign(k2, hashes.SHA256()))
+        pfx2 = os.path.join(tmp, "t2.pfx")
+        open(pfx2, "wb").write(pkcs12.serialize_key_and_certificates(b"t2", k2, c2, None, serialization.BestAvailableEncryption(b"1")))
+        out2 = signing.sign_pdf_bytes(out, signing.load_pfx(pfx2, "1"), 0, (50, 600, 290, 680), 842, "Teste 2", "")
+        res2 = signing.validate(out2)
+        assert len(res2) == 2 and all(r["intact"] and r["valid"] for r in res2), res2
+        print_("assinatura ok (duas assinaturas válidas)")
 
         # conversões e operações
         ops.to_docx(data, os.path.join(tmp, "x.docx"))

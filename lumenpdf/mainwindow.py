@@ -794,7 +794,17 @@ class MainWindow(QMainWindow):
             return
         pg = tab.doc[page]
         unrot = ops.to_unrot(pg, rect)
-        data = tab.doc.tobytes(garbage=3, deflate=True)
+        # Assina sempre como revisão incremental sobre os bytes exatos do arquivo: regravar o PDF
+        # (tobytes) reorganiza os objetos e invalida as assinaturas que já existem nele.
+        if tab.has_signatures or not tab.modified:
+            if tab.modified and QMessageBox.question(
+                    self, APP, "Este documento já tem assinatura e possui alterações não salvas.\n\n"
+                               "Para manter as assinaturas anteriores válidas, a nova assinatura será aplicada sobre a "
+                               "versão salva do arquivo, sem essas alterações. Continuar?") != QMessageBox.Yes:
+                return
+            data = tab.original_bytes
+        else:
+            data = tab.doc.tobytes(garbage=3, deflate=True)
         tsa_url, ltv = d.tsa_url(), d.use_ltv.isChecked()
         self.settings.setValue("sign_tsa", "true" if d.use_tsa.isChecked() else "false")
         if tsa_url:
