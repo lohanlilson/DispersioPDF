@@ -164,6 +164,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var nameDialog by remember { mutableStateOf(false) }
     var certSign by remember { mutableStateOf<Triple<Int, android.graphics.RectF, String?>?>(null) }  // página, área (PDF), campo
     var sigSheet by remember { mutableStateOf(false) }
+    var organize by remember { mutableStateOf(false) }
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { u ->
         if (u != null) vm.saveAs(d, u)
     }
@@ -233,6 +234,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     DropdownMenuItem(text = { Text(if (d.night) "Modo claro" else "Modo noturno") },
                                         leadingIcon = { Icon(Icons.Filled.DarkMode, null) },
                                         onClick = { menu = false; d.night = !d.night })
+                                    DropdownMenuItem(text = { Text("Organizar páginas…") }, onClick = { menu = false; organize = true })
                                     DropdownMenuItem(text = { Text("Ir para a página…") }, onClick = { menu = false; gotoDialog = true })
                                     DropdownMenuItem(text = { Text("Salvar uma cópia…") }, onClick = { menu = false; saveAs.launch(d.name) })
                                     DropdownMenuItem(text = { Text("Seu nome nos comentários…") }, onClick = { menu = false; nameDialog = true })
@@ -428,6 +430,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
         }
     }
     if (sigSheet) SignaturesSheet(d) { sigSheet = false }
+    if (organize) OrganizeScreen(vm, d) { organize = false }
     if (nameDialog) TextInputDialog("Seu nome", "Aparece como autor dos comentários", vm.authorName(), multiline = false,
         onDismiss = { nameDialog = false }) { n, _ -> nameDialog = false; vm.setAuthorName(n) }
     if (vm.confirmClose) AlertDialog(

@@ -283,4 +283,78 @@ object Editor {
         }
         return out
     }
+
+    // ------------------------------------------------------------ páginas (alteram a estrutura: gravação completa)
+    /** Abre, aplica e grava o documento inteiro (mudanças de páginas). */
+    fun applyFull(src: File, dst: File, password: String?, block: (PDDocument, MutableList<PDDocument>) -> Unit) {
+        val keep = mutableListOf<PDDocument>()   // documentos de origem: ficam abertos até gravar
+        try {
+            PDDocument.load(src, password ?: "").use { doc ->
+                block(doc, keep)
+                dst.outputStream().buffered().use { doc.save(it) }
+            }
+        } finally {
+            keep.forEach { runCatching { it.close() } }
+        }
+    }
+
+    fun isSigned(src: File, password: String?): Boolean =
+        runCatching { PDDocument.load(src, password ?: "").use { signed(it) } }.getOrDefault(false)
+
+    fun rotate(doc: PDDocument, pages: Collection<Int>, angle: Int) {
+        for (i in pages) doc.getPage(i).let { it.rotation = ((it.rotation + angle) % 360 + 360) % 360 }
+    }
+
+    fun delete(doc: PDDocument, pages: Collection<Int>) {
+        for (i in pages.sortedDescending()) doc.removePage(i)
+    }
+
+    /** Reordena: order[k] = índice antigo da página que fica na posição k. */
+    fun reorder(doc: PDDocument, order: List<Int>) {
+        val pages = (0 until doc.numberOfPages).map { doc.getPage(it) }
+        for (p in pages) doc.pages.remove(p)
+        for (i in order) doc.pages.add(pages[i])
+    }
+
+    /** Insere as páginas de outro PDF na posição [at]. */
+    fun insertPdf(doc: PDDocument, other: File, at: Int, keep: MutableList<PDDocument>) {
+        val o = PDDocument.load(other)
+        keep += o
+        val total = doc.numberOfPages
+        val added = (0 until o.numberOfPages).map { doc.importPage(o.getPage(it)) }
+        val order = (0 until total).toMutableList()
+        order.addAll(at.coerceIn(0, total), (total until total + added.size).toList())
+        reorder(doc, order)
+    }
+
+    fun insertBlank(doc: PDDocument, at: Int) {
+        val ref = doc.getPage((at - 1).coerceAtLeast(0).coerceAtMost(doc.numberOfPages - 1))
+        val page = PDPage(ref.mediaBox)
+        doc.addPage(page)
+        val total = doc.numberOfPages
+        val order = (0 until total - 1).toMutableList()
+        order.add(at.coerceIn(0, total - 1), total - 1)
+        reorder(doc, order)
+    }
+
+    fun extract(src: File, password: String?, pages: List<Int>, dst: File) {
+        PDDocument.load(src, password ?: "").use { doc ->
+            PDDocument().use { out ->
+                for (i in pages) out.importPage(doc.getPage(i))
+                dst.outputStream().buffered().use { out.save(it) }
+            }
+        }
+    }
+
+    fun merge(files: List<File>, dst: File) {
+        PDDocument().use { out ->
+            val opened = files.map { PDDocument.load(it) }
+            try {
+                for (d in opened) for (i in 0 until d.numberOfPages) out.importPage(d.getPage(i))
+                dst.outputStream().buffered().use { out.save(it) }
+            } finally {
+                opened.forEach { it.close() }
+            }
+        }
+    }
 }

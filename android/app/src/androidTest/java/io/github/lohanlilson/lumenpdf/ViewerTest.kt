@@ -173,6 +173,7 @@ class ViewerTest {
             compose.onNodeWithText("Salvar").performClick()
             Thread.sleep(2500)
         }
+        f.copyTo(File(File(ctx.getExternalFilesDir(null), "capturas"), "editado.pdf"), overwrite = true)
         PDDocument.load(f).use { doc ->
             val annots = doc.getPage(0).annotations.map { it.subtype }
             Log.i("LumenTest", "anotações na página 1: $annots")

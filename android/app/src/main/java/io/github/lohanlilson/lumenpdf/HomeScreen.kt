@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Card
@@ -88,6 +90,7 @@ fun HomeScreen(vm: AppVm) {
             contentPadding = PaddingValues(bottom = 96.dp),
         ) {
             item { Hero() }
+            item { QuickActions(vm) }
             item {
                 Text("Recentes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 8.dp))
@@ -156,6 +159,32 @@ private fun RecentRow(vm: AppVm, r: RecentDoc) {
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem(text = { Text("Remover dos recentes") }, onClick = { menu = false; vm.removeRecent(r) })
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickActions(vm: AppVm) {
+    val merge = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { list: List<Uri> ->
+        if (list.size >= 2) vm.mergeAndOpen(list) else if (list.size == 1) vm.open(list[0], fromPicker = true)
+    }
+    val scan = rememberScanner { vm.openScanned(it) }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        ActionCard(Icons.Filled.DocumentScanner, "Escanear", "Câmera → PDF", Modifier.weight(1f)) { scan() }
+        ActionCard(Icons.Filled.MergeType, "Juntar PDFs", "Vários em um", Modifier.weight(1f)) { merge.launch(arrayOf("application/pdf")) }
+    }
+}
+
+@Composable
+private fun ActionCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, sub: String, modifier: Modifier, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

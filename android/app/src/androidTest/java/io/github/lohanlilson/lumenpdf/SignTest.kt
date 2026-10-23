@@ -84,6 +84,7 @@ class SignTest {
             val bmp = engine.render(pdf, 0, 1000)
             val dir = File(ctx.getExternalFilesDir(null), "capturas").apply { mkdirs() }
             File(dir, "08_assinado.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            f3.copyTo(File(dir, "assinado.pdf"), overwrite = true)
             engine.close(pdf)
         }
     }

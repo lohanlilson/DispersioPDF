@@ -58,6 +58,8 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
 data class PendingPassword(val uri: Uri, val name: String, val wrong: Boolean)
 
 class AppVm(app: Application) : AndroidViewModel(app) {
+    /** edições em fila: um toque durante outra edição espera a vez em vez de ser descartado */
+    private val editLock = kotlinx.coroutines.sync.Mutex()
     private val lumen = app as LumenApp
     val engine get() = lumen.engine
     val recents get() = lumen.recents
@@ -136,7 +138,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     /** Aplica uma edição (PDFBox) e reabre a nova versão no visualizador. */
     fun edit(d: ViewerDoc, what: String, block: (PDDocument) -> Collection<COSDictionary>) = viewModelScope.launch {
-        if (d.busy) return@launch
+        editLock.lock()
         d.busy = true
         try {
             val app = getApplication<Application>()
@@ -163,6 +165,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             d.busy = false
             d.canUndo = d.undo.isNotEmpty()
             d.canRedo = d.redo.isNotEmpty()
+            editLock.unlock()
         }
     }
 
@@ -217,7 +220,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     /** Assina com certificado digital (gravação incremental) e abre a versão assinada. */
     fun signWithCert(d: ViewerDoc, cert: suspend () -> SigningCert, page: Int, rect: android.graphics.RectF, field: String?,
                      reason: String, location: String, tsa: Boolean) = viewModelScope.launch {
-        if (d.busy) return@launch
+        editLock.lock()
         d.busy = true
         try {
             val app = getApplication<Application>()
@@ -249,6 +252,92 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             d.busy = false
             d.canUndo = d.undo.isNotEmpty()
             d.canRedo = d.redo.isNotEmpty()
+            editLock.unlock()
+        }
+    }
+
+    /** Operação de páginas (gravação completa). Em documento assinado, confirma antes (invalida as assinaturas). */
+    fun pages(d: ViewerDoc, what: String, block: (PDDocument, MutableList<PDDocument>) -> Unit) = viewModelScope.launch {
+        editLock.lock()
+        d.busy = true
+        try {
+            val app = getApplication<Application>()
+            val src = d.work ?: withContext(Dispatchers.IO) {
+                val dir = editDir(d).apply { deleteRecursively(); mkdirs() }
+                File(dir, "v0.pdf").also { f ->
+                    app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { i -> f.outputStream().use { i.copyTo(it) } }
+                }
+            }
+            d.version++
+            val dst = File(src.parentFile, "v${d.version}.pdf")
+            withContext(Dispatchers.IO) { Editor.applyFull(src, dst, d.password, block) }
+            d.undo.addLast(src)
+            d.redo.clear()
+            d.work = dst
+            d.dirty = true
+            d.lastBitmaps.evictAll()
+            reopen(d, dst)
+        } catch (e: Exception) {
+            error = "Não foi possível $what.\n${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            d.busy = false
+            d.canUndo = d.undo.isNotEmpty()
+            d.canRedo = d.redo.isNotEmpty()
+            editLock.unlock()
+        }
+    }
+
+    /** Salva as páginas escolhidas num PDF novo (pasta do app) e devolve o arquivo. */
+    suspend fun extract(d: ViewerDoc, pages: List<Int>): File = withContext(Dispatchers.IO) {
+        val app = getApplication<Application>()
+        val src = d.work ?: File(app.cacheDir, "extrair-origem.pdf").also { f ->
+            app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { i -> f.outputStream().use { i.copyTo(it) } }
+        }
+        val base = d.name.removeSuffix(".pdf").removeSuffix(".PDF")
+        val out = File(File(app.filesDir, "recebidos").apply { mkdirs() }, "${base}_paginas.pdf")
+        Editor.extract(src, d.password, pages, out)
+        out
+    }
+
+    /** Copia um arquivo escolhido (content://) para o cache e devolve o caminho. */
+    suspend fun cacheCopy(u: Uri, name: String = "inserir.pdf"): File = withContext(Dispatchers.IO) {
+        val f = File(getApplication<Application>().cacheDir, name)
+        getApplication<Application>().contentResolver.openInputStream(u)!!.use { i -> f.outputStream().use { i.copyTo(it) } }
+        f
+    }
+
+    /** Junta vários PDFs num novo arquivo e abre. */
+    fun mergeAndOpen(uris: List<Uri>) = viewModelScope.launch {
+        loading = true
+        try {
+            val app = getApplication<Application>()
+            val files = uris.mapIndexed { i, u -> cacheCopy(u, "juntar_$i.pdf") }
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmm", java.util.Locale.US).format(java.util.Date())
+            val out = File(File(app.filesDir, "recebidos").apply { mkdirs() }, "Combinado_$stamp.pdf")
+            withContext(Dispatchers.IO) { Editor.merge(files, out) }
+            openPrepared(Uri.fromFile(out), out.name, null)
+        } catch (e: Exception) {
+            error = "Não foi possível juntar os arquivos.\n${e.message ?: ""}"
+        } finally {
+            loading = false
+        }
+    }
+
+    /** PDF gerado pelo scanner: guarda na pasta do app e abre. */
+    fun openScanned(u: Uri) = viewModelScope.launch {
+        loading = true
+        try {
+            val app = getApplication<Application>()
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmm", java.util.Locale.US).format(java.util.Date())
+            val out = File(File(app.filesDir, "recebidos").apply { mkdirs() }, "Digitalizacao_$stamp.pdf")
+            withContext(Dispatchers.IO) {
+                app.contentResolver.openInputStream(u)!!.use { i -> out.outputStream().use { i.copyTo(it) } }
+            }
+            openPrepared(Uri.fromFile(out), out.name, null)
+        } catch (e: Exception) {
+            error = "Não foi possível abrir a digitalização.\n${e.message ?: ""}"
+        } finally {
+            loading = false
         }
     }
 
