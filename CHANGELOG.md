@@ -2,7 +2,11 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
-## 1.0.6
+## 1.0.7
+- Verifica atualizações sozinho toda vez que o programa abre (e a cada 4 horas aberto).
+- Abre sempre maximizado.
+- Pode ser encaixado em meia tela no Windows: a tela se adapta escondendo o painel de ferramentas
+  (disponível pelo menu ☰) e reorganizando a tela Início.
 - Corrigido o patch de atualização, que não encontrava o programa instalado.
 - Cada versão agora é testada instalando a anterior e aplicando o patch antes de ser publicada.
 
