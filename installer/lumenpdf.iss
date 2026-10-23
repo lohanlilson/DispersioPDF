@@ -32,6 +32,8 @@ PrivilegesRequired=admin
 DisableDirPage=no
 ChangesAssociations=yes
 CloseApplications=yes
+; só fecha o próprio programa (nunca o Explorador, que pode estar usando a LumenShell.dll)
+CloseApplicationsFilter=*.exe
 RestartApplications=no
 AppMutex=LumenPDF_Running
 MinVersion=10.0
@@ -44,7 +46,9 @@ Name: "desktopicon"; Description: "Criar atalho na Área de Trabalho"; GroupDesc
 Name: "assocpdf"; Description: "Registrar o Lumen PDF para abrir arquivos .pdf"; GroupDescription: "Integração com o Windows:"
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "LumenShell.dll"; Flags: ignoreversion recursesubdirs createallsubdirs
+; a DLL pode estar em uso pelo Explorador: se estiver, é substituída na próxima reinicialização
+Source: "{#SourceDir}\LumenShell.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete skipifsourcedoesntexist
 Source: "..\assets\pdfdoc.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
@@ -58,6 +62,7 @@ Root: HKA; Subkey: "Software\LumenPDF"; ValueType: string; ValueName: "Version";
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#AppExe}"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe}"; Flags: uninsdeletekey
 #define AssocCond "Tasks: assocpdf"
 #include "assoc.iss"
+#include "shellext.iss"
 
 [Run]
 Filename: "{app}\{#AppExe}"; Parameters: "--set-default"; Description: "Definir o Lumen PDF como leitor de PDF padrão"; Flags: nowait postinstall skipifsilent; Tasks: assocpdf
@@ -69,3 +74,10 @@ Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait; St
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\_internal"
+
+[Code]
+function ShellExtPresent(): Boolean;
+begin
+  { a LumenShell.dll só existe quando o build tinha o compilador C++ }
+  Result := FileExists(ExpandConstant('{app}\LumenShell.dll'));
+end;

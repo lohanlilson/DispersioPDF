@@ -568,7 +568,8 @@ class MainWindow(QMainWindow):
         <tr><td><b>V / H</b></td><td>Selecionar / Mão</td><td><b>Ctrl+Shift+H</b></td><td>Destacar</td></tr>
         <tr><td><b>Ctrl+E</b></td><td>Editar texto</td><td><b>Ctrl+H</b></td><td>Modo de leitura</td></tr>
         <tr><td><b>F4</b></td><td>Miniaturas</td><td><b>Delete</b></td><td>Excluir comentário selecionado</td></tr>
-        <tr><td><b>Esc</b></td><td>Voltar à seleção</td><td><b>F11</b></td><td>Tela cheia</td></tr></table>"""
+        <tr><td><b>Esc</b></td><td>Voltar à seleção</td><td><b>F11</b></td><td>Tela cheia</td></tr>
+        <tr><td><b>Ctrl+\\</b></td><td>Dividir tela</td><td><b>Botão do meio</b></td><td>Rolagem automática</td></tr></table>"""
         dialogs.HtmlDialog(self, "Atalhos", html).exec()
 
     def about(self):

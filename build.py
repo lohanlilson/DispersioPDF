@@ -77,6 +77,41 @@ def pyinstaller(ver):
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
+def shellext():
+    """Compila a LumenShell.dll (miniaturas e painel de visualização do Explorador) e copia para dist.
+    Precisa do Visual Studio Build Tools (C++). Sem ele, o programa é gerado sem essa integração."""
+    if os.name != "nt":
+        return
+    step("Compilando a extensão do Explorador (miniaturas e visualização de PDF)")
+    bat = os.path.join(ROOT, "shellext", "build.bat")
+    if shutil.which("cl"):
+        cmd = f'"{bat}"'
+    else:
+        vswhere = os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                               "Microsoft Visual Studio", "Installer", "vswhere.exe")
+        vs = ""
+        if os.path.exists(vswhere):
+            vs = subprocess.run([vswhere, "-latest", "-products", "*", "-requires",
+                                 "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"],
+                                capture_output=True, text=True).stdout.strip()
+        vcvars = os.path.join(vs, "VC", "Auxiliary", "Build", "vcvars64.bat") if vs else ""
+        if not vcvars or not os.path.exists(vcvars):
+            msg = "Visual Studio Build Tools (C++) não encontrado — sem miniaturas de PDF no Explorador."
+            if os.environ.get("LUMEN_REQUIRE_SHELLEXT"):
+                sys.exit("ERRO: " + msg)
+            print("AVISO: " + msg)
+            return
+        cmd = f'call "{vcvars}" >nul && "{bat}"'
+    r = subprocess.run(cmd, shell=True, cwd=ROOT)
+    dll = os.path.join(BUILD, "shellext", "LumenShell.dll")
+    if r.returncode != 0 or not os.path.exists(dll):
+        if os.environ.get("LUMEN_REQUIRE_SHELLEXT"):
+            sys.exit("ERRO: falha ao compilar a LumenShell.dll")
+        print("AVISO: falha ao compilar a extensão do Explorador — gerado sem ela.")
+        return
+    shutil.copy2(dll, os.path.join(DIST, "LumenShell.dll"))
+
+
 def manifest(folder):
     out = {}
     for base, _, files in os.walk(folder):
@@ -211,6 +246,7 @@ def main():
     if os.path.isdir(saida):
         shutil.rmtree(saida)
     pyinstaller(ver)
+    shellext()
     snapshot(ver)
     if not a.sem_instalador:
         step("Gerando instalador")

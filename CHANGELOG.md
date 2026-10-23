@@ -2,6 +2,16 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.5.0
+
+- **Comparar documentos:** as duas versões aparecem lado a lado, com o texto removido em vermelho e o inserido em verde. Há uma lista de alterações para navegar (F3), rolagem sincronizada e relatório para salvar. Fica em Ferramentas › Mais ferramentas › Comparar arquivos.
+- **O que mudou depois de cada assinatura:** no painel de assinaturas e na validação de cada uma, o botão "O que mudou depois desta assinatura" compara a versão assinada com a atual. Também mostra os comentários, campos preenchidos e assinaturas feitos depois.
+- **Dividir tela (Ctrl+\\):** veja duas partes do mesmo documento ou outro PDF aberto ao lado, ou acima e abaixo, com rolagem sincronizada.
+- **Detectar campos automaticamente:** transforma um PDF comum em formulário preenchível. Sublinhados, pontilhados, caixas, ( ) e ☐ viram campos, e as linhas de assinatura ("Assinatura do Cedente", "Testemunha"…) viram campos de assinatura. Fica em Ferramentas › Formulários.
+- **Campos de assinatura vazios:** ficam destacados na tela. Clique para assinar ali mesmo com o certificado digital.
+- **Miniaturas e pré-visualização no Explorador do Windows:** os arquivos PDF mostram a primeira página como miniatura, e o painel de visualização (Alt+P) mostra o documento sem abrir o programa.
+- **PDFs grandes abrem até 3× mais rápido.** As miniaturas laterais são geradas só quando o painel está aberto, começando pelas visíveis.
+
 ## 1.4.5
 
 - **Texto mais nítido na tela:** as páginas agora são desenhadas pixel a pixel, sem a suavização que deixava o texto levemente borrado.

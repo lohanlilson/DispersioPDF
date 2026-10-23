@@ -33,7 +33,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 CloseApplications=yes
+CloseApplicationsFilter=*.exe
 RestartApplications=yes
+ChangesAssociations=yes
 AppMutex=LumenPDF_Running
 UpdateUninstallLogAppName=no
 
@@ -45,7 +47,8 @@ WelcomeLabel1=Atualizar o [name]
 WelcomeLabel2=Este assistente vai atualizar o Lumen PDF da versão {#FromVersion} para a versão {#AppVersion}.%n%nApenas os arquivos alterados serão substituídos. Feche o Lumen PDF antes de continuar.
 
 [Files]
-Source: "..\build\patch\files\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\build\patch\files\*"; DestDir: "{app}"; Excludes: "LumenShell.dll"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\build\patch\files\LumenShell.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete skipifsourcedoesntexist
 
 Source: "..\assets\pdfdoc.ico"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -60,12 +63,18 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "
 Root: HKA; Subkey: "Software\LumenPDF"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"
 #define AssocCond "Check: AssocInstalled"
 #include "assoc.iss"
+#include "shellext.iss"
 
 [Run]
 Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait
 Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [Code]
+function ShellExtPresent(): Boolean;
+begin
+  { a LumenShell.dll só existe quando o build tinha o compilador C++ }
+  Result := FileExists(ExpandConstant('{app}\LumenShell.dll'));
+end;
 function AssocInstalled(): Boolean;
 begin
   Result := RegKeyExists(HKLM, 'Software\Classes\{#ProgId}') or RegKeyExists(HKCU, 'Software\Classes\{#ProgId}');

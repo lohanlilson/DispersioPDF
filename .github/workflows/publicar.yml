@@ -32,6 +32,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
 
+      - name: Compilador C++ (extensão do Explorador)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Inno Setup
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
@@ -73,10 +78,14 @@ jobs:
           python tests/features_test.py
           python tests/autoscroll_test.py
           python tests/sharpness_test.py
+          python tests/split_test.py
+          python tests/novidades_test.py
 
       - name: Gerar executável, instalador e patch
         if: steps.versao.outputs.publicar == 'sim'
         shell: bash
+        env:
+          LUMEN_REQUIRE_SHELLEXT: "1"
         run: |
           if [ -n "$ANTERIOR" ]; then python build.py --publicar --patch-from "$ANTERIOR"; else python build.py --publicar; fi
           ls -la Saida
@@ -89,6 +98,16 @@ jobs:
           $p = Start-Process -FilePath "dist\LumenPDF\LumenPDF.exe" -ArgumentList "--selftest","selftest.txt" -PassThru; $p.WaitForExit()
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { Write-Error "Autoteste do executável falhou"; exit 1 }
+
+      - name: Teste da extensão do Explorador (miniatura e painel de visualização)
+        if: steps.versao.outputs.publicar == 'sim'
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          python tests/make_shellext_pdf.py teste_shell.pdf
+          New-Item -ItemType Directory -Force saida_shell | Out-Null
+          & build\shellext\test_shellext.exe (Resolve-Path dist\LumenPDF\LumenShell.dll) (Resolve-Path teste_shell.pdf) (Resolve-Path saida_shell)
+          if ($LASTEXITCODE -ne 0) { throw "A extensão do Explorador falhou no teste" }
 
       - name: Teste da impressão rápida (/p, vários arquivos ao mesmo tempo)
         if: steps.versao.outputs.publicar == 'sim'
@@ -132,6 +151,9 @@ jobs:
           Start-Sleep 5; Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force
           Write-Host "Versão instalada após o patch: $v"
           if ($v -ne $env:VERSAO) { throw "Versão esperada $env:VERSAO, encontrada $v" }
+          $dll = (Get-ItemProperty "Registry::HKEY_LOCAL_MACHINE\Software\Classes\CLSID\{6E1F4D3A-8C2B-4A57-9B1E-3D5C7A9F0B21}\InprocServer32").'(default)'
+          Write-Host "Extensão do Explorador registrada em: $dll"
+          if (-not $dll -or -not (Test-Path $dll)) { throw "Extensão do Explorador não registrada após o patch" }
           $exe = Join-Path (Get-ItemProperty $key).InstallLocation "LumenPDF.exe"
           $p = Start-Process $exe -ArgumentList "--selftest","selftest-instalado.txt" -PassThru; $p.WaitForExit()
           Get-Content selftest-instalado.txt
