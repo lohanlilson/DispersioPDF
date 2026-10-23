@@ -442,7 +442,7 @@ private:
     void ScrollTo(int y) {
         RECT rc;
         GetClientRect(m_hwnd, &rc);
-        int maxy = max(0, ContentHeight(rc.right) - rc.bottom);
+        int maxy = max(0, ContentHeight((int)rc.right) - (int)rc.bottom);
         y = max(0, min(y, maxy));
         if (y != m_scroll) {
             m_scroll = y;
@@ -463,7 +463,7 @@ private:
         FillRect(dc, &rc, bg);
         DeleteObject(bg);
         SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, m_text);
+        ::SetTextColor(dc, m_text);
         HGDIOBJ oldFont = SelectObject(dc, m_font ? (HGDIOBJ)m_font : GetStockObject(DEFAULT_GUI_FONT));
         int pw = max(40, W - 2 * kMargin);
         int y = kMargin - m_scroll;
