@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.4.2
+- Corrigido: ao imprimir vários PDFs de uma vez pelo botão direito, alguns podiam demorar ou ficar presos.
+  Agora cada arquivo é confirmado pela fila de impressão e todos saem uma única vez.
+
 ## 1.4.1
 - A atualização automática não mostra mais a janela preta de prompt (CMD): aparece só a barra de
   progresso da instalação, e o programa reabre sozinho ao terminar.

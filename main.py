@@ -43,16 +43,30 @@ def parse_args(argv):
 
 
 def send_to_running(msg, wait_ms=400):
-    """Se o programa já está aberto, entrega o pedido para ele e retorna True."""
+    """Entrega o pedido à instância já aberta e espera a confirmação dela. Retorna True se foi recebido."""
+    import time
     sock = QLocalSocket()
     sock.connectToServer(SERVER)
     if not sock.waitForConnected(wait_ms):
+        sock.abort()
         return False
-    sock.write(json.dumps(msg).encode("utf-8"))
+    sock.write(json.dumps(msg).encode("utf-8") + b"\n")
     sock.flush()
-    sock.waitForBytesWritten(2000)
-    sock.disconnectFromServer()
-    return True
+    ok = False
+    if sock.bytesToWrite():
+        sock.waitForBytesWritten(3000)
+    reply = bytearray()
+    t0 = time.time()
+    while time.time() - t0 < 20:  # a instância principal pode estar ocupada imprimindo
+        if sock.bytesAvailable() or sock.waitForReadyRead(300):
+            reply.extend(bytes(sock.readAll()))
+            if b"ok" in reply:
+                ok = True
+                break
+        if sock.state() == QLocalSocket.UnconnectedState:
+            break
+    sock.abort()  # nunca fica preso esperando o outro lado
+    return ok
 
 
 def become_server_or_forward(msg):
@@ -150,23 +164,27 @@ def main():
             win.open_path(f)
 
     def incoming():
-        conn = server.nextPendingConnection()
-        if conn is None:
-            return
-        buf = bytearray()
+        while server.hasPendingConnections():
+            conn = server.nextPendingConnection()
+            buf = bytearray()
 
-        def read():
-            buf.extend(bytes(conn.readAll()))
-
-        def done():
-            read()
-            try:
-                msg = json.loads(bytes(buf).decode("utf-8") or "{}")
-            except ValueError:
-                return
-            handle(msg)
-        conn.readyRead.connect(read)
-        conn.disconnected.connect(done)
+            def read(conn=conn, buf=buf):
+                buf.extend(bytes(conn.readAll()))
+                if b"\n" not in buf or getattr(conn, "_handled", False):
+                    return
+                conn._handled = True
+                line = bytes(buf).split(b"\n", 1)[0]
+                conn.write(b"ok\n")  # confirma o recebimento antes de processar
+                conn.flush()
+                try:
+                    msg = json.loads(line.decode("utf-8") or "{}")
+                except ValueError:
+                    return
+                QTimer.singleShot(0, lambda m=msg: handle(m))
+            conn.readyRead.connect(read)
+            conn.disconnected.connect(conn.deleteLater)
+            if conn.bytesAvailable():
+                read()
     server.newConnection.connect(incoming)
 
     if headless:

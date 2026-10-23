@@ -1205,7 +1205,8 @@ def quick_print(sources, printer_name="", opts=None, printer=None):
     if printer is None and test_dir:
         printer = QPrinter(QPrinter.HighResolution)
         printer.setOutputFormat(QPrinter.PdfFormat)
-        printer.setOutputFileName(os.path.join(test_dir, os.path.splitext(sources[0].name)[0] + "_impresso.pdf"))
+        import time as _t
+        printer.setOutputFileName(os.path.join(test_dir, f"{os.path.splitext(sources[0].name)[0]}_impresso_{_t.time_ns()}.pdf"))
     if printer is None:
         info = find_printer(printer_name)
         printer = QPrinter(info, QPrinter.HighResolution)
