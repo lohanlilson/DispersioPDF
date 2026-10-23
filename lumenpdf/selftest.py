@@ -87,6 +87,22 @@ def run(log_path=None):
         ops.builtin_office_to_pdf(xl, os.path.join(tmp, "b.pdf"))
         assert "1.234,50" in pymupdf.open(os.path.join(tmp, "b.pdf"))[0].get_text()
         print_("office embutido ok")
+        # carimbo de tempo + LTV (só quando houver internet liberada, ex.: no build)
+        if os.environ.get("LUMEN_NET_TEST") == "1":
+            rep = {}
+            out = signing.sign_pdf_bytes(data, signer, 0, (300, 600, 540, 680), 842, "TSA", "CI",
+                                         tsa_url=signing.DEFAULT_TSA, ltv=True, report=rep)
+            res = signing.validate(out)[0]
+            assert rep["tsa"] and res["tsa_time"] and res["intact"], (rep, res)
+            log(f"carimbo de tempo ok (LTV: {rep['ltv']})")
+
+        # edição de texto mantendo a fonte
+        dd = pymupdf.open("pdf", data)
+        sp = ops.span_at(dd[0], (80, 95))
+        used = ops.replace_span(dd[0], sp, "Texto editado ção")
+        assert "editado" in dd[0].get_text(), dd[0].get_text()
+        log(f"edição de texto ok ({used})")
+
         # módulos carregados sob demanda pela interface
         import PySide6.QtPrintSupport  # noqa
         import PySide6.QtSvg  # noqa
@@ -96,7 +112,7 @@ def run(log_path=None):
             log("voz ok")
         except ImportError as e:
             log(f"AVISO: leitura em voz alta indisponível ({e})")
-        from . import wincert, updater, system  # noqa
+        from . import wincert, updater, system, errors  # noqa
         log("SELFTEST OK")
         ok = True
     except Exception:

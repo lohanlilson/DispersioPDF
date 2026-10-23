@@ -55,6 +55,8 @@ def main():
 
     from lumenpdf.mainwindow import MainWindow
     win = MainWindow()
+    from lumenpdf import errors
+    errors.install(win)
 
     server = QLocalServer()
     QLocalServer.removeServer(SERVER)
@@ -77,6 +79,9 @@ def main():
     server.newConnection.connect(incoming)
 
     win.showMaximized()
+    import threading
+    from lumenpdf import ops
+    threading.Thread(target=ops.system_fonts, daemon=True).start()  # prepara a edição de texto com fontes originais
     for p in paths:
         win.open_path(p)
     QTimer.singleShot(1200, win.check_default_app)

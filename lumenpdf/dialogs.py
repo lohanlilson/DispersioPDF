@@ -92,18 +92,19 @@ class EditTextDialog(FormDialog):
         self.text = QPlainTextEdit(span["text"])
         self.text.setFixedHeight(80)
         self.size = spin(round(span["size"], 1), 4, 200, dec=True, suffix=" pt")
-        self.font = combo(list(ops.BASE_FONTS))
-        guess = ops.guess_font(span)
-        self.font.setCurrentText(next(k for k, v in ops.BASE_FONTS.items() if v == guess))
+        orig = span.get("font", "").split("+")[-1] or "original"
+        self.font = combo([f"Original ({orig})"] + list(ops.BASE_FONTS))
         c = span.get("color", 0)
         self.colorb = ColorButton("#%06x" % c)
         super().__init__(parent, "Editar texto", [("Texto:", self.text), ("Fonte:", self.font),
                                                    ("Tamanho:", self.size), ("Cor:", self.colorb)],
-                         intro="O trecho original será substituído. Fontes incorporadas são aproximadas pelas fontes padrão.")
+                         intro="O trecho será substituído mantendo a fonte original sempre que possível "
+                               "(fonte do PDF ou a mesma fonte instalada no Windows).")
 
     def values(self):
+        f = self.font.currentText()
         return (self.text.toPlainText(), self.size.value(), ops.hex_to_rgb(self.colorb.color),
-                ops.BASE_FONTS[self.font.currentText()])
+                ops.BASE_FONTS.get(f, ops.ORIGINAL_FONT))
 
 
 class AddTextDialog(FormDialog):
@@ -339,10 +340,29 @@ class CertSignDialog(FormDialog):
         self.pwd = line(password=True, placeholder="Senha do arquivo / PIN do token")
         self.reason = line("Concordo com o conteúdo deste documento")
         self.location = line("Goiânia/GO")
+        from . import signing
+        st = getattr(parent, "settings", None)
+        self.use_tsa = QCheckBox("Carimbo de tempo (data e hora certificadas por um servidor confiável)")
+        self.use_tsa.setChecked((st.value("sign_tsa", "true") if st else "true") == "true")
+        self.tsa = QComboBox()
+        self.tsa.setEditable(True)
+        for label, url in signing.TSA_SERVERS.items():
+            self.tsa.addItem(f"{label} — {url}", url)
+        saved = st.value("sign_tsa_url", signing.DEFAULT_TSA) if st else signing.DEFAULT_TSA
+        idx = self.tsa.findData(saved)
+        if idx >= 0:
+            self.tsa.setCurrentIndex(idx)
+        else:
+            self.tsa.setEditText(saved)
+        self.use_ltv = QCheckBox("Validação de longo prazo — LTV (continua verificável após o certificado vencer)")
+        self.use_ltv.setChecked((st.value("sign_ltv", "true") if st else "true") == "true")
+        self.use_tsa.toggled.connect(self.tsa.setEnabled)
+        self.tsa.setEnabled(self.use_tsa.isChecked())
         super().__init__(parent, "Assinar com certificado digital", [
             ("Tipo:", self.kind), ("Certificado:", self.cert_row), ("", self.show_expired),
             ("Arquivo / biblioteca:", self.file_row), ("Senha / PIN:", self.pwd),
-            ("Motivo:", self.reason), ("Local:", self.location)],
+            ("Motivo:", self.reason), ("Local:", self.location),
+            (None, self.use_tsa), ("Servidor:", self.tsa), (None, self.use_ltv)],
             ok_text="Assinar", width=620,
             intro="Assinatura no padrão PAdES (compatível com ICP-Brasil), salva como um novo PDF. "
                   "Com certificado instalado, o Windows ou o driver do token pede o PIN quando necessário.")
@@ -388,6 +408,13 @@ class CertSignDialog(FormDialog):
         if i == 1 and self.pfx.text().lower().endswith((".dll", ".so", ".dylib")):
             self.pfx.clear()
         self.adjustSize()
+
+    def tsa_url(self):
+        if not self.use_tsa.isChecked():
+            return None
+        data = self.tsa.currentData()
+        text = self.tsa.currentText().strip()
+        return data if data and text.endswith(data) else (text.split("—")[-1].strip() or None)
 
     def selected_cert(self):
         i = self.cert_combo.currentIndex()
@@ -447,7 +474,10 @@ class SignatureInfoDialog(QDialog):
             ("Organização", c.get("organizacao") or "—"),
             ("E-mail", c.get("email") or "—"),
             ("<b>Assinatura</b>", ""),
-            ("Data/hora informada", _fmt_dt(info.get("time"))),
+            ("Data/hora informada", _fmt_dt(info.get("time")) + ("" if info.get("tsa_time") else " (relógio do computador do signatário)")),
+            ("Carimbo de tempo", (f"{_fmt_dt(info.get('tsa_time'))} — " + ("certificado por servidor confiável" if info.get("tsa_trusted") and info.get("tsa_valid") else "servidor não verificado"))
+             if info.get("tsa_time") else "Não possui"),
+            ("Validação de longo prazo", "Sim (LTV — dados de validação embutidos)" if info.get("ltv") else "Não"),
             ("Motivo", info.get("reason") or "—"),
             ("Local", info.get("location") or "—"),
             ("Integridade", yesno(info.get("intact"), "O documento não foi alterado desde a assinatura",
@@ -471,7 +501,16 @@ class SignatureInfoDialog(QDialog):
         body = QLabel(f"<table cellspacing=2>{table}</table>")
         body.setTextInteractionFlags(Qt.TextSelectableByMouse)
         body.setWordWrap(True)
-        lay.addWidget(body)
+        from PySide6.QtWidgets import QScrollArea, QFrame as _QF
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(_QF.NoFrame)
+        scroll.setWidget(body)
+        screen = self.screen().availableGeometry() if self.screen() else None
+        max_h = int(screen.height() * 0.45) if screen else 420
+        need = body.heightForWidth(580) if body.hasHeightForWidth() else body.sizeHint().height()
+        scroll.setMinimumHeight(min(need + 12, max_h))
+        lay.addWidget(scroll, 1)
         if not info.get("trusted") and info.get("intact"):
             note = QLabel("Para certificados ICP-Brasil, a identidade é confirmada quando as cadeias da ICP-Brasil "
                           "estão instaladas no Windows (disponíveis no site do ITI).")

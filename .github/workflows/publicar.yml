@@ -83,6 +83,7 @@ jobs:
         if: steps.versao.outputs.publicar == 'sim'
         shell: pwsh
         run: |
+          $env:LUMEN_NET_TEST = "1"
           $p = Start-Process -FilePath "dist\LumenPDF\LumenPDF.exe" -ArgumentList "--selftest","selftest.txt" -PassThru; $p.WaitForExit()
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { Write-Error "Autoteste do executável falhou"; exit 1 }

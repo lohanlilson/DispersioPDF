@@ -427,18 +427,99 @@ def compress(doc, level="media"):
 
 # ---------------------------------------------------------------- editar
 
-BASE_FONTS = {"Helvetica": "helv", "Helvetica Negrito": "hebo", "Times": "tiro",
-              "Times Negrito": "tibo", "Courier": "cour", "Courier Negrito": "cobo"}
+BASE_FONTS = {"Helvetica": "helv", "Helvetica Negrito": "hebo", "Helvetica Itálico": "heit",
+              "Times": "tiro", "Times Negrito": "tibo", "Times Itálico": "tiit",
+              "Courier": "cour", "Courier Negrito": "cobo"}
+
+
+ORIGINAL_FONT = "__original__"
 
 
 def guess_font(span):
+    """Fonte padrão (base-14) mais parecida: família, negrito e itálico."""
     name = span.get("font", "").lower()
-    bold = bool(span.get("flags", 0) & 16) or "bold" in name
-    if "times" in name or "serif" in name and "sans" not in name:
-        return "tibo" if bold else "tiro"
-    if "courier" in name or "mono" in name:
-        return "cobo" if bold else "cour"
-    return "hebo" if bold else "helv"
+    flags = span.get("flags", 0)
+    bold = bool(flags & 16) or "bold" in name or "black" in name or "heavy" in name
+    italic = bool(flags & 2) or "italic" in name or "oblique" in name
+    serif = bool(flags & 4) or any(k in name for k in ("times", "georgia", "garamond", "cambria", "book", "serif")) \
+        and "sans" not in name
+    if "courier" in name or "mono" in name or "consol" in name or flags & 8:
+        return {(0, 0): "cour", (0, 1): "coit", (1, 0): "cobo", (1, 1): "cobi"}[(bold, italic)]
+    if serif:
+        return {(0, 0): "tiro", (0, 1): "tiit", (1, 0): "tibo", (1, 1): "tibi"}[(bold, italic)]
+    return {(0, 0): "helv", (0, 1): "heit", (1, 0): "hebo", (1, 1): "hebi"}[(bold, italic)]
+
+
+def _norm_font(name):
+    name = (name or "").split("+")[-1].lower()
+    for junk in ("ps", "mt", "regular", "roman", "-", " ", ",", "_"):
+        name = name.replace(junk, "") if junk not in ("ps", "mt") else re.sub(rf"{junk}$", "", name)
+    return name
+
+
+_SYSTEM_FONTS = None
+
+
+def system_fonts():
+    """Índice nome-normalizado -> arquivo das fontes instaladas (Windows, usuário, Linux, macOS)."""
+    global _SYSTEM_FONTS
+    if _SYSTEM_FONTS is not None:
+        return _SYSTEM_FONTS
+    dirs = [os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts"),
+            "/usr/share/fonts", "/usr/local/share/fonts", os.path.expanduser("~/.fonts"),
+            "/Library/Fonts", "/System/Library/Fonts"]
+    idx = {}
+    for d in dirs:
+        if not d or not os.path.isdir(d):
+            continue
+        for base, _, files in os.walk(d):
+            for fn in files:
+                if not fn.lower().endswith((".ttf", ".otf")):
+                    continue
+                path = os.path.join(base, fn)
+                try:
+                    f = pymupdf.Font(fontfile=path)
+                    for key in {_norm_font(f.name), _norm_font(os.path.splitext(fn)[0])}:
+                        idx.setdefault(key, path)
+                except Exception:
+                    pass
+    _SYSTEM_FONTS = idx
+    return idx
+
+
+def _covers(font, text):
+    return all(font.has_glyph(ord(c)) for c in text if not c.isspace())
+
+
+def resolve_font(page, span, text):
+    """Escolhe a fonte para reescrever um trecho mantendo a aparência original.
+    Retorna (fontname, fontbuffer|None, fontfile|None, descrição)."""
+    want = _norm_font(span.get("font", ""))
+    # 1) a própria fonte embutida no PDF, se tiver todos os caracteres do novo texto
+    try:
+        for xref, ext, ftype, basefont, *_ in page.get_fonts():
+            if _norm_font(basefont) != want or ftype == "Type3":
+                continue
+            _, fext, _, buf = page.parent.extract_font(xref)
+            if buf and fext not in ("n/a", ""):
+                f = pymupdf.Font(fontbuffer=buf)
+                if _covers(f, text):
+                    return f"LmnE{xref}", buf, None, f"{span.get('font')} (fonte original do PDF)"
+    except Exception:
+        pass
+    # 2) a mesma fonte instalada no computador (ex.: Arial, Calibri, Segoe UI)
+    try:
+        path = system_fonts().get(want)
+        if path:
+            f = pymupdf.Font(fontfile=path)
+            if _covers(f, text):
+                return f"LmnS{abs(hash(path)) % 10**6}", None, path, f"{f.name} (instalada no computador)"
+    except Exception:
+        pass
+    # 3) fonte padrão parecida
+    base = guess_font(span)
+    return base, None, None, f"{span.get('font')} aproximada por fonte padrão"
 
 
 def span_at(page, disp_point):
@@ -456,17 +537,26 @@ def span_at(page, disp_point):
 
 
 def replace_span(page, span, new_text, fontsize=None, color=None, fontname=None):
+    """Substitui um trecho de texto. fontname=ORIGINAL_FONT (padrão) tenta manter a fonte do documento.
+    Retorna a descrição da fonte usada."""
     rect = pymupdf.Rect(span["bbox"])
     page.add_redact_annot(rect, fill=False)
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
                           graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
     fs = fontsize or span["size"]
     col = color if color is not None else pymupdf.sRGB_to_pdf(span["color"])
-    fn = fontname or guess_font(span)
     origin = pymupdf.Point(span["origin"])
-    if new_text:
-        page.insert_text(origin, new_text, fontsize=fs, fontname=fn, color=col,
-                         rotate=page.rotation)
+    used = fontname
+    if not new_text:
+        return used
+    if fontname in (None, ORIGINAL_FONT):
+        fn, buf, path, used = resolve_font(page, span, new_text)
+        if buf or path:
+            page.insert_font(fontname=fn, fontbuffer=buf, fontfile=path)
+        page.insert_text(origin, new_text, fontsize=fs, fontname=fn, color=col, rotate=page.rotation)
+    else:
+        page.insert_text(origin, new_text, fontsize=fs, fontname=fontname, color=col, rotate=page.rotation)
+    return used
 
 
 def add_text(page, disp_point, text, fontsize=12, fontname="helv", color=(0, 0, 0)):

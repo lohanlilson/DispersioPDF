@@ -103,27 +103,82 @@ def _stamp(signer_name, box_w, box_h, reason="", location=""):
     )
 
 
-def sign_pdf_bytes(pdf_bytes, signer, page_index, unrot_rect, page_height, reason="", location="",
-                   field_name=None, visible=True):
-    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-    from pyhanko.sign import signers
-    from pyhanko.sign.fields import SigFieldSpec, append_signature_field
+TSA_SERVERS = {
+    "DigiCert (gratuito)": "http://timestamp.digicert.com",
+    "Sectigo (gratuito)": "http://timestamp.sectigo.com",
+    "GlobalSign (gratuito)": "http://timestamp.globalsign.com/tsa/r6advanced1",
+    "FreeTSA (gratuito)": "https://freetsa.org/tsr",
+}
+DEFAULT_TSA = TSA_SERVERS["DigiCert (gratuito)"]
 
-    w = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes), strict=False)
+
+def _ltv_context(signer):
+    """Contexto para embutir dados de validação (cadeia + OCSP/CRL) — busca online as revogações."""
+    from pyhanko_certvalidator import ValidationContext
+    _validation_context()  # carrega raízes do Windows em cache
+    roots, others = _VC_CERTS or ([], [])
+    roots, others = list(roots), list(others)
+    chain = [signer.signing_cert] + list(getattr(signer, "cert_registry", None) or [])
+    for c in chain:
+        if c.self_signed != "no" and c not in roots:
+            roots.append(c)
+        elif c not in others:
+            others.append(c)
+    return ValidationContext(trust_roots=roots or None, other_certs=others, allow_fetching=True,
+                             revocation_mode="soft-fail")
+
+
+def sign_pdf_bytes(pdf_bytes, signer, page_index, unrot_rect, page_height, reason="", location="",
+                   field_name=None, visible=True, tsa_url=None, ltv=False, report=None):
+    """Assina em PAdES. Com tsa_url aplica carimbo de tempo; com ltv embute os dados de validação de longo prazo.
+    Se a internet/servidor falhar, assina com o que for possível e descreve o resultado em report."""
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign import signers, timestamps
+    from pyhanko.sign.fields import SigFieldSpec, append_signature_field, SigSeedSubFilter
+
+    report = report if report is not None else {}
     field_name = field_name or f"Assinatura_{datetime.now():%Y%m%d%H%M%S%f}"
-    if visible:
-        append_signature_field(w, SigFieldSpec(sig_field_name=field_name, on_page=page_index,
-                                               box=_box_pdf_coords(page_height, unrot_rect)))
-    else:
-        append_signature_field(w, SigFieldSpec(sig_field_name=field_name))
-    meta = signers.PdfSignatureMetadata(field_name=field_name, reason=reason or None,
-                                        location=location or None, md_algorithm="sha256")
     x0, y0, x1, y1 = unrot_rect
-    pdf_signer = signers.PdfSigner(meta, signer=signer,
-                                   stamp_style=_stamp(cert_subject(signer), abs(x1 - x0), abs(y1 - y0), reason, location))
-    out = io.BytesIO()
-    pdf_signer.sign_pdf(w, output=out)
-    return out.getvalue()
+    style = _stamp(cert_subject(signer), abs(x1 - x0), abs(y1 - y0), reason, location)
+
+    def attempt(use_tsa, use_ltv):
+        w = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes), strict=False)
+        if visible:
+            append_signature_field(w, SigFieldSpec(sig_field_name=field_name, on_page=page_index,
+                                                   box=_box_pdf_coords(page_height, unrot_rect)))
+        else:
+            append_signature_field(w, SigFieldSpec(sig_field_name=field_name))
+        extra = {}
+        if use_ltv:
+            extra = dict(embed_validation_info=True, validation_context=_ltv_context(signer))
+        meta = signers.PdfSignatureMetadata(field_name=field_name, reason=reason or None,
+                                            location=location or None, md_algorithm="sha256",
+                                            subfilter=SigSeedSubFilter.PADES, **extra)
+        tsa = timestamps.HTTPTimeStamper(use_tsa, timeout=20) if use_tsa else None
+        out = io.BytesIO()
+        signers.PdfSigner(meta, signer=signer, timestamper=tsa, stamp_style=style).sign_pdf(w, output=out)
+        return out.getvalue()
+
+    plans = []
+    if tsa_url and ltv:
+        plans.append((tsa_url, True))
+    if tsa_url:
+        plans.append((tsa_url, False))
+    if ltv and not tsa_url:
+        plans.append((None, True))
+    plans.append((None, False))
+    errors_ = []
+    for use_tsa, use_ltv in plans:
+        try:
+            data = attempt(use_tsa, use_ltv)
+            report.update(tsa=bool(use_tsa), ltv=use_ltv, tsa_url=use_tsa or "", problems=errors_)
+            return data
+        except Exception as e:
+            what = ("carimbo de tempo + LTV" if use_tsa and use_ltv else "carimbo de tempo" if use_tsa
+                    else "dados de validação (LTV)" if use_ltv else "assinatura")
+            errors_.append(f"{what}: {e}")
+            if (use_tsa, use_ltv) == plans[-1]:
+                raise
 
 
 def load_pfx(path, password):
@@ -160,6 +215,17 @@ def cert_subject(signer):
 _VC_CERTS = None
 
 
+def _certifi_roots():
+    """Raízes públicas (Mozilla/certifi) — usadas junto com as do Windows; garantem as das TSAs."""
+    try:
+        import certifi
+        from asn1crypto import pem, x509 as ax
+        data = open(certifi.where(), "rb").read()
+        return [ax.Certificate.load(der) for _, _, der in pem.unarmor(data, multiple=True)]
+    except Exception:
+        return []
+
+
 def _validation_context():
     """Contexto de validação com as raízes confiáveis do Windows (inclui ICP-Brasil quando instaladas)."""
     global _VC_CERTS
@@ -184,6 +250,7 @@ def _validation_context():
                         pass
     except Exception:
         roots, others = [], []
+    roots += _certifi_roots()
     _VC_CERTS = (roots, others)
     kw = dict(allow_fetching=False, revocation_mode="soft-fail")
     if roots:
@@ -226,7 +293,8 @@ def validate(pdf_bytes, field=None):
     for idx, sig in enumerate(sigs):
         if field and sig.field_name != field:
             continue
-        info = dict(field=sig.field_name, index=idx + 1, total=len(sigs), signer="?", time=None, intact=False,
+        info = dict(tsa_time=None, tsa_valid=False, tsa_trusted=False,
+                    ltv=b"/DSS" in pdf_bytes, field=sig.field_name, index=idx + 1, total=len(sigs), signer="?", time=None, intact=False,
                     valid=False, covers_all=False, trusted=False, error=None, modification=None,
                     reason="", location="", contact="", cert={}, chain=[], revision_end=None,
                     later_changes=False)
@@ -245,6 +313,14 @@ def validate(pdf_bytes, field=None):
         try:
             st = validate_pdf_signature(sig, signer_validation_context=vc) if vc else validate_pdf_signature(sig)
             info.update(intact=st.intact, valid=st.valid, trusted=st.trusted, time=st.signer_reported_dt)
+            try:
+                tv = st.timestamp_validity
+                if tv is not None:
+                    info["tsa_time"] = tv.timestamp
+                    info["tsa_valid"] = bool(tv.intact and tv.valid)
+                    info["tsa_trusted"] = bool(tv.trusted)
+            except Exception:
+                pass
             try:
                 info["covers_all"] = st.coverage.name == "ENTIRE_FILE"
                 info["modification"] = st.modification_level.name if st.modification_level else None

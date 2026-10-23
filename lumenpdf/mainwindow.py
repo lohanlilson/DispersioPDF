@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
                                QProgressDialog, QGridLayout, QListWidget, QListWidgetItem, QButtonGroup,
                                QToolButton, QApplication, QColorDialog, QStatusBar, QFrame, QMenu)
 
-from . import ops, theme, icons, dialogs, signing, system, __version__, resource, AUTHOR, EMAIL, COPYRIGHT
+from . import ops, theme, icons, dialogs, signing, system, errors, __version__, resource, AUTHOR, EMAIL, COPYRIGHT
 from .doctab import DocTab
 from .panels import ToolPanel, OrganizeDialog, tool_button, ALL_TOOLS, list_annots
 
@@ -26,7 +26,7 @@ NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature"
 class Worker(QThread):
     progress = Signal(int, int)
     done = Signal(object)
-    failed = Signal(str)
+    failed = Signal(object)
 
     def __init__(self, fn):
         super().__init__()
@@ -37,7 +37,7 @@ class Worker(QThread):
         try:
             self.done.emit(self.fn(self))
         except Exception as e:
-            self.failed.emit(str(e))
+            self.failed.emit(e)
 
 
 class HomePage(QWidget):
@@ -356,6 +356,8 @@ class MainWindow(QMainWindow):
         auto.toggled.connect(lambda on: self.settings.setValue("auto_update", "true" if on else "false"))
         m.addAction(auto)
         m.addSeparator()
+        act(m, "Abrir registro de erros", lambda: __import__("PySide6.QtGui", fromlist=["QDesktopServices"]).QDesktopServices.openUrl(
+            __import__("PySide6.QtCore", fromlist=["QUrl"]).QUrl.fromLocalFile(errors.log_dir())))
         act(m, "Enviar sugestão ou relatar problema…", lambda: __import__("PySide6.QtGui", fromlist=["QDesktopServices"]).QDesktopServices.openUrl(
             __import__("PySide6.QtCore", fromlist=["QUrl"]).QUrl(f"mailto:{EMAIL}?subject={APP} {__version__}")))
         act(m, f"Sobre o {APP}", self.about)
@@ -724,9 +726,9 @@ class MainWindow(QMainWindow):
             dlg.close()
             on_done(res)
 
-        def fail(msg):
+        def fail(exc):
             dlg.close()
-            QMessageBox.critical(self, APP, msg)
+            errors.report(self, f"{label.rstrip('…')} falhou: {exc}", exc, label)
         w.done.connect(finish)
         w.failed.connect(fail)
         self._worker = w
@@ -743,7 +745,8 @@ class MainWindow(QMainWindow):
         try:
             self._dispatch(name, tab, **kw)
         except Exception as e:
-            QMessageBox.critical(self, APP, f"Erro em \"{ALL_TOOLS.get(name, (None, name))[1]}\":\n{e}")
+            tool = ALL_TOOLS.get(name, (None, name))[1]
+            errors.report(self, f"Erro em “{tool}”: {e}", e, tool)
 
     def _dispatch(self, name, tab, **kw):
         v = tab.view if tab else None
@@ -823,19 +826,41 @@ class MainWindow(QMainWindow):
         pg = tab.doc[page]
         unrot = ops.to_unrot(pg, rect)
         data = tab.doc.tobytes(garbage=3, deflate=True)
+        tsa_url, ltv = d.tsa_url(), d.use_ltv.isChecked()
+        self.settings.setValue("sign_tsa", "true" if d.use_tsa.isChecked() else "false")
+        if tsa_url:
+            self.settings.setValue("sign_tsa_url", tsa_url)
+        self.settings.setValue("sign_ltv", "true" if ltv else "false")
+        rep = {}
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.statusBar().showMessage("Assinando… (consultando carimbo de tempo e dados de validação)")
+        QApplication.processEvents()
         try:
             out = signing.sign_pdf_bytes(data, signer, page, tuple(unrot), pg.mediabox.height,
-                                         d.reason.text(), d.location.text())
+                                         d.reason.text(), d.location.text(), tsa_url=tsa_url, ltv=ltv, report=rep)
         except Exception as e:
-            QMessageBox.critical(self, APP, f"A assinatura não foi concluída:\n{e}")
+            QApplication.restoreOverrideCursor()
+            errors.report(self, f"A assinatura não foi concluída: {e}", e, "Assinar com certificado")
             return
+        QApplication.restoreOverrideCursor()
+        self.statusBar().clearMessage()
+        extras = []
+        if rep.get("tsa"):
+            extras.append("✔ Carimbo de tempo aplicado")
+        elif tsa_url:
+            extras.append("⚠ Sem carimbo de tempo (servidor indisponível ou sem internet)")
+        if rep.get("ltv"):
+            extras.append("✔ Validação de longo prazo (LTV) incluída")
+        elif ltv:
+            extras.append("⚠ LTV não incluída (não foi possível obter os dados de revogação do certificado)")
         fn = tab.save_copy_bytes(out, "_assinado")
         if fn:
             new = DocTab(out, fn, tab.password, self.settings)
             new.has_signatures = True
             self.add_tab(new)
             self._add_recent(fn)
-            QMessageBox.information(self, APP, f"Documento assinado por {signing.cert_subject(signer)}.\nSalvo em:\n{fn}")
+            QMessageBox.information(self, APP, f"Documento assinado por {signing.cert_subject(signer)}.\n"
+                                    + ("\n".join(extras) + "\n" if extras else "") + f"\nSalvo em:\n{fn}")
 
     def _sig_results(self, tab, field=None):
         if tab.sig_results and not field:
@@ -875,8 +900,10 @@ class MainWindow(QMainWindow):
         if d.exec():
             txt, size, color, font = d.values()
             tab.checkpoint()
-            ops.replace_span(pg, span, txt, size, color, font)
+            used = ops.replace_span(pg, span, txt, size, color, font)
             tab.changed([page])
+            if used:
+                self.statusBar().showMessage(f"Texto editado com: {used}", 6000)
 
     def tool_add_text_at(self, tab, page, point, **kw):
         d = dialogs.AddTextDialog(self)

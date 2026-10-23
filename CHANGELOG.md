@@ -2,6 +2,15 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.0.9
+- **Carimbo de tempo** nas assinaturas digitais: a data e a hora passam a ser certificadas por um servidor
+  confiável (DigiCert, Sectigo, GlobalSign ou FreeTSA), e não pelo relógio do computador.
+- **Validação de longo prazo (LTV)**: a assinatura continua verificável mesmo depois que o certificado vencer.
+- **Edição de texto com a fonte original**: o texto editado usa a mesma fonte do documento (ou a mesma fonte
+  instalada no Windows), mantendo negrito e itálico.
+- **Relatório de erros**: se algo falhar, o programa mostra os detalhes e permite enviá-los ao desenvolvedor
+  por e-mail com um clique (Ajuda › Abrir registro de erros).
+
 ## 1.0.8
 - Clique sobre uma assinatura digital para ver a validação completa dela: signatário, CPF/CNPJ, data,
   motivo, integridade, alterações posteriores e dados do certificado.
