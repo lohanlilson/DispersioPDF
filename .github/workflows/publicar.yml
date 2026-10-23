@@ -71,5 +71,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cp "Saida/LumenPDF-Setup-$VERSAO.exe" Saida/LumenPDF-Setup.exe
           gh release create "v$VERSAO" Saida/*.exe Saida/versao.json Saida/manifest.json \
             --title "Lumen PDF $VERSAO" --notes-file Saida/NOTAS.md --latest
+
+      - name: Instalador com nome fixo na versão já publicada
+        if: steps.versao.outputs.publicar == 'nao'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "v$VERSAO" --json assets -q '.assets[].name' | grep -qx LumenPDF-Setup.exe; then
+            gh release download "v$VERSAO" -p "LumenPDF-Setup-$VERSAO.exe" -D tmp
+            cp "tmp/LumenPDF-Setup-$VERSAO.exe" tmp/LumenPDF-Setup.exe
+            gh release upload "v$VERSAO" tmp/LumenPDF-Setup.exe --clobber
+          fi
