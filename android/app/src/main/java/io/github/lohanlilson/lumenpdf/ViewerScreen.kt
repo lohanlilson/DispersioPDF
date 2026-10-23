@@ -434,10 +434,13 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int) 
     val density = LocalDensity.current
     val pageH = (pageW * sz.ratio).roundToInt()
     val renderW = min(pageW, MAX_RENDER_PX)
-    // mantém o bitmap anterior enquanto o novo (no zoom atual) é gerado
-    var shown by remember(d, i) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(d, i, renderW) {
-        shown = vm.engine.render(d.pdf, i, renderW).asImageBitmap()
+    // mostra a última imagem desta página (zoom anterior ou versão antes da edição) enquanto a nova é gerada
+    var shown by remember(d, i) { mutableStateOf(d.lastBitmaps.get(i)) }
+    val pdf = d.pdf
+    LaunchedEffect(pdf, i, renderW) {
+        val b = vm.engine.render(pdf, i, renderW).asImageBitmap()
+        shown = b
+        d.lastBitmaps.put(i, b)
     }
     val scope = rememberCoroutineScope()
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

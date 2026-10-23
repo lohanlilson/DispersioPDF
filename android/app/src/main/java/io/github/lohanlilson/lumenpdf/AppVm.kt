@@ -50,6 +50,8 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var inkWidth by mutableFloatStateOf(2f)
     val strokes = mutableStateListOf<Pair<Int, List<Offset>>>()   // (página, pontos em frações da largura)
     var busy by mutableStateOf(false)
+    /** últimas imagens exibidas por página (marcador enquanto a nova renderização não fica pronta) */
+    val lastBitmaps = android.util.LruCache<Int, androidx.compose.ui.graphics.ImageBitmap>(10)
 }
 
 data class PendingPassword(val uri: Uri, val name: String, val wrong: Boolean)
