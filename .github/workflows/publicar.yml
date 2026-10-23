@@ -74,6 +74,14 @@ jobs:
           if [ -n "$ANTERIOR" ]; then python build.py --publicar --patch-from "$ANTERIOR"; else python build.py --publicar; fi
           ls -la Saida
 
+      - name: Autoteste do executável gerado (sem Python instalado)
+        if: steps.versao.outputs.publicar == 'sim'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\LumenPDF\LumenPDF.exe" -ArgumentList "--selftest","selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { Write-Error "Autoteste do executável falhou"; exit 1 }
+
       - name: Publicar Release
         if: steps.versao.outputs.publicar == 'sim'
         shell: bash

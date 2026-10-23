@@ -4,4 +4,5 @@ pdf2docx>=0.5.8
 pyHanko[image-support]>=0.25
 Pillow>=10
 openpyxl>=3.1
+mammoth>=1.6
 pywin32>=306; sys_platform == "win32"

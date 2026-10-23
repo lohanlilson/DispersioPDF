@@ -41,8 +41,8 @@ Cada build fica guardado em `releases\<versão>` — **não apague essa pasta**,
 ### Opcionais
 | Recurso | Requisito |
 |---|---|
-| OCR | [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) com o idioma **Portuguese** marcado na instalação |
-| Word/Excel/PowerPoint → PDF | Microsoft Office (via pywin32) ou LibreOffice |
+| OCR | Já incluído (português e inglês) |
+| Word/Excel → PDF | Embutido para .docx/.xlsx/.csv/.txt; outros formatos (.doc, .ppt, .odt…) usam o Office ou LibreOffice se existirem |
 | Certificado A3 (token) | Driver do token (ex.: SafeNet `eTPKCS11.dll`) |
 | Ler em voz alta | Vozes do Windows (já incluídas) |
 

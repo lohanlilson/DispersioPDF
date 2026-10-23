@@ -27,6 +27,10 @@ def send_to_running(paths):
 
 
 def main():
+    if "--selftest" in sys.argv:  # usado pelo build para conferir o executável gerado
+        from lumenpdf import selftest
+        i = sys.argv.index("--selftest")
+        return selftest.run(sys.argv[i + 1] if len(sys.argv) > i + 1 else None)
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     if sys.platform == "win32":
         import ctypes

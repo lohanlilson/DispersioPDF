@@ -317,13 +317,95 @@ def office_to_pdf(path, out_path):
             if os.path.exists(cand):
                 soffice = cand
     if not soffice:
-        raise RuntimeError("Instale o Microsoft Office ou o LibreOffice para converter arquivos do Office.")
+        if ext in (".docx", ".xlsx", ".xlsm", ".csv", ".txt"):
+            return builtin_office_to_pdf(path, out_path)
+        raise RuntimeError("Para converter este formato é preciso ter o Microsoft Office ou o LibreOffice instalado. "
+                           "Arquivos .docx, .xlsx, .csv e .txt são convertidos mesmo sem eles.")
     outdir = tempfile.mkdtemp()
     subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", outdir, path],
                    check=True, timeout=180, capture_output=True)
     produced = os.path.join(outdir, os.path.splitext(os.path.basename(path))[0] + ".pdf")
     shutil.move(produced, out_path)
     return out_path
+
+
+CSS = ("body{font-family:sans-serif;font-size:11pt;line-height:1.35} h1{font-size:18pt} h2{font-size:15pt}"
+       "h3{font-size:13pt} table{border-collapse:collapse} td,th{border:1px solid #999;padding:3px 5px;font-size:9pt}"
+       "th{background:#eef}")
+
+
+def html_to_pdf(html, out_path, archive_dir=None, landscape=False):
+    """Renderiza HTML em PDF A4 com o motor do MuPDF (não depende de programas externos)."""
+    mediabox = pymupdf.paper_rect("a4-l" if landscape else "a4")
+    where = mediabox + (50, 50, -50, -50)
+    story = pymupdf.Story(html=html, user_css=CSS, archive=pymupdf.Archive(archive_dir) if archive_dir else None)
+    writer = pymupdf.DocumentWriter(out_path)
+    more = True
+    while more:
+        dev = writer.begin_page(mediabox)
+        more, _ = story.place(where)
+        story.draw(dev)
+        writer.end_page()
+    writer.close()
+    return out_path
+
+
+def builtin_office_to_pdf(path, out_path):
+    """Conversão embutida (sem Office/LibreOffice) de .docx, .xlsx, .csv e .txt."""
+    ext = os.path.splitext(path)[1].lower()
+    tmp = tempfile.mkdtemp()
+    if ext == ".docx":
+        import mammoth
+        counter = [0]
+
+        def save_image(image):
+            counter[0] += 1
+            name = f"img{counter[0]}.{image.content_type.split('/')[-1].replace('jpeg', 'jpg')}"
+            with image.open() as src, open(os.path.join(tmp, name), "wb") as dst:
+                dst.write(src.read())
+            return {"src": name}
+        with open(path, "rb") as f:
+            body = mammoth.convert_to_html(f, convert_image=mammoth.images.img_element(save_image)).value
+        return html_to_pdf(body, out_path, tmp)
+    if ext in (".xlsx", ".xlsm"):
+        from openpyxl import load_workbook
+        wb = load_workbook(path, data_only=True, read_only=True)
+        parts, wide = [], False
+        for ws in wb.worksheets:
+            rows = [r for r in ws.iter_rows(values_only=True) if any(v not in (None, "") for v in r)]
+            if not rows:
+                continue
+            ncol = max(len(r) for r in rows)
+            wide = wide or ncol > 7
+            trs = "".join("<tr>" + "".join(f"<{'th' if i == 0 else 'td'}>{html.escape(_fmt(v))}</{'th' if i == 0 else 'td'}>"
+                                           for v in r) + "</tr>" for i, r in enumerate(rows))
+            parts.append(f"<h2>{html.escape(ws.title)}</h2><table>{trs}</table>")
+        return html_to_pdf("".join(parts) or "<p>(planilha vazia)</p>", out_path, landscape=wide)
+    if ext == ".csv":
+        import csv
+        with open(path, encoding="utf-8-sig", errors="replace", newline="") as f:
+            sample = f.read(4096)
+            f.seek(0)
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=";,\t|")
+            except csv.Error:
+                dialect = csv.excel
+            rows = list(csv.reader(f, dialect))
+        trs = "".join("<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in r) + "</tr>" for r in rows)
+        return html_to_pdf(f"<table>{trs}</table>", out_path, landscape=max((len(r) for r in rows), default=0) > 7)
+    with open(path, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    return html_to_pdf(f"<pre style='font-family:monospace;font-size:9.5pt;white-space:pre-wrap'>{html.escape(text)}</pre>", out_path)
+
+
+def _fmt(v):
+    if v is None:
+        return ""
+    if isinstance(v, float):
+        return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if hasattr(v, "strftime"):
+        return v.strftime("%d/%m/%Y")
+    return str(v)
 
 
 def compress(doc, level="media"):
@@ -538,6 +620,11 @@ def decrypted_bytes(doc):
 # ---------------------------------------------------------------- OCR
 
 def tessdata_dir():
+    """Usa primeiro os idiomas que acompanham o programa (português e inglês), depois o Tesseract instalado."""
+    from . import resource
+    bundled = resource("assets", "tessdata")
+    if os.path.isfile(os.path.join(bundled, "por.traineddata")):
+        return bundled
     env = os.environ.get("TESSDATA_PREFIX")
     if env and os.path.isdir(env):
         return env
@@ -562,7 +649,7 @@ def ocr(doc, pages=None, language="por", dpi=300, progress=None, skip_text_pages
     """Adiciona uma camada de texto invisível e pesquisável sobre páginas digitalizadas."""
     tess = tessdata_dir()
     if not tess:
-        raise RuntimeError("Tesseract OCR não encontrado. Instale-o e o idioma 'por'.")
+        raise RuntimeError("Dados de idioma do OCR não encontrados (assets/tessdata).")
     pages = list(pages) if pages is not None else list(range(doc.page_count))
     done = 0
     for k, p in enumerate(pages):

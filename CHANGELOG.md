@@ -2,6 +2,11 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.0.4
+- OCR em português e inglês já incluído — não precisa mais instalar o Tesseract.
+- Abrir/converter .docx, .xlsx, .csv e .txt em PDF funciona mesmo sem Office ou LibreOffice.
+- Cada versão agora é testada já empacotada, num Windows sem Python, antes de ser publicada.
+
 ## 1.0.3
 - Corrigida a assinatura com certificado digital, que falhava ao gerar o carimbo com o logo.
 
