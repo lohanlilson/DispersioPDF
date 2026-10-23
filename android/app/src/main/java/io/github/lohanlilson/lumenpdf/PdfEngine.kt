@@ -84,6 +84,7 @@ class PdfEngine(context: Context) {
             p.renderPageBitmap(bmp, 0, 0, w, h, true, false, Color.WHITE, Color.WHITE)
         }
         cache.put(key, bmp)
+        android.util.Log.d("LumenPdf", "renderizado $key")
         bmp
     }
 

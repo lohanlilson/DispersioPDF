@@ -171,6 +171,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     private suspend fun reopen(d: ViewerDoc, f: File) {
         val newPdf = engine.open(getApplication(), Uri.fromFile(f), d.password)
+        android.util.Log.i("LumenPdf", "reaberto: ${newPdf.id} (${f.length()} bytes)")
         val old = d.pdf
         d.pdf = newPdf
         engine.close(old)

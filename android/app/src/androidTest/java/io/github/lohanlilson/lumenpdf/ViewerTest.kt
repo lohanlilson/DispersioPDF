@@ -167,7 +167,7 @@ class ViewerTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Salvar").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("Marcar ✓").performClick()
             compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.85f, height * 0.25f)) }
-            Thread.sleep(3000)
+            Thread.sleep(6000)
             shot("07_editado")
             compose.onNodeWithContentDescription("Salvar").performClick()
             compose.onNodeWithText("Salvar").performClick()

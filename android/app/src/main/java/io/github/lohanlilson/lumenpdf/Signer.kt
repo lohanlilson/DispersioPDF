@@ -262,7 +262,14 @@ object PdfSigner {
             val lh = size * 1.18f
             var y = h - (h - lh * lines.size) / 2 - size * 0.92f
             for (l in lines) {
-                cs.beginText(); cs.setFont(f, size); cs.newLineAtOffset(x, y); cs.showText(l); cs.endText()
+                cs.beginText(); cs.setFont(f, size)
+                if (f === bold) {
+                    // negrito garantido mesmo sem a fonte bold no aparelho: contorno + preenchimento
+                    cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL_STROKE)
+                    cs.setStrokingColor(0.08f, 0.08f, 0.10f)
+                    cs.setLineWidth(size * 0.045f)
+                } else cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL)
+                cs.newLineAtOffset(x, y); cs.showText(l); cs.endText()
                 y -= lh
             }
         }
