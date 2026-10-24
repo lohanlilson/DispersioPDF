@@ -73,8 +73,10 @@ class ToolsTest {
         val src = pdf(withPhoto = true)
         val w = File(dir, "w.pdf")
         Editor.applyFull(src, w, null) { d, _ -> Editor.watermark(d, "CONFIDENCIAL", 0.2f, 0xFFD7373F); Editor.pageNumbers(d, "Página {n} de {total}") }
-        val t = text(w)
-        assertTrue(t.contains("CONFIDENCIAL") && t.contains("Página 1 de 1"))
+        val t = text(w).replace(Regex("\\s"), "")
+        Log.i("LumenTest", "marca/numeração: $t")
+        assertTrue("numeração: $t", t.contains("Página1de1"))
+        assertTrue("marca d'água: $t", t.contains("CONFIDENCIAL") || t.reversed().contains("CONFIDENCIAL"))
         val small = File(dir, "small.pdf")
         var n = 0
         Editor.applyFull(src, small, null) { d, _ -> n = Editor.compress(d, 600, 0.5f) }

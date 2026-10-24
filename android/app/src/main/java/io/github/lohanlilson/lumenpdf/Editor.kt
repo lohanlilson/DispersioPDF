@@ -392,11 +392,15 @@ object Editor {
 
     fun deleteAnnot(doc: PDDocument, ref: AnnotRef): List<COSDictionary> {
         val (page, a) = annotAt(doc, ref)
-        val list = page.annotations
-        val popup = (a as? PDAnnotationMarkup)?.popup
-        list.removeAll { it.cosObject == a.cosObject || (popup != null && it.cosObject == popup.cosObject) }
-        page.annotations = list
-        (page.cosObject.getDictionaryObject(COSName.ANNOTS) as? COSArray)?.let { it.isNeedToBeUpdated = true }
+        val popup = (a as? PDAnnotationMarkup)?.popup?.cosObject
+        // remove direto do array /Annots (a lista do PDFBox não repassa remoções)
+        val arr = page.cosObject.getDictionaryObject(COSName.ANNOTS) as? COSArray ?: return emptyList()
+        for (k in arr.size() - 1 downTo 0) {
+            val o = arr.getObject(k)
+            if (o == a.cosObject || (popup != null && o == popup)) arr.remove(k)
+        }
+        arr.isNeedToBeUpdated = true
+        page.cosObject.setItem(COSName.ANNOTS, arr)
         return listOf(page.cosObject)
     }
 

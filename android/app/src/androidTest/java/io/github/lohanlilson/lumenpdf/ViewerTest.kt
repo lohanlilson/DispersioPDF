@@ -206,12 +206,12 @@ class ViewerTest {
             Thread.sleep(1500)
             compose.onNodeWithContentDescription("Editar").performClick()
             compose.onNodeWithContentDescription("Rubrica").performClick()
-            compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.5f, height * 0.85f)) }
+            compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.5f, height * 0.4f)) }
             compose.mainClock.advanceTimeBy(1000)
             compose.waitUntil(5_000) { compose.onAllNodesWithText("Confirmar").fetchSemanticsNodes().isNotEmpty() }
             // puxa o canto para aumentar a rubrica
             compose.onNodeWithContentDescription("Página 1").performTouchInput {
-                val start = Offset(width * 0.5f + 60f * width / 595f, height * 0.85f + 20f * width / 595f)
+                val start = Offset(width * 0.5f + 60f * width / 595f, height * 0.4f + 20f * width / 595f)
                 swipe(start, start + Offset(width * 0.2f, 0f), 600)
             }
             compose.waitForIdle()
