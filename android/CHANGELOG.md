@@ -1,5 +1,11 @@
 # Novidades do Lumen PDF para Android
 
+## 0.4.1
+
+- **Editar texto mantém o estilo:** a fonte, o negrito, o itálico, o tamanho e a cor do texto original são preservados. Se a fonte do PDF não tiver alguma letra nova (ex.: ç), o app usa uma fonte de mesmas medidas e estilo (Arial, Times, Courier e Calibri têm equivalentes).
+- Ao tocar numa palavra, o app edita só o trecho com aquele estilo (ex.: só o nome em negrito, sem mexer em "Nome:").
+- O texto antigo sai do arquivo de verdade (não fica escondido embaixo de um retângulo branco) e o resto da linha acompanha a nova largura.
+
 ## 0.4.0
 
 - **Validação ICP-Brasil:** o painel de assinaturas confirma se o certificado de quem assinou pertence à ICP-Brasil (cadeia até a AC Raiz), se estava dentro da validade na data da assinatura e, com internet, se não foi revogado.
