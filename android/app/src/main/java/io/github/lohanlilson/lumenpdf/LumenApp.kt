@@ -13,6 +13,7 @@ class LumenApp : Application() {
     override fun onCreate() {
         super.onCreate()
         com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
+        TextEdit.assets = assets
         engine = PdfEngine(this)
         recents = Recents(this)
         prefs = Prefs(this)

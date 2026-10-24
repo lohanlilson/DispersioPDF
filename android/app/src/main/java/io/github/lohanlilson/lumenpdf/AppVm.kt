@@ -201,6 +201,32 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         loadFields(d)
     }
 
+    /** Trecho de texto (mesmo estilo) sob o dedo, para a ferramenta "Editar texto". */
+    suspend fun analyzeRun(d: ViewerDoc, line: TextLine, px: Float, py: Float): TextRun? = withContext(Dispatchers.IO) {
+        runCatching {
+            val app = getApplication<Application>()
+            val f = d.work
+            val doc = if (f != null) PDDocument.load(f, d.password ?: "")
+                else app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { PDDocument.load(it, d.password ?: "") }
+            doc.use { TextEdit.analyze(it, line.page, line.rect, px, py) }
+        }.onFailure { android.util.Log.w("LumenPdf", "analisar texto", it) }.getOrNull()
+    }
+
+    /** Troca o texto mantendo fonte, negrito/itálico, tamanho e cor. */
+    fun replaceText(d: ViewerDoc, line: TextLine, px: Float, py: Float, text: String) {
+        var used: String? = null
+        edit(d, "editar o texto") { doc ->
+            val r = runCatching { TextEdit.replace(doc, line.page, line.rect, px, py, text) }
+                .onFailure { android.util.Log.w("LumenPdf", "editar texto", it) }.getOrNull()
+            if (r != null) { used = r.fontUsed; r.changed }
+            else Editor.replaceText(doc, line.page, line.rect, line.x, line.baseline, text, line.size, 0xFF1C1B22)
+        }.invokeOnCompletion {
+            val u = used
+            if (u != null && u != "fonte original do PDF" && u != "—")
+                toast = "A fonte original não tem todas as letras do novo texto; usei $u (mesmas medidas e estilo)."
+        }
+    }
+
     fun undo(d: ViewerDoc) = viewModelScope.launch {
         val prev = d.undo.removeLastOrNull() ?: return@launch
         d.work?.let { d.redo.addLast(it) }

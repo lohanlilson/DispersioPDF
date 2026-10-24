@@ -170,6 +170,8 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var sigSheet by remember { mutableStateOf(false) }
     var organize by remember { mutableStateOf(false) }
     var editLine by remember { mutableStateOf<TextLine?>(null) }
+    var editRun by remember { mutableStateOf<TextRun?>(null) }
+    var editPt by remember { mutableStateOf(android.graphics.PointF()) }
     var dlg by remember { mutableStateOf("") }           // comprimir | senha | marca | numeros | prefs
     var confirmSigned by remember { mutableStateOf<(() -> Unit)?>(null) }
     val pickCompare = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.compareWith(d, u) }
@@ -363,7 +365,12 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                         d.editing && d.tool == Tool.EDITTEXT -> {
                             val line = vm.engine.lineAt(d.pdf, pg, fx, fy)
                             if (line == null || line.text.isBlank()) Toast.makeText(ctx, "Nenhum texto neste ponto", Toast.LENGTH_SHORT).show()
-                            else editLine = line
+                            else {
+                                val pt = vm.engine.pdfPoint(d.pdf, pg, fx, fy)
+                                editPt = pt
+                                editRun = vm.analyzeRun(d, line, pt.x, pt.y)
+                                editLine = line
+                            }
                         }
                         annot != null -> d.selAnnot = annot
                         d.editing && d.tool in setOf(Tool.CHECK, Tool.CROSS) ->
@@ -574,9 +581,12 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             dismissButton = { TextButton({ confirmSigned = null }) { Text("Cancelar") } })
     }
     editLine?.let { line ->
-        TextInputDialog("Editar texto", "Texto da linha", line.text, multiline = false, onDismiss = { editLine = null }) { t, _ ->
+        val run = editRun
+        TextInputDialog("Editar texto", run?.style?.description ?: "Texto da linha", run?.text ?: line.text, multiline = false,
+            onDismiss = { editLine = null; editRun = null }) { t, _ ->
             editLine = null
-            vm.edit(d, "editar o texto") { Editor.replaceText(it, line.page, line.rect, line.x, line.baseline, t, line.size, 0xFF1C1B22) }
+            editRun = null
+            vm.replaceText(d, line, editPt.x, editPt.y, t)
         }
     }
     editNote?.let { a ->
