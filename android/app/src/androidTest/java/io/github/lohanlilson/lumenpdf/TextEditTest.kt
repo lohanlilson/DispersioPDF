@@ -88,6 +88,11 @@ class TextEditTest {
         assertEquals("BELTRANO SILVA", run!!.text)
         assertTrue(run.style.bold && run.style.fontName.contains("Bold"))
         assertEquals(0xCC0000, run.style.color and 0xFFFFFF)
+        // o resto da linha andou junto (não ficou por baixo do texto novo, que é mais comprido)
+        val resto = PDDocument.load(out1).use { TextEdit.analyze(it, 0, line1, run.rect.right + 20f, 703f) }!!
+        Log.i("LumenTest", "resto da linha: $resto")
+        assertEquals("- CPF 111.222.333-44", resto.text)
+        assertTrue("sobreposto: ${resto.rect} x ${run.rect}", resto.rect.left >= run.rect.right)
         // "Nome:" continua normal e preto
         val nome = PDDocument.load(out1).use { TextEdit.analyze(it, 0, line1, 80f, 703f) }!!
         assertEquals("Nome:", nome.text)

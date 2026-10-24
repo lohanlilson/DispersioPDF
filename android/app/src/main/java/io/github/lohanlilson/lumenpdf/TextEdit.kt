@@ -75,7 +75,7 @@ object TextEdit {
         val op: Int, val str: Int, val idx: Int, val font: PDFont, val code: Int, val unicode: String,
         val x: Float, val y: Float, val cx: Float, val cy: Float, val advUser: Float,
         val tfs: Float, val adjust: Float,          // número a usar no TJ para manter o avanço do caractere removido
-        val size: Float, val color: Int, val angle: Double, val th: Float, val fakeBold: Boolean,
+        val size: Float, val color: Int, val angle: Double, val th: Float, val fakeBold: Boolean, val sx: Float,
     ) {
         var styleKey = ""
     }
@@ -141,7 +141,7 @@ object TextEdit {
                 trm.translateX, trm.translateY, a * u + c * v + trm.translateX, b * u + d * v + trm.translateY,
                 displacement.x * trm.scalingFactorX, tfs, if (tfs != 0f) -adv * 1000f / tfs else 0f,
                 trm.scalingFactorY, color, atan2(b.toDouble(), a.toDouble()), ts.horizontalScaling / 100f,
-                mode == RenderingMode.FILL_STROKE)
+                mode == RenderingMode.FILL_STROKE, trm.scalingFactorX)
         }
 
         fun run(doc: PDDocument): List<Glyph> {
@@ -229,7 +229,10 @@ object TextEdit {
     // ------------------------------------------------------------ remover do conteúdo
 
     /** Reescreve o conteúdo da página sem os caracteres indicados (mantém o avanço deles). */
-    private fun removeGlyphs(doc: PDDocument, page: PDPage, remove: List<Glyph>): List<COSDictionary> {
+    private fun removeGlyphs(doc: PDDocument, page: PDPage, remove: List<Glyph>, deltaUser: Float = 0f): List<COSDictionary> {
+        // o último caractere removido "anda" a diferença de largura: o resto da linha acompanha o texto novo
+        val last = remove.maxByOrNull { it.x * kotlin.math.cos(it.angle).toFloat() + it.y * kotlin.math.sin(it.angle).toFloat() }
+        fun adj(g: Glyph) = if (g === last && g.sx != 0f) g.adjust - deltaUser * 1000f / g.sx else g.adjust
         val byOp = remove.groupBy { it.op }
         val parser = PDFStreamParser(page)
         parser.parse()
@@ -266,7 +269,7 @@ object TextEdit {
                     val end = bytes.size - inp.available()
                     val g = gl[i]
                     if (g == null) chunk.write(bytes, pos, end - pos)
-                    else { flush(); arr.add(COSFloat(g.adjust)) }
+                    else { flush(); arr.add(COSFloat(adj(g))) }
                     pos = end
                     i++
                 }
@@ -360,10 +363,13 @@ object TextEdit {
         val first = gs.first()
         val style = styleOf(gs.maxByOrNull { it.size }!!)
         val run = TextRun(pageIndex, gs.joinToString("") { it.unicode }, rectOf(gs), style)
-        val changed = ArrayList(removeGlyphs(doc, page, gs))
+        val chosen = if (text.isNotEmpty()) fontFor(doc, first, style, text) else null
+        val oldW = gs.last().let { it.x + it.advUser } - first.x
+        val newW = chosen?.let { (f, _) -> runCatching { f.getStringWidth(text) / 1000f * first.size * first.th }.getOrNull() } ?: 0f
+        val changed = ArrayList(removeGlyphs(doc, page, gs, newW - oldW))
         var used = "—"
-        if (text.isNotEmpty()) {
-            val (font, desc) = fontFor(doc, first, style, text)
+        if (chosen != null) {
+            val (font, desc) = chosen
             used = desc
             com.tom_roush.pdfbox.pdmodel.PDPageContentStream(doc, page,
                 com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
