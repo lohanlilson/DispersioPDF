@@ -162,6 +162,17 @@ class PdfEngine(context: Context) {
         }
     }
 
+    /** Caracteres da página com a caixa de cada um (coordenadas do PDF). */
+    suspend fun chars(pdf: OpenPdf, page: Int): List<Pair<Char, RectF?>> = withContext(dispatcher) {
+        pdf.doc.openPage(page).use { p ->
+            p.openTextPage().use { tp ->
+                (0 until tp.textPageCountChars()).map { k ->
+                    tp.textPageGetUnicode(k) to tp.textPageGetCharBox(k)?.takeIf { kotlin.math.abs(it.right - it.left) > 0.01f }
+                }
+            }
+        }
+    }
+
     suspend fun lineAt(pdf: OpenPdf, page: Int, fx: Float, fy: Float): TextLine? = withContext(dispatcher) {
         pdf.doc.openPage(page).use { p ->
             val pt = toPdf(p, pdf.sizes[page], fx, fy)

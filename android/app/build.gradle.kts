@@ -78,6 +78,8 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // escanear documentos com a câmera (scanner do Google: bordas, perspectiva e filtros)
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
+    // OCR no próprio celular (sem internet)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     androidTestImplementation(bom)

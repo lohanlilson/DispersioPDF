@@ -83,7 +83,7 @@ data class SignResult(val bytes: ByteArray, val timestamp: Boolean, val problem:
 data class SigInfo(
     val field: String, val signer: String, val document: String?, val date: Date?, val tsaDate: Date?,
     val intact: Boolean, val coversWhole: Boolean, val reason: String?, val location: String?,
-    val issuer: String, val validUntil: Date?, val error: String?,
+    val issuer: String, val validUntil: Date?, val error: String?, val revisionEnd: Int = 0,
 ) {
     val ok get() = intact && error == null
 }
@@ -378,7 +378,7 @@ object PdfSigner {
                     val (name, docId) = Certs.splitName(Certs.cn(cert))
                     out += SigInfo(field, name, docId, sig.signDate?.time, tsa, ok, covers, sig.reason, sig.location,
                         runCatching { X500Name.getInstance(cert.issuerX500Principal.encoded).getRDNs(BCStyle.CN).first().first.value.toString() }.getOrDefault(""),
-                        cert.notAfter, null)
+                        cert.notAfter, null, end)
                 } catch (e: Exception) {
                     out += SigInfo(field, sig.name ?: "?", null, sig.signDate?.time, null, false, false, sig.reason, sig.location,
                         "", null, e.message ?: e.javaClass.simpleName)

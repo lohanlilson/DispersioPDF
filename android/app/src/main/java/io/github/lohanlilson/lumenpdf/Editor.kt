@@ -573,4 +573,64 @@ object Editor {
             dst.outputStream().buffered().use { doc.save(it) }
         }
     }
+
+    // ------------------------------------------------------------ OCR
+    /** Palavra reconhecida: canto inferior esquerdo visual (x,y) em coordenadas do PDF e tamanho visual em pontos. */
+    data class OcrWord(val text: String, val x: Float, val y: Float, val w: Float, val h: Float)
+
+    /** Camada de texto invisível sobre a imagem (o PDF passa a ser pesquisável e o texto pode ser copiado). */
+    fun ocrLayer(doc: PDDocument, pageIndex: Int, words: List<OcrWord>): List<COSDictionary> {
+        if (words.isEmpty()) return emptyList()
+        val page = doc.getPage(pageIndex)
+        return withContent(doc, page) { cs ->
+            val font = loadFont(doc)
+            cs.beginText()
+            cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.NEITHER)
+            for (wd in words) {
+                val size = (wd.h * 0.85f).coerceAtLeast(2f)
+                val natural = runCatching { font.getStringWidth(wd.text) / 1000 * size }.getOrNull() ?: continue
+                if (natural <= 0f) continue
+                cs.setFont(font, size)
+                cs.setHorizontalScaling((100f * wd.w / natural).coerceIn(20f, 400f))
+                cs.setTextMatrix(upright(page, wd.x, wd.y + wd.h * 0.18f))
+                runCatching { cs.showText(wd.text) }
+            }
+            cs.endText()
+        }
+    }
+
+    // ------------------------------------------------------------ tarja definitiva
+    /**
+     * Substitui o conteúdo da página por uma imagem dela já com as tarjas pretas: o que estava embaixo
+     * deixa de existir no arquivo. [image] = página renderizada (orientação de exibição) com as tarjas.
+     * Remove os comentários que ficavam sob as tarjas (pdfRects = tarjas em coordenadas do PDF).
+     */
+    fun redactPage(doc: PDDocument, pageIndex: Int, image: Bitmap, pdfRects: List<RectF>) {
+        val page = doc.getPage(pageIndex)
+        val box = page.cropBox
+        val rot = ((page.rotation % 360) + 360) % 360
+        val img = com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory.createFromImage(doc, image, 0.9f)
+        page.resources = com.tom_roush.pdfbox.pdmodel.PDResources()
+        PDPageContentStream(doc, page, PDPageContentStream.AppendMode.OVERWRITE, true, true).use { cs ->
+            val (vw, vh) = if (rot % 180 == 0) box.width to box.height else box.height to box.width
+            val m = when (rot) {
+                90 -> Matrix(0f, 1f, -1f, 0f, box.upperRightX, box.lowerLeftY)
+                180 -> Matrix(-1f, 0f, 0f, -1f, box.upperRightX, box.upperRightY)
+                270 -> Matrix(0f, -1f, 1f, 0f, box.lowerLeftX, box.upperRightY)
+                else -> Matrix(1f, 0f, 0f, 1f, box.lowerLeftX, box.lowerLeftY)
+            }
+            cs.transform(m)
+            cs.drawImage(img, 0f, 0f, vw, vh)
+        }
+        // comentários e campos sob as tarjas
+        val arr = page.cosObject.getDictionaryObject(COSName.ANNOTS) as? COSArray
+        if (arr != null) {
+            for (k in arr.size() - 1 downTo 0) {
+                val d = arr.getObject(k) as? COSDictionary ?: continue
+                val r = (d.getDictionaryObject(COSName.RECT) as? COSArray)?.toFloatArray() ?: continue
+                val ar = RectF(minOf(r[0], r[2]), maxOf(r[1], r[3]), maxOf(r[0], r[2]), minOf(r[1], r[3]))
+                if (pdfRects.any { t -> minOf(t.right, ar.right) > maxOf(t.left, ar.left) && minOf(t.top, ar.top) > maxOf(t.bottom, ar.bottom) }) arr.remove(k)
+            }
+        }
+    }
 }

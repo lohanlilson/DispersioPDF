@@ -18,7 +18,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Tool { NONE, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT }
+enum class Tool { NONE, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT }
+
+/** Comparação aberta: as duas versões e a lista de alterações. */
+class CompareState(val a: OpenPdf, val b: OpenPdf, val nameA: String, val nameB: String, val changes: List<Change>,
+                   val title: String, val intro: String = "")
 
 /** Caixa sendo posicionada (rubrica, assinatura digital ou comentário a mover), em frações da largura da página. */
 data class Placement(val kind: Tool, val page: Int, val l: Float, val t: Float, val r: Float, val b: Float,
@@ -62,6 +66,7 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var placing by mutableStateOf<Placement?>(null)
     var annots by mutableStateOf<List<Pair<Editor.AnnotRef, FracRect>>>(emptyList())
     var selAnnot by mutableStateOf<Editor.AnnotRef?>(null)
+    val redactions = mutableStateListOf<Pair<Int, FracRect>>()
     /** últimas imagens exibidas por página (marcador enquanto a nova renderização não fica pronta) */
     val lastBitmaps = android.util.LruCache<Int, androidx.compose.ui.graphics.ImageBitmap>(10)
 }
@@ -422,6 +427,8 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     var toast by mutableStateOf<String?>(null)
     var confirmClose by mutableStateOf(false)
     var showSettings by mutableStateOf(false)
+    var progress by mutableStateOf<String?>(null)
+    var compare by mutableStateOf<CompareState?>(null)
     var closeAfterSave = false
 
     fun requestClose() {
@@ -507,6 +514,179 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         } finally {
             loading = false
         }
+    }
+
+    // ------------------------------------------------------------ leva 2
+    /** OCR nas páginas sem texto: cria a camada de texto invisível (pesquisável e copiável). */
+    fun ocr(d: ViewerDoc) = viewModelScope.launch {
+        try {
+            val todo = (0 until d.pageCount).filter { engine.chars(d.pdf, it).count { c -> !c.first.isWhitespace() } < 15 }
+            if (todo.isEmpty()) { toast = "Todas as páginas já têm texto"; return@launch }
+            val words = HashMap<Int, List<Editor.OcrWord>>()
+            for ((k, p) in todo.withIndex()) {
+                progress = "Reconhecendo texto… página ${k + 1} de ${todo.size}"
+                val sz = d.pdf.sizes[p]
+                val ws = Ocr.page(engine, d.pdf, p)
+                if (ws.isEmpty()) continue
+                val pts = engine.pdfPoints(d.pdf, p, ws.map { it.second.l to it.second.b })
+                words[p] = ws.mapIndexed { i, (t, r) -> Editor.OcrWord(t, pts[i * 2], pts[i * 2 + 1], (r.r - r.l) * sz.w, (r.b - r.t) * sz.w) }
+            }
+            progress = null
+            if (words.isEmpty()) { toast = "Nenhum texto reconhecido"; return@launch }
+            edit(d, "aplicar o OCR") { doc -> words.flatMap { (p, ws) -> Editor.ocrLayer(doc, p, ws) } }.join()
+            toast = "Texto reconhecido em ${words.size} página(s). Agora dá para buscar e copiar."
+        } catch (e: Exception) {
+            error = "Não foi possível reconhecer o texto.\n${e.message ?: ""}"
+        } finally {
+            progress = null
+        }
+    }
+
+    /** Texto de todas as páginas (para Word, Excel e .txt). */
+    suspend fun allText(d: ViewerDoc): List<String> = (0 until d.pageCount).map { engine.pageText(d.pdf, it) }
+
+    fun convert(d: ViewerDoc, kind: String, target: Uri?) = viewModelScope.launch {
+        val app = getApplication<Application>()
+        try {
+            progress = "Convertendo…"
+            if (kind == "imagens") {
+                val n = Convert.images(app, engine, d.pdf, d.name.removeSuffix(".pdf").removeSuffix(".PDF")) { progress = "Salvando página ${it + 1}…" }
+                toast = "$n imagem(ns) salvas na galeria (Imagens › Lumen PDF)"
+                return@launch
+            }
+            val pages = allText(d)
+            if (pages.all { it.isBlank() }) { error = "Este PDF não tem texto (é imagem). Use \"Reconhecer texto (OCR)\" antes."; return@launch }
+            withContext(Dispatchers.IO) {
+                app.contentResolver.openOutputStream(target!!, "wt")!!.use { o ->
+                    when (kind) {
+                        "word" -> Convert.docx(pages, o)
+                        "excel" -> Convert.xlsx(pages, o)
+                        else -> o.write(pages.joinToString("\n\n\u000C").toByteArray())
+                    }
+                }
+            }
+            toast = "Convertido: ${displayName(app, target!!)}"
+        } catch (e: Exception) {
+            error = "Não foi possível converter.\n${e.message ?: ""}"
+        } finally {
+            progress = null
+        }
+    }
+
+    fun detectFields(d: ViewerDoc) = viewModelScope.launch {
+        progress = "Procurando campos…"
+        val chars = (0 until d.pageCount).associateWith { engine.chars(d.pdf, it) }
+        var count: Map<String, Int> = emptyMap()
+        pages(d, "criar os campos", done = { _, _ -> }) { doc, _ ->
+            val found = chars.mapValues { (p, c) -> FieldDetect.detect(doc, p, c) }.filterValues { it.isNotEmpty() }
+            count = FieldDetect.create(doc, found)
+        }.join()
+        progress = null
+        val total = count.values.sum()
+        toast = if (total == 0) "Nenhum campo novo encontrado" else
+            "$total campo(s): ${count["text"]} de texto, ${count["check"]} caixa(s), ${count["signature"]} de assinatura"
+    }
+
+    /** Tarjas de padrões (CPF, CNPJ, e-mail, telefone) encontradas no texto. */
+    suspend fun findPatterns(d: ViewerDoc, kinds: Set<String>): List<Pair<Int, FracRect>> {
+        val re = mapOf(
+            "cpf" to "\\d{3}\\.?\\d{3}\\.?\\d{3}-?\\d{2}",
+            "cnpj" to "\\d{2}\\.?\\d{3}\\.?\\d{3}/?\\d{4}-?\\d{2}",
+            "email" to "[\\w.+-]+@[\\w-]+\\.[\\w.-]+",
+            "telefone" to "\\(?\\d{2}\\)?\\s?9?\\d{4}-?\\d{4}",
+        ).filterKeys { it in kinds }.values.joinToString("|").toRegex()
+        val out = ArrayList<Pair<Int, FracRect>>()
+        for (p in 0 until d.pageCount) {
+            val chars = engine.chars(d.pdf, p)
+            val text = String(chars.map { it.first }.toCharArray())
+            for (m in re.findAll(text)) {
+                val boxes = chars.subList(m.range.first, m.range.last + 1).mapNotNull { it.second }
+                if (boxes.isEmpty()) continue
+                val r = android.graphics.RectF(boxes.minOf { it.left }, boxes.maxOf { it.top }, boxes.maxOf { it.right }, boxes.minOf { it.bottom })
+                out += p to engine.fracOf(d.pdf, p, r)
+            }
+        }
+        return out
+    }
+
+    /** Aplica as tarjas: as páginas atingidas são regravadas como imagem, sem o conteúdo coberto. */
+    fun applyRedactions(d: ViewerDoc) = viewModelScope.launch {
+        val items = d.redactions.toList()
+        if (items.isEmpty()) return@launch
+        progress = "Aplicando tarjas…"
+        try {
+            val byPage = items.groupBy({ it.first }, { it.second })
+            val images = HashMap<Int, android.graphics.Bitmap>()
+            val pdfRects = HashMap<Int, List<android.graphics.RectF>>()
+            for ((p, rects) in byPage) {
+                val sz = d.pdf.sizes[p]
+                val w = (sz.w * 200 / 72).toInt()
+                val bmp = engine.render(d.pdf, p, w).copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+                val c = android.graphics.Canvas(bmp)
+                val black = android.graphics.Paint().apply { color = android.graphics.Color.BLACK }
+                rects.forEach { r -> c.drawRect(r.l * w - 2, r.t * w - 2, r.r * w + 2, r.b * w + 2, black) }
+                images[p] = bmp
+                pdfRects[p] = rects.map { r ->
+                    val pts = engine.pdfPoints(d.pdf, p, listOf(r.l to r.t, r.r to r.b))
+                    android.graphics.RectF(minOf(pts[0], pts[2]), maxOf(pts[1], pts[3]), maxOf(pts[0], pts[2]), minOf(pts[1], pts[3]))
+                }
+            }
+            d.redactions.clear()
+            pages(d, "aplicar as tarjas") { doc, _ -> images.forEach { (p, img) -> Editor.redactPage(doc, p, img, pdfRects[p]!!) } }.join()
+            toast = "Tarjas aplicadas em ${images.size} página(s)"
+        } finally {
+            progress = null
+        }
+    }
+
+    // ------------------------------------------------------------ comparar
+    private suspend fun runCompare(a: OpenPdf, b: OpenPdf, nameA: String, nameB: String, title: String, intro: String) {
+        progress = "Comparando…"
+        try {
+            val wa = Compare.words(engine, a)
+            val wb = Compare.words(engine, b)
+            val ch = withContext(Dispatchers.Default) { Compare.changes(wa, wb) }
+            compare = CompareState(a, b, nameA, nameB, ch, title, intro)
+        } finally {
+            progress = null
+        }
+    }
+
+    fun compareWith(d: ViewerDoc, other: Uri) = viewModelScope.launch {
+        try {
+            val app = getApplication<Application>()
+            val fa = currentFile(d).let { f -> File(app.cacheDir, "comparar_a.pdf").also { f.copyTo(it, true) } }
+            val fb = cacheCopy(other, "comparar_b.pdf")
+            val a = engine.open(app, Uri.fromFile(fa), d.password)
+            val b = engine.open(app, Uri.fromFile(fb))
+            runCompare(a, b, d.name, displayName(app, other), "Comparar documentos", "")
+        } catch (e: Exception) {
+            error = "Não foi possível comparar.\n${e.message ?: ""}"
+        }
+    }
+
+    /** Versão assinada × versão atual. */
+    fun changesAfter(d: ViewerDoc, sig: SigInfo) = viewModelScope.launch {
+        try {
+            val app = getApplication<Application>()
+            val cur = currentFile(d)
+            val bytes = withContext(Dispatchers.IO) { cur.readBytes() }
+            val fa = File(app.cacheDir, "versao_assinada.pdf").apply { writeBytes(bytes.copyOfRange(0, sig.revisionEnd.coerceAtMost(bytes.size))) }
+            val fb = File(app.cacheDir, "versao_atual.pdf").apply { writeBytes(bytes) }
+            val a = engine.open(app, Uri.fromFile(fa), d.password)
+            val b = engine.open(app, Uri.fromFile(fb), d.password)
+            val later = d.signatures.filter { it.revisionEnd > sig.revisionEnd }.joinToString { it.signer }
+            runCompare(a, b, "Versão assinada", "Versão atual", "Alterações após a assinatura",
+                "Depois da assinatura de ${sig.signer}" + (if (later.isNotEmpty()) " · assinaturas posteriores: $later" else ""))
+        } catch (e: Exception) {
+            error = "Não foi possível comparar.\n${e.message ?: ""}"
+        }
+    }
+
+    fun closeCompare() {
+        val c = compare ?: return
+        compare = null
+        viewModelScope.launch { engine.close(c.a); engine.close(c.b) }
     }
 }
 

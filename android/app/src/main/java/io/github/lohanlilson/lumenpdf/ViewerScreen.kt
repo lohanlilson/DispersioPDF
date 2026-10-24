@@ -172,6 +172,11 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var editLine by remember { mutableStateOf<TextLine?>(null) }
     var dlg by remember { mutableStateOf("") }           // comprimir | senha | marca | numeros | prefs
     var confirmSigned by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val pickCompare = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.compareWith(d, u) }
+    var convertKind by remember { mutableStateOf("") }
+    val convertTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { u ->
+        if (u != null) vm.convert(d, convertKind, u)
+    }
     var reader by remember { mutableStateOf<Reader?>(null) }
     fun guarded(a: () -> Unit) { if (d.signatures.isNotEmpty()) confirmSigned = a else a() }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { reader?.release() } }
@@ -262,6 +267,10 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                             scope.launch { list.animateScrollToItem(pg) }
                                         }.also { r -> scope.launch { while (!r.ready) kotlinx.coroutines.delay(100); r.start(d.page) } }
                                     })
+                                    DropdownMenuItem(text = { Text("Reconhecer texto (OCR)") }, onClick = { menu = false; vm.ocr(d) })
+                                    DropdownMenuItem(text = { Text("Converter…") }, onClick = { menu = false; dlg = "converter" })
+                                    DropdownMenuItem(text = { Text("Detectar campos de formulário") }, onClick = { menu = false; guarded { vm.detectFields(d) } })
+                                    DropdownMenuItem(text = { Text("Comparar com outro PDF…") }, onClick = { menu = false; pickCompare.launch(arrayOf("application/pdf")) })
                                     DropdownMenuItem(text = { Text("Comprimir…") }, onClick = { menu = false; dlg = "comprimir" })
                                     DropdownMenuItem(text = { Text("Proteger com senha…") }, onClick = { menu = false; dlg = "senha" })
                                     DropdownMenuItem(text = { Text("Marca d'água…") }, onClick = { menu = false; dlg = "marca" })
@@ -400,7 +409,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             ) {
                 LazyColumn(
                     state = list,
-                    userScrollEnabled = d.tool != Tool.INK && d.placing == null,
+                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.REDACT && d.placing == null,
                     modifier = Modifier.width(with(density) { contentW.toDp() }).fillMaxHeight()
                         .graphicsLayer {
                             scaleX = gesture
@@ -495,7 +504,16 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             vm.signWithCert(d, cert, pg, rect, fieldName, reason, location, tsa)
         }
     }
-    if (sigSheet) SignaturesSheet(d) { sigSheet = false }
+    if (sigSheet) SignaturesSheet(d, onChanges = { sig -> sigSheet = false; vm.changesAfter(d, sig) }) { sigSheet = false }
+    vm.compare?.let { c -> CompareScreen(vm, c) { vm.closeCompare() } }
+    vm.progress?.let { msg ->
+        AlertDialog(onDismissRequest = {}, confirmButton = {}, text = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(28.dp))
+                Text(msg, Modifier.padding(start = 16.dp))
+            }
+        })
+    }
     when (dlg) {
         "comprimir" -> CompressDialog((d.work?.length() ?: Uri.parse(d.uri).path?.let { File(it).length() } ?: 0L) / 1024,
             onDismiss = { dlg = "" }) { px, q ->
@@ -522,6 +540,21 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             guarded { vm.pages(d, "numerar as páginas") { doc, _ -> Editor.pageNumbers(doc, f) } }
         }
         "prefs" -> SettingsScreen(vm) { dlg = "" }
+        "converter" -> AlertDialog(onDismissRequest = { dlg = "" }, title = { Text("Converter para") },
+            text = {
+                Column {
+                    val base = d.name.removeSuffix(".pdf").removeSuffix(".PDF")
+                    listOf(Triple("word", "Word (.docx)", "$base.docx"), Triple("excel", "Excel (.xlsx)", "$base.xlsx"),
+                        Triple("texto", "Texto (.txt)", "$base.txt"), Triple("imagens", "Imagens JPG (galeria)", "")).forEach { (k, l, fname) ->
+                        TextButton({
+                            dlg = ""
+                            convertKind = k
+                            if (k == "imagens") vm.convert(d, k, null) else convertTarget.launch(fname)
+                        }, modifier = Modifier.fillMaxWidth()) { Text(l, Modifier.fillMaxWidth()) }
+                    }
+                }
+            },
+            confirmButton = {}, dismissButton = { TextButton({ dlg = "" }) { Text("Cancelar") } })
     }
     confirmSigned?.let { act ->
         AlertDialog(onDismissRequest = { confirmSigned = null }, title = { Text("Documento assinado") },
@@ -637,6 +670,22 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                                 }
                             },
                         )
+                    } else if (d.tool == Tool.REDACT) {
+                        // tarja: arrastar desenha o retângulo
+                        var start = Offset.Zero
+                        detectDragGestures(
+                            onDragStart = { o -> start = o; d.redactions += i to FracRect(o.x / pageW, o.y / pageW, o.x / pageW, o.y / pageW) },
+                            onDrag = { ch, _ ->
+                                ch.consume()
+                                val p = ch.position
+                                if (d.redactions.isNotEmpty()) d.redactions[d.redactions.lastIndex] = i to FracRect(
+                                    minOf(start.x, p.x) / pageW, minOf(start.y, p.y) / pageW, maxOf(start.x, p.x) / pageW, maxOf(start.y, p.y) / pageW)
+                            },
+                            onDragEnd = {
+                                val last = d.redactions.lastOrNull()
+                                if (last != null && (last.second.r - last.second.l) * pageW < 8) d.redactions.removeAt(d.redactions.lastIndex)
+                            },
+                        )
                     } else if (d.tool == Tool.INK) {
                         // desenho à mão livre
                         var cur = mutableListOf<Offset>()
@@ -683,6 +732,14 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
             shown?.let {
                 Image(it, "Página ${i + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
                     colorFilter = if (d.night) INVERT else null)
+            }
+            val reds = d.redactions.filter { it.first == i }
+            if (reds.isNotEmpty()) Canvas(Modifier.fillMaxSize()) {
+                val w = size.width
+                reds.forEach { (_, r) ->
+                    drawRect(Color(0xAA000000), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w))
+                    drawRect(Color(0xFFD7373F), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w), style = Stroke(2f))
+                }
             }
             val place = d.placing?.takeIf { it.page == i }
             val selA = d.selAnnot?.let { a -> d.annots.firstOrNull { it.first == a && a.page == i }?.second }

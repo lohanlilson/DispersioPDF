@@ -22,6 +22,7 @@ import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.geometry.Offset
@@ -205,7 +206,7 @@ class ViewerTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithText("1 / 3").fetchSemanticsNodes().isNotEmpty() }
             Thread.sleep(1500)
             compose.onNodeWithContentDescription("Editar").performClick()
-            compose.onNodeWithContentDescription("Rubrica").performClick()
+            compose.onNodeWithContentDescription("Rubrica").performScrollTo().performClick()
             compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.5f, height * 0.4f)) }
             compose.mainClock.advanceTimeBy(1000)
             compose.waitUntil(5_000) { compose.onAllNodesWithText("Confirmar").fetchSemanticsNodes().isNotEmpty() }
@@ -219,7 +220,7 @@ class ViewerTest {
             compose.onNodeWithText("Confirmar").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Salvar").fetchSemanticsNodes().isNotEmpty() }
             // editar texto: toca no título da página 1
-            compose.onNodeWithContentDescription("Editar texto").performClick()
+            compose.onNodeWithContentDescription("Editar texto").performScrollTo().performClick()
             compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.2f, height * 72f / 842f)) }
             compose.mainClock.advanceTimeBy(1000)
             compose.waitUntil(8_000) { compose.onAllNodesWithText("Texto da linha").fetchSemanticsNodes().isNotEmpty() }

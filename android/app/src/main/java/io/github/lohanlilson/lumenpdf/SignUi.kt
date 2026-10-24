@@ -168,7 +168,7 @@ fun SignatureBanner(d: ViewerDoc, onOpen: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SignaturesSheet(d: ViewerDoc, onDismiss: () -> Unit) {
+fun SignaturesSheet(d: ViewerDoc, onChanges: (SigInfo) -> Unit = {}, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Text("Assinaturas digitais", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
@@ -190,6 +190,7 @@ fun SignaturesSheet(d: ViewerDoc, onDismiss: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     s.reason?.let { Text("Motivo: $it", style = MaterialTheme.typography.bodySmall) }
                     s.location?.let { Text("Local: $it", style = MaterialTheme.typography.bodySmall) }
+                    if (!s.coversWhole && s.ok && s.revisionEnd > 0) TextButton({ onChanges(s) }) { Text("O que mudou depois desta assinatura") }
                     Text("A identidade (cadeia ICP-Brasil) é conferida no Lumen PDF do computador.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

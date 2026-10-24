@@ -1,5 +1,16 @@
 # Novidades do Lumen PDF para Android
 
+## 0.3.0
+
+Inclui tudo da 0.2.0 e mais:
+
+- **Reconhecer texto (OCR):** documentos escaneados viram pesquisáveis e o texto pode ser copiado. O reconhecimento roda no próprio celular, sem internet.
+- **Converter** para Word (.docx), Excel (.xlsx), texto (.txt) ou imagens JPG na galeria.
+- **Detectar campos de formulário:** linhas ____, pontilhados, ( ) e linhas de assinatura viram campos preenchíveis.
+- **Comparar com outro PDF:** as diferenças aparecem destacadas, com navegação entre elas.
+- **O que mudou depois de cada assinatura,** no painel de assinaturas.
+- **Tarjar:** arraste sobre o que deve sumir ou marque CPF, CNPJ, e-mail e telefone automaticamente. A tarja é definitiva: o conteúdo coberto é apagado do arquivo.
+
 ## 0.2.0
 
 - **Assinatura e rubrica do tamanho que você quiser:** toque ou arraste na página, mova a caixa e puxe o canto para ajustar o tamanho antes de confirmar.

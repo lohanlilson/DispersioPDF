@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Rectangle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.VerifiedUser
@@ -84,6 +85,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.launch
 import java.io.File
 
 val INK_COLORS = listOf(0xFFD7373F, 0xFF1473E6, 0xFF1C1B22, 0xFF6D3CF0, 0xFF2D9D78)
@@ -115,10 +117,12 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 Tool.SIGN -> "Toque ou arraste onde quer colocar sua rubrica"
                 Tool.CERT -> "Toque ou arraste onde a assinatura digital deve ficar"
                 Tool.EDITTEXT -> "Toque numa linha de texto para alterá-la"
+                Tool.REDACT -> "Arraste sobre o que deve ser apagado (tarja preta definitiva)"
             }
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
             if (d.tool == Tool.INK) InkOptions(vm, d)
+            if (d.tool == Tool.REDACT) RedactOptions(vm, d)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 fun pick(t: Tool) {
@@ -137,6 +141,7 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 ToolButton(Icons.Filled.Close, "Marcar ✗", d.tool == Tool.CROSS) { pick(Tool.CROSS) }
                 ToolButton(Icons.Filled.Draw, "Rubrica", d.tool == Tool.SIGN) { pick(Tool.SIGN); if (d.tool == Tool.SIGN) onSign() }
                 ToolButton(Icons.Filled.VerifiedUser, "Certificado", d.tool == Tool.CERT) { pick(Tool.CERT) }
+                ToolButton(Icons.Filled.Rectangle, "Tarjar", d.tool == Tool.REDACT) { pick(Tool.REDACT) }
                 ToolButton(Icons.AutoMirrored.Filled.Undo, "Desfazer", false, d.canUndo && !d.busy) { vm.undo(d) }
                 ToolButton(Icons.AutoMirrored.Filled.Redo, "Refazer", false, d.canRedo && !d.busy) { vm.redo(d) }
             }
@@ -369,5 +374,40 @@ fun AnnotBar(vm: AppVm, d: ViewerDoc, onEditNote: (Editor.AnnotRef) -> Unit) {
                 IconButton({ d.selAnnot = null }) { Icon(Icons.Filled.Close, "Fechar") }
             }
         }
+    }
+}
+
+@Composable
+private fun RedactOptions(vm: AppVm, d: ViewerDoc) {
+    var patterns by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        TextButton({ patterns = true }) { Text("CPF, CNPJ…") }
+        Spacer(Modifier.weight(1f))
+        TextButton({ d.redactions.clear() }, enabled = d.redactions.isNotEmpty()) { Text("Limpar") }
+        TextButton({ vm.applyRedactions(d) }, enabled = d.redactions.isNotEmpty() && !d.busy) { Text("Aplicar (${d.redactions.size})") }
+    }
+    if (patterns) {
+        val sel = remember { mutableStateListOf("cpf", "cnpj") }
+        AlertDialog(onDismissRequest = { patterns = false }, title = { Text("Tarjar automaticamente") },
+            text = {
+                Column {
+                    listOf("cpf" to "CPF", "cnpj" to "CNPJ", "email" to "E-mail", "telefone" to "Telefone").forEach { (k, l) ->
+                        Row(Modifier.fillMaxWidth().clickable { if (k in sel) sel.remove(k) else sel.add(k) }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(k in sel, { if (it) sel.add(k) else sel.remove(k) }); Text(l)
+                        }
+                    }
+                    Text("As ocorrências são marcadas para você conferir antes de aplicar.", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = { TextButton({
+                patterns = false
+                scope.launch {
+                    val found = vm.findPatterns(d, sel.toSet())
+                    d.redactions.addAll(found)
+                    vm.toast = "${found.size} ocorrência(s) marcada(s)"
+                }
+            }, enabled = sel.isNotEmpty()) { Text("Marcar") } },
+            dismissButton = { TextButton({ patterns = false }) { Text("Cancelar") } })
     }
 }
