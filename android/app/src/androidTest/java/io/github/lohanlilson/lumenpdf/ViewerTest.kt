@@ -21,6 +21,8 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.geometry.Offset
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -186,6 +188,57 @@ class ViewerTest {
             val streams = doc.getPage(0).contentStreams.asSequence().count()
             Log.i("LumenTest", "fluxos de conteúdo na página 1: $streams")
             assertTrue("✓ não foi gravado", streams > 1)
+        }
+    }
+
+    /** Rubrica com tamanho ajustável e editar texto pela interface. */
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun rubricaAjustavelEEditarTexto() {
+        // rubrica salva antes (como se o usuário já tivesse desenhado)
+        val sig = Bitmap.createBitmap(300, 100, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(sig).drawLine(10f, 80f, 290f, 20f, Paint().apply { color = Color.BLUE; strokeWidth = 8f })
+        signatureFile(ctx).outputStream().use { sig.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val f = makePdf()
+        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.fromFile(f), "application/pdf").setClass(ctx, MainActivity::class.java)
+        ActivityScenario.launch<MainActivity>(intent).use {
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("1 / 3").fetchSemanticsNodes().isNotEmpty() }
+            Thread.sleep(1500)
+            compose.onNodeWithContentDescription("Editar").performClick()
+            compose.onNodeWithContentDescription("Rubrica").performClick()
+            compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.5f, height * 0.85f)) }
+            compose.mainClock.advanceTimeBy(1000)
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("Confirmar").fetchSemanticsNodes().isNotEmpty() }
+            // puxa o canto para aumentar a rubrica
+            compose.onNodeWithContentDescription("Página 1").performTouchInput {
+                val start = Offset(width * 0.5f + 60f * width / 595f, height * 0.85f + 20f * width / 595f)
+                swipe(start, start + Offset(width * 0.2f, 0f), 600)
+            }
+            compose.waitForIdle()
+            shot("09_rubrica_ajustavel")
+            compose.onNodeWithText("Confirmar").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Salvar").fetchSemanticsNodes().isNotEmpty() }
+            // editar texto: toca no título da página 1
+            compose.onNodeWithContentDescription("Editar texto").performClick()
+            compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.2f, height * 72f / 842f)) }
+            compose.mainClock.advanceTimeBy(1000)
+            compose.waitUntil(8_000) { compose.onAllNodesWithText("Texto da linha").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNode(hasSetTextAction()).performTextReplacement("Contrato revisado")
+            compose.onNodeWithText("OK").performClick()
+            compose.mainClock.advanceTimeBy(500)
+            Thread.sleep(5000)
+            compose.waitForIdle()
+            shot("10_texto_editado")
+            compose.onNodeWithContentDescription("Salvar").performClick()
+            compose.onNodeWithText("Salvar").performClick()
+            Thread.sleep(2500)
+        }
+        PDDocument.load(f).use { doc ->
+            val txt = com.tom_roush.pdfbox.text.PDFTextStripper().apply { startPage = 1; endPage = 1 }.getText(doc)
+            val images = doc.getPage(0).resources.xObjectNames.count { doc.getPage(0).resources.isImageXObject(it) }
+            Log.i("LumenTest", "texto editado: ${txt.take(60)} imagens=$images")
+            assertTrue("texto não foi editado", txt.contains("Contrato revisado"))
+            assertTrue("rubrica não foi gravada", images >= 1)
         }
     }
 }

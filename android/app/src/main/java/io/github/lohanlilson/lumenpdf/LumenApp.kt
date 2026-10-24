@@ -7,11 +7,14 @@ class LumenApp : Application() {
         private set
     lateinit var recents: Recents
         private set
+    lateinit var prefs: Prefs
+        private set
 
     override fun onCreate() {
         super.onCreate()
         com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
         engine = PdfEngine(this)
         recents = Recents(this)
+        prefs = Prefs(this)
     }
 }

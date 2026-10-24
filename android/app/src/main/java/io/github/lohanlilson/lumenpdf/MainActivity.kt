@@ -16,7 +16,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) handle(intent)
-        setContent { LumenTheme { LumenRoot(vm) } }
+        setContent { LumenTheme(vm.prefs.theme) { LumenRoot(vm) } }
     }
 
     override fun onNewIntent(intent: Intent) {

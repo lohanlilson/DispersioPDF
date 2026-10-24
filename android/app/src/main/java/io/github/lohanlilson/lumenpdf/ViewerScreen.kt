@@ -25,6 +25,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditOff
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
@@ -114,6 +117,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.android.awaitFrame
@@ -165,6 +169,18 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var certSign by remember { mutableStateOf<Triple<Int, android.graphics.RectF, String?>?>(null) }  // página, área (PDF), campo
     var sigSheet by remember { mutableStateOf(false) }
     var organize by remember { mutableStateOf(false) }
+    var editLine by remember { mutableStateOf<TextLine?>(null) }
+    var dlg by remember { mutableStateOf("") }           // comprimir | senha | marca | numeros | prefs
+    var confirmSigned by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var reader by remember { mutableStateOf<Reader?>(null) }
+    fun guarded(a: () -> Unit) { if (d.signatures.isNotEmpty()) confirmSigned = a else a() }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { reader?.release() } }
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(vm.prefs.keepScreenOn) {
+        view.keepScreenOn = vm.prefs.keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
+    var editNote by remember { mutableStateOf<Editor.AnnotRef?>(null) }
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { u ->
         if (u != null) vm.saveAs(d, u)
     }
@@ -235,6 +251,22 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                         leadingIcon = { Icon(Icons.Filled.DarkMode, null) },
                                         onClick = { menu = false; d.night = !d.night })
                                     DropdownMenuItem(text = { Text("Organizar páginas…") }, onClick = { menu = false; organize = true })
+                                    DropdownMenuItem(text = { Text("Imprimir…") }, onClick = {
+                                        menu = false
+                                        scope.launch { printPdf(ctx, vm.currentFile(d), d.name) }
+                                    })
+                                    DropdownMenuItem(text = { Text("Ler em voz alta") }, onClick = {
+                                        menu = false
+                                        reader?.release()
+                                        reader = Reader(ctx, { pg -> vm.engine.pageText(d.pdf, pg) }, d.pageCount) { pg ->
+                                            scope.launch { list.animateScrollToItem(pg) }
+                                        }.also { r -> scope.launch { while (!r.ready) kotlinx.coroutines.delay(100); r.start(d.page) } }
+                                    })
+                                    DropdownMenuItem(text = { Text("Comprimir…") }, onClick = { menu = false; dlg = "comprimir" })
+                                    DropdownMenuItem(text = { Text("Proteger com senha…") }, onClick = { menu = false; dlg = "senha" })
+                                    DropdownMenuItem(text = { Text("Marca d'água…") }, onClick = { menu = false; dlg = "marca" })
+                                    DropdownMenuItem(text = { Text("Numerar páginas…") }, onClick = { menu = false; dlg = "numeros" })
+                                    DropdownMenuItem(text = { Text("Preferências…") }, onClick = { menu = false; dlg = "prefs" })
                                     DropdownMenuItem(text = { Text("Ir para a página…") }, onClick = { menu = false; gotoDialog = true })
                                     DropdownMenuItem(text = { Text("Salvar uma cópia…") }, onClick = { menu = false; saveAs.launch(d.name) })
                                     DropdownMenuItem(text = { Text("Seu nome nos comentários…") }, onClick = { menu = false; nameDialog = true })
@@ -294,16 +326,34 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                     val hit = Triple(pg, fx, fy)
                     android.util.Log.i("LumenPdf", "toque $hit ferramenta=${d.tool} edição=${d.editing}")
                     val field = d.fields.firstOrNull { (f, r) -> f.page == pg && fx in r.l..r.r && fy in r.t..r.b && !f.readOnly }?.first
+                    val annot = if (d.editing && d.tool == Tool.NONE) d.annots.filter { (a, r) ->
+                        a.page == pg && fx in r.l - 0.01f..r.r + 0.01f && fy in r.t - 0.01f..r.b + 0.01f
+                    }.minByOrNull { (_, r) -> (r.r - r.l) * (r.b - r.t) }?.first else null
                     when {
+                        d.placing != null -> Unit
                         d.editing && d.tool == Tool.CERT -> {
                             val sz = d.pdf.sizes[pg]
                             val w = 190f / sz.w
                             val h = 56f / sz.w
-                            val pts = vm.engine.pdfPoints(d.pdf, pg, listOf((fx - w / 2) to (fy - h / 2), (fx + w / 2) to (fy + h / 2)))
-                            certSign = Triple(pg, android.graphics.RectF(minOf(pts[0], pts[2]), maxOf(pts[1], pts[3]),
-                                maxOf(pts[0], pts[2]), minOf(pts[1], pts[3])), null)
+                            d.placing = Placement(Tool.CERT, pg, fx - w / 2, fy - h / 2, fx + w / 2, fy + h / 2)
                         }
-                        d.editing && d.tool in setOf(Tool.CHECK, Tool.CROSS, Tool.SIGN) ->
+                        d.editing && d.tool == Tool.SIGN -> {
+                            val bmp = loadSignature(ctx)
+                            if (bmp == null) signPad = true else {
+                                val sz = d.pdf.sizes[pg]
+                                val aspect = bmp.width.toFloat() / bmp.height
+                                val w = 120f / sz.w
+                                val h = w / aspect
+                                d.placing = Placement(Tool.SIGN, pg, fx - w / 2, fy - h / 2, fx + w / 2, fy + h / 2, aspect)
+                            }
+                        }
+                        d.editing && d.tool == Tool.EDITTEXT -> {
+                            val line = vm.engine.lineAt(d.pdf, pg, fx, fy)
+                            if (line == null || line.text.isBlank()) Toast.makeText(ctx, "Nenhum texto neste ponto", Toast.LENGTH_SHORT).show()
+                            else editLine = line
+                        }
+                        annot != null -> d.selAnnot = annot
+                        d.editing && d.tool in setOf(Tool.CHECK, Tool.CROSS) ->
                             placeNow(ctx, vm, d, d.tool, pg, Offset(fx, fy)) { signPad = true }
                         d.editing && d.tool in setOf(Tool.NOTE, Tool.TEXT) -> pendingTap = Triple(d.tool, pg, Offset(fx, fy))
                         field != null && field.kind == FormField.Kind.CHECK ->
@@ -350,7 +400,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             ) {
                 LazyColumn(
                     state = list,
-                    userScrollEnabled = d.tool != Tool.INK,
+                    userScrollEnabled = d.tool != Tool.INK && d.placing == null,
                     modifier = Modifier.width(with(density) { contentW.toDp() }).fillMaxHeight()
                         .graphicsLayer {
                             scaleX = gesture
@@ -370,6 +420,24 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             if (d.selection != null) Box(Modifier.align(Alignment.BottomCenter)) {
                 SelectionBar(vm, d) { copyText(ctx, it) }
             }
+            reader?.let { r ->
+                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 6.dp,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 56.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp)) {
+                        Text("Lendo pág. ${r.page + 1}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 10.dp))
+                        IconButton({ if (r.playing) r.pause() else r.resume() }) {
+                            Icon(if (r.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (r.playing) "Pausar" else "Continuar")
+                        }
+                        IconButton({ r.release(); reader = null }) { Icon(Icons.Filled.Stop, "Parar leitura") }
+                    }
+                }
+            }
+            if (d.placing != null) Box(Modifier.align(Alignment.BottomCenter)) {
+                PlacementBar(d) { p -> scope.launch { confirmPlacement(ctx, vm, d, p) { certSign = it } } }
+            }
+            if (d.selAnnot != null) Box(Modifier.align(Alignment.BottomCenter)) {
+                AnnotBar(vm, d) { editNote = it }
+            }
             if (d.busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             if (bars || d.signatures.any { !it.ok }) Box(Modifier.align(Alignment.TopCenter)) { SignatureBanner(d) { sigSheet = true } }
             // indicador de página
@@ -378,7 +446,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 shape = RoundedCornerShape(50),
                 color = Color(0xCC1C1B22),
                 modifier = Modifier.align(Alignment.BottomCenter).then(if (d.editing) Modifier else Modifier.navigationBarsPadding())
-                    .padding(bottom = if (d.selection != null) 84.dp else 14.dp),
+                    .padding(bottom = if (d.selection != null || d.placing != null || d.selAnnot != null) 96.dp else 14.dp),
             ) {
                 Text("${d.page + 1} / ${d.pageCount}", color = Color.White,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
@@ -428,6 +496,51 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
         }
     }
     if (sigSheet) SignaturesSheet(d) { sigSheet = false }
+    when (dlg) {
+        "comprimir" -> CompressDialog((d.work?.length() ?: Uri.parse(d.uri).path?.let { File(it).length() } ?: 0L) / 1024,
+            onDismiss = { dlg = "" }) { px, q ->
+            dlg = ""
+            guarded {
+                vm.pages(d, "comprimir", done = { a, b ->
+                    vm.toast = "Comprimido: %.1f MB → %.1f MB".format(a / 1048576.0, b / 1048576.0)
+                }) { doc, _ -> Editor.compress(doc, px, q) }
+            }
+        }
+        "senha" -> ProtectDialog(d.password != null, onDismiss = { dlg = "" }, onRemove = {
+            dlg = ""
+            vm.pages(d, "remover a senha", newPassword = null) { doc, _ -> Editor.unprotect(doc) }
+        }) { user, owner, pr, cp, ed ->
+            dlg = ""
+            guarded { vm.pages(d, "proteger", newPassword = user) { doc, _ -> Editor.protect(doc, user, owner, pr, cp, ed) } }
+        }
+        "marca" -> WatermarkDialog(onDismiss = { dlg = "" }) { t, op ->
+            dlg = ""
+            guarded { vm.pages(d, "aplicar a marca d'água") { doc, _ -> Editor.watermark(doc, t, op, 0xFFD7373F) } }
+        }
+        "numeros" -> PageNumbersDialog(onDismiss = { dlg = "" }) { f ->
+            dlg = ""
+            guarded { vm.pages(d, "numerar as páginas") { doc, _ -> Editor.pageNumbers(doc, f) } }
+        }
+        "prefs" -> SettingsScreen(vm) { dlg = "" }
+    }
+    confirmSigned?.let { act ->
+        AlertDialog(onDismissRequest = { confirmSigned = null }, title = { Text("Documento assinado") },
+            text = { Text("Esta alteração regrava o documento inteiro e invalida as assinaturas digitais. Continuar?") },
+            confirmButton = { TextButton({ confirmSigned = null; act() }) { Text("Continuar") } },
+            dismissButton = { TextButton({ confirmSigned = null }) { Text("Cancelar") } })
+    }
+    editLine?.let { line ->
+        TextInputDialog("Editar texto", "Texto da linha", line.text, multiline = false, onDismiss = { editLine = null }) { t, _ ->
+            editLine = null
+            vm.edit(d, "editar o texto") { Editor.replaceText(it, line.page, line.rect, line.x, line.baseline, t, line.size, 0xFF1C1B22) }
+        }
+    }
+    editNote?.let { a ->
+        TextInputDialog("Editar nota", "Comentário", a.contents, onDismiss = { editNote = null }) { t, _ ->
+            editNote = null
+            vm.edit(d, "editar a nota") { Editor.editNote(it, a, t) }
+        }
+    }
     if (organize) OrganizeScreen(vm, d) { organize = false }
     if (nameDialog) TextInputDialog("Seu nome", "Aparece como autor dos comentários", vm.authorName(), multiline = false,
         onDismiss = { nameDialog = false }) { n, _ -> nameDialog = false; vm.setAuthorName(n) }
@@ -464,6 +577,10 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
         d.lastBitmaps.put(i, b)
     }
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    val signBmp = remember(d.tool, d.placing?.kind) { if (d.tool == Tool.SIGN || d.placing?.kind == Tool.SIGN) loadSignature(ctx) else null }
+    val signImg = remember(signBmp) { signBmp?.asImageBitmap() }
+    val signAspect = signBmp?.let { it.width.toFloat() / it.height }
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Box(
             Modifier.size(with(density) { pageW.toDp() }, with(density) { pageH.toDp() })
@@ -476,8 +593,51 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                         onLongPress = { },
                     )
                 }
-                .pointerInput(d, d.tool, pageW) {
-                    if (d.tool == Tool.INK) {
+                .pointerInput(d, d.tool, d.placing != null, pageW) {
+                    if (d.placing != null || (d.editing && d.tool in setOf(Tool.SIGN, Tool.CERT))) {
+                        // caixa de assinatura/rubrica: arrastar move, o canto redimensiona, arrastar fora cria uma nova
+                        var mode = 0
+                        val minW = 30f / pageW
+                        fun resized(p: Placement, r0: Float, b0: Float): Placement {
+                            val r = maxOf(p.l + minW, r0)
+                            val b = if (p.aspect != null) p.t + (r - p.l) / p.aspect else maxOf(p.t + minW * 0.5f, b0)
+                            return p.copy(r = r, b = b)
+                        }
+                        detectDragGestures(
+                            onDragStart = { o ->
+                                val fx = o.x / pageW
+                                val fy = o.y / pageW
+                                val p = d.placing
+                                val tol = 48f / pageW
+                                mode = when {
+                                    p != null && p.page == i && p.kind != Tool.NONE && kotlin.math.abs(fx - p.r) < tol && kotlin.math.abs(fy - p.b) < tol -> 2
+                                    p != null && p.page == i && fx in p.l..p.r && fy in p.t..p.b -> 1
+                                    d.tool in setOf(Tool.SIGN, Tool.CERT) && p?.kind != Tool.NONE -> {
+                                        val aspect = if (d.tool == Tool.SIGN) signAspect else null
+                                        if (d.tool == Tool.SIGN && signAspect == null) 0 else {
+                                            d.placing = Placement(d.tool, i, fx, fy, fx + minW, fy + minW / (aspect ?: 2f), aspect)
+                                            3
+                                        }
+                                    }
+                                    else -> 0
+                                }
+                            },
+                            onDrag = { ch, drag ->
+                                if (mode != 0) {
+                                    ch.consume()
+                                    val p = d.placing
+                                    if (p != null) {
+                                        val dx = drag.x / pageW
+                                        val dy = drag.y / pageW
+                                        d.placing = when (mode) {
+                                            1 -> p.copy(l = p.l + dx, t = p.t + dy, r = p.r + dx, b = p.b + dy)
+                                            else -> resized(p, p.r + dx, p.b + dy)
+                                        }
+                                    }
+                                }
+                            },
+                        )
+                    } else if (d.tool == Tool.INK) {
                         // desenho à mão livre
                         var cur = mutableListOf<Offset>()
                         detectDragGestures(
@@ -524,7 +684,33 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                 Image(it, "Página ${i + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
                     colorFilter = if (d.night) INVERT else null)
             }
-            val fields = d.fields.filter { it.first.page == i }
+            val place = d.placing?.takeIf { it.page == i }
+            val selA = d.selAnnot?.let { a -> d.annots.firstOrNull { it.first == a && a.page == i }?.second }
+            if (place != null || selA != null) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width
+                    selA?.let { r ->
+                        drawRect(Color(0xFF6D3CF0), Offset(r.l * w - 4, r.t * w - 4), Size((r.r - r.l) * w + 8, (r.b - r.t) * w + 8),
+                            style = Stroke(3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 6f))))
+                    }
+                    place?.let { p ->
+                        val tl = Offset(p.l * w, p.t * w)
+                        val sz2 = Size(p.w * w, p.h * w)
+                        drawRect(Color(0x226D3CF0), tl, sz2)
+                        if (p.kind == Tool.SIGN && signImg != null) {
+                            drawImage(signImg, dstOffset = androidx.compose.ui.unit.IntOffset(tl.x.toInt(), tl.y.toInt()),
+                                dstSize = androidx.compose.ui.unit.IntSize(sz2.width.toInt().coerceAtLeast(1), sz2.height.toInt().coerceAtLeast(1)))
+                        }
+                        if (p.kind == Tool.CERT) drawContext.canvas.nativeCanvas.drawText("Assinatura digital",
+                            tl.x + 10f, tl.y + sz2.height / 2 + 10f,
+                            android.graphics.Paint().apply { color = 0xFF6D3CF0.toInt(); textSize = (sz2.height * 0.28f).coerceIn(14f, 48f); isAntiAlias = true })
+                        drawRect(Color(0xFF6D3CF0), tl, sz2, style = Stroke(3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 8f))))
+                        drawCircle(Color(0xFF6D3CF0), 18f, Offset(tl.x + sz2.width, tl.y + sz2.height))
+                        drawCircle(Color.White, 8f, Offset(tl.x + sz2.width, tl.y + sz2.height))
+                    }
+                }
+            }
+            val fields = if (vm.prefs.highlightFields) d.fields.filter { it.first.page == i } else emptyList()
             val sel = d.selection?.takeIf { it.page == i }
             val strokes = d.strokes.filter { it.first == i }
             if (fields.isNotEmpty() || sel != null || strokes.isNotEmpty()) {
@@ -584,6 +770,35 @@ private suspend fun placeNow(ctx: Context, vm: AppVm, d: ViewerDoc, tool: Tool, 
             // canto inferior esquerdo visual da rubrica centralizada no toque
             val pt = vm.engine.pdfPoint(d.pdf, page, at.x - w / 2 / sz.w, at.y + h / 2 / sz.w)
             vm.edit(d, "colocar a rubrica") { Editor.image(it, page, bmp, pt.x, pt.y, w, h) }
+        }
+        else -> Unit
+    }
+}
+
+/** Grava a caixa posicionada: rubrica (imagem), assinatura digital (abre o diálogo) ou comentário movido. */
+private suspend fun confirmPlacement(ctx: Context, vm: AppVm, d: ViewerDoc, p: Placement,
+                                     openCert: (Triple<Int, android.graphics.RectF, String?>) -> Unit) {
+    val sz = d.pdf.sizes[p.page]
+    when (p.kind) {
+        Tool.SIGN -> {
+            val bmp = loadSignature(ctx) ?: return
+            val pt = vm.engine.pdfPoint(d.pdf, p.page, p.l, p.b)   // canto inferior esquerdo visual
+            val w = p.w * sz.w
+            val h = p.h * sz.w
+            vm.edit(d, "colocar a rubrica") { Editor.image(it, p.page, bmp, pt.x, pt.y, w, h) }
+        }
+        Tool.CERT -> {
+            val pts = vm.engine.pdfPoints(d.pdf, p.page, listOf(p.l to p.t, p.r to p.b))
+            openCert(Triple(p.page, android.graphics.RectF(minOf(pts[0], pts[2]), maxOf(pts[1], pts[3]),
+                maxOf(pts[0], pts[2]), minOf(pts[1], pts[3])), null))
+        }
+        Tool.NONE -> {
+            val a = p.annot ?: return
+            val old = d.annots.firstOrNull { it.first == a }?.second ?: return
+            val pts = vm.engine.pdfPoints(d.pdf, p.page, listOf(old.l to old.t, p.l to p.t))
+            val dx = pts[2] - pts[0]
+            val dy = pts[3] - pts[1]
+            vm.edit(d, "mover o comentário") { Editor.moveAnnot(it, a, dx, dy) }
         }
         else -> Unit
     }

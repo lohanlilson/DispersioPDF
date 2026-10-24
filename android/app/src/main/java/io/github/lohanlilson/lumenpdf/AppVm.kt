@@ -18,10 +18,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Tool { NONE, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT }
+enum class Tool { NONE, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT }
+
+/** Caixa sendo posicionada (rubrica, assinatura digital ou comentário a mover), em frações da largura da página. */
+data class Placement(val kind: Tool, val page: Int, val l: Float, val t: Float, val r: Float, val b: Float,
+                     val aspect: Float? = null, val annot: Editor.AnnotRef? = null) {
+    val w get() = r - l
+    val h get() = b - t
+}
 
 /** Documento aberto no visualizador e o estado da tela dele. */
-class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int, val password: String?) {
+class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int, password: String?) {
+    var password: String? = password
     var pdf by mutableStateOf(pdf)
     var uri by mutableStateOf(uri)
     var zoom by mutableFloatStateOf(1f)
@@ -51,9 +59,14 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     val strokes = mutableStateListOf<Pair<Int, List<Offset>>>()   // (página, pontos em frações da largura)
     var busy by mutableStateOf(false)
     var signatures by mutableStateOf<List<SigInfo>>(emptyList())
+    var placing by mutableStateOf<Placement?>(null)
+    var annots by mutableStateOf<List<Pair<Editor.AnnotRef, FracRect>>>(emptyList())
+    var selAnnot by mutableStateOf<Editor.AnnotRef?>(null)
     /** últimas imagens exibidas por página (marcador enquanto a nova renderização não fica pronta) */
     val lastBitmaps = android.util.LruCache<Int, androidx.compose.ui.graphics.ImageBitmap>(10)
 }
+
+const val KEEP_PASSWORD = "\u0000manter"
 
 data class PendingPassword(val uri: Uri, val name: String, val wrong: Boolean)
 
@@ -63,6 +76,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     private val lumen = app as LumenApp
     val engine get() = lumen.engine
     val recents get() = lumen.recents
+    val prefs get() = lumen.prefs
 
     var doc by mutableStateOf<ViewerDoc?>(null)
         private set
@@ -126,9 +140,9 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         }
         doc?.let { closeDoc() }
         val key = uri.toString()
-        val start = recents.list().firstOrNull { it.uri == key }?.page?.coerceIn(0, pdf.sizes.size - 1) ?: 0
+        val start = if (!prefs.rememberPage) 0 else recents.list().firstOrNull { it.uri == key }?.page?.coerceIn(0, pdf.sizes.size - 1) ?: 0
         recents.touch(key, name)
-        doc = ViewerDoc(pdf, key, name, start, pwd)
+        doc = ViewerDoc(pdf, key, name, start, pwd).also { it.night = prefs.nightPages }
         refreshRecents()
         loadFields(doc!!)
     }
@@ -210,6 +224,15 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             }
         }.getOrDefault(emptyList())
         d.fields = list.filter { it.page < d.pageCount }.map { it to engine.fracOf(d.pdf, it.page, it.rect) }
+        val ann = runCatching {
+            withContext(Dispatchers.IO) {
+                val f = d.work
+                if (f != null) PDDocument.load(f, d.password ?: "").use { Editor.annotations(it) }
+                else app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { s -> PDDocument.load(s, d.password ?: "").use { Editor.annotations(it) } }
+            }
+        }.getOrDefault(emptyList())
+        d.annots = ann.filter { it.page < d.pageCount }.map { it to engine.fracOf(d.pdf, it.page, it.rect) }
+        d.selAnnot = null
         d.signatures = if (list.any { it.kind == FormField.Kind.SIGNATURE && it.value.isNotEmpty() }) runCatching {
             withContext(Dispatchers.IO) {
                 val bytes = d.work?.readBytes() ?: app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { it.readBytes() }
@@ -258,7 +281,8 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     }
 
     /** Operação de páginas (gravação completa). Em documento assinado, confirma antes (invalida as assinaturas). */
-    fun pages(d: ViewerDoc, what: String, block: (PDDocument, MutableList<PDDocument>) -> Unit) = viewModelScope.launch {
+    fun pages(d: ViewerDoc, what: String, newPassword: String? = KEEP_PASSWORD, done: (Long, Long) -> Unit = { _, _ -> },
+              block: (PDDocument, MutableList<PDDocument>) -> Unit) = viewModelScope.launch {
         editLock.lock()
         d.busy = true
         try {
@@ -272,6 +296,8 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             d.version++
             val dst = File(src.parentFile, "v${d.version}.pdf")
             withContext(Dispatchers.IO) { Editor.applyFull(src, dst, d.password, block) }
+            if (newPassword != KEEP_PASSWORD) d.password = newPassword
+            done(src.length(), dst.length())
             d.undo.addLast(src)
             d.redo.clear()
             d.work = dst
@@ -395,6 +421,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     var toast by mutableStateOf<String?>(null)
     var confirmClose by mutableStateOf(false)
+    var showSettings by mutableStateOf(false)
     var closeAfterSave = false
 
     fun requestClose() {
@@ -440,7 +467,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     }
 
     fun checkUpdate() {
-        if (checkedUpdate) return
+        if (checkedUpdate || !prefs.autoUpdate) return
         checkedUpdate = true
         viewModelScope.launch {
             update = runCatching { Updater.check() }.getOrNull()
@@ -450,5 +477,54 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         doc?.let { d -> recents.setPage(d.uri, d.page) }
         super.onCleared()
+    }
+
+    /** Arquivo atual (versão editada, se houver) para imprimir. */
+    suspend fun currentFile(d: ViewerDoc): File = withContext(Dispatchers.IO) {
+        d.work ?: Uri.parse(d.uri).let { u ->
+            if (u.scheme == "file") File(u.path!!)
+            else File(getApplication<Application>().cacheDir, "imprimir.pdf").also { f ->
+                getApplication<Application>().contentResolver.openInputStream(u)!!.use { i -> f.outputStream().use { i.copyTo(it) } }
+            }
+        }
+    }
+
+    /** Fotos da galeria para PDF (uma página por foto). */
+    fun imagesToPdf(uris: List<Uri>) = viewModelScope.launch {
+        loading = true
+        try {
+            val app = getApplication<Application>()
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmm", java.util.Locale.US).format(java.util.Date())
+            val out = File(File(app.filesDir, "recebidos").apply { mkdirs() }, "Fotos_$stamp.pdf")
+            withContext(Dispatchers.IO) {
+                val bmps = uris.mapNotNull { u -> runCatching { decodeImage(app, u, 2000) }.getOrNull() }
+                require(bmps.isNotEmpty()) { "Nenhuma imagem pôde ser lida" }
+                Editor.imagesToPdf(bmps, out)
+            }
+            openPrepared(Uri.fromFile(out), out.name, null)
+        } catch (e: Exception) {
+            error = "Não foi possível criar o PDF.\n${e.message ?: ""}"
+        } finally {
+            loading = false
+        }
+    }
+}
+
+/** Lê uma imagem já girada conforme a foto e reduzida (lado maior até maxPx). */
+fun decodeImage(ctx: android.content.Context, u: Uri, maxPx: Int): android.graphics.Bitmap {
+    return if (android.os.Build.VERSION.SDK_INT >= 28) {
+        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(ctx.contentResolver, u)) { dec, info, _ ->
+            val big = maxOf(info.size.width, info.size.height)
+            if (big > maxPx) dec.setTargetSize(info.size.width * maxPx / big, info.size.height * maxPx / big)
+            dec.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+    } else {
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(u)!!.use { android.graphics.BitmapFactory.decodeStream(it, null, o) }
+        var sample = 1
+        while (maxOf(o.outWidth, o.outHeight) / sample > maxPx * 2) sample *= 2
+        ctx.contentResolver.openInputStream(u)!!.use {
+            android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })!!
+        }
     }
 }

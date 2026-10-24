@@ -3,6 +3,7 @@ package io.github.lohanlilson.lumenpdf
 import android.graphics.Bitmap
 import android.graphics.RectF
 import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -355,6 +356,217 @@ object Editor {
             } finally {
                 opened.forEach { it.close() }
             }
+        }
+    }
+
+    // ------------------------------------------------------------ comentários existentes
+    data class AnnotRef(val page: Int, val index: Int, val subtype: String, val rect: RectF, val contents: String) {
+        val movable get() = subtype in setOf("Text", "Ink", "FreeText", "Square", "Circle", "Line", "Stamp")
+        val label get() = when (subtype) {
+            "Highlight" -> "Destaque"; "Underline" -> "Sublinhado"; "StrikeOut" -> "Tachado"; "Text" -> "Nota"
+            "Ink" -> "Desenho"; "FreeText" -> "Caixa de texto"; "Square" -> "Retângulo"; "Circle" -> "Elipse"
+            else -> subtype
+        }
+    }
+
+    private val SKIP = setOf("Widget", "Link", "Popup")
+
+    fun annotations(doc: PDDocument): List<AnnotRef> {
+        val out = ArrayList<AnnotRef>()
+        for (p in 0 until doc.numberOfPages) {
+            doc.getPage(p).annotations.forEachIndexed { i, a ->
+                if (a.subtype in SKIP) return@forEachIndexed
+                val r = a.rectangle ?: return@forEachIndexed
+                out += AnnotRef(p, i, a.subtype, RectF(r.lowerLeftX, r.upperRightY, r.upperRightX, r.lowerLeftY), a.contents ?: "")
+            }
+        }
+        return out
+    }
+
+    private fun annotAt(doc: PDDocument, ref: AnnotRef): Pair<PDPage, PDAnnotation> {
+        val page = doc.getPage(ref.page)
+        val a = page.annotations.getOrNull(ref.index)
+        require(a != null && a.subtype == ref.subtype) { "comentário não encontrado" }
+        return page to a
+    }
+
+    fun deleteAnnot(doc: PDDocument, ref: AnnotRef): List<COSDictionary> {
+        val (page, a) = annotAt(doc, ref)
+        val list = page.annotations
+        val popup = (a as? PDAnnotationMarkup)?.popup
+        list.removeAll { it.cosObject == a.cosObject || (popup != null && it.cosObject == popup.cosObject) }
+        page.annotations = list
+        (page.cosObject.getDictionaryObject(COSName.ANNOTS) as? COSArray)?.let { it.isNeedToBeUpdated = true }
+        return listOf(page.cosObject)
+    }
+
+    fun recolorAnnot(doc: PDDocument, ref: AnnotRef, color: Long): List<COSDictionary> {
+        val (page, a) = annotAt(doc, ref)
+        a.color = PDColor(argb(color), PDDeviceRGB.INSTANCE)
+        a.setModifiedDate(Calendar.getInstance())
+        a.cosObject.removeItem(COSName.AP)
+        a.constructAppearances(doc)
+        return listOf(page.cosObject, a.cosObject)
+    }
+
+    fun editNote(doc: PDDocument, ref: AnnotRef, text: String): List<COSDictionary> {
+        val (page, a) = annotAt(doc, ref)
+        a.contents = text
+        a.setModifiedDate(Calendar.getInstance())
+        return listOf(page.cosObject, a.cosObject)
+    }
+
+    /** Desloca o comentário (dx, dy em coordenadas do PDF). */
+    fun moveAnnot(doc: PDDocument, ref: AnnotRef, dx: Float, dy: Float): List<COSDictionary> {
+        val (page, a) = annotAt(doc, ref)
+        val r = a.rectangle
+        a.rectangle = PDRectangle(r.lowerLeftX + dx, r.lowerLeftY + dy, r.width, r.height)
+        if (a is PDAnnotationMarkup) {
+            a.inkList?.let { list -> a.inkList = list.map { s -> FloatArray(s.size) { k -> s[k] + if (k % 2 == 0) dx else dy } }.toTypedArray() }
+        }
+        (a as? PDAnnotationTextMarkup)?.quadPoints?.let { q -> a.quadPoints = FloatArray(q.size) { k -> q[k] + if (k % 2 == 0) dx else dy } }
+        a.setModifiedDate(Calendar.getInstance())
+        a.cosObject.removeItem(COSName.AP)
+        a.constructAppearances(doc)
+        return listOf(page.cosObject, a.cosObject)
+    }
+
+    // ------------------------------------------------------------ editar texto existente
+    /**
+     * Troca uma linha de texto: cobre o trecho original com um retângulo da cor do fundo e escreve o novo texto
+     * na mesma posição e tamanho. rect = área do texto original (coordenadas do PDF).
+     */
+    fun replaceText(doc: PDDocument, pageIndex: Int, rect: RectF, x: Float, y: Float, text: String, size: Float,
+                    color: Long, bg: Long = 0xFFFFFFFF): List<COSDictionary> {
+        val page = doc.getPage(pageIndex)
+        return withContent(doc, page) { cs ->
+            val l = minOf(rect.left, rect.right); val b = minOf(rect.top, rect.bottom)
+            val w = kotlin.math.abs(rect.right - rect.left); val h = kotlin.math.abs(rect.top - rect.bottom)
+            cs.setNonStrokingColor(PDColor(argb(bg), PDDeviceRGB.INSTANCE))
+            cs.addRect(l - 1, b - 1, w + 2, h + 2)
+            cs.fill()
+            if (text.isNotEmpty()) {
+                val font = loadFont(doc)
+                cs.beginText()
+                cs.setNonStrokingColor(PDColor(argb(color), PDDeviceRGB.INSTANCE))
+                cs.setFont(font, size)
+                cs.setTextMatrix(upright(page, x, y))
+                cs.showText(text)
+                cs.endText()
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ marca d'água e numeração
+    fun watermark(doc: PDDocument, text: String, opacity: Float, color: Long) {
+        val font = loadFont(doc)
+        for (page in doc.pages) {
+            PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                val box = page.cropBox
+                val gs = com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState()
+                gs.nonStrokingAlphaConstant = opacity
+                cs.setGraphicsStateParameters(gs)
+                cs.setNonStrokingColor(PDColor(argb(color), PDDeviceRGB.INSTANCE))
+                val diag = kotlin.math.hypot(box.width, box.height)
+                var size = diag / 12f
+                val tw = font.getStringWidth(text) / 1000 * size
+                if (tw > diag * 0.8f) size *= diag * 0.8f / tw
+                val w = font.getStringWidth(text) / 1000 * size
+                val ang = Math.atan2(box.height.toDouble(), box.width.toDouble())
+                cs.beginText()
+                cs.setFont(font, size)
+                val m = Matrix.getRotateInstance(ang, box.lowerLeftX + box.width / 2, box.lowerLeftY + box.height / 2)
+                m.translate(-w / 2, -size / 3)
+                cs.setTextMatrix(m)
+                cs.showText(text)
+                cs.endText()
+            }
+        }
+    }
+
+    /** formato: "{n}", "{n} de {total}", "Página {n} de {total}". */
+    fun pageNumbers(doc: PDDocument, format: String, size: Float = 10f) {
+        val font = loadFont(doc)
+        val total = doc.numberOfPages
+        doc.pages.forEachIndexed { i, page ->
+            val text = format.replace("{n}", "${i + 1}").replace("{total}", "$total")
+            PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                val box = page.cropBox
+                val rot = ((page.rotation % 360) + 360) % 360
+                val w = font.getStringWidth(text) / 1000 * size
+                // centro do rodapé visual
+                val (vw, _) = if (rot % 180 == 0) box.width to box.height else box.height to box.width
+                val m = when (rot) {
+                    90 -> Matrix(0f, 1f, -1f, 0f, box.lowerLeftX + box.width - 24f, box.lowerLeftY + vw / 2 - w / 2)
+                    180 -> Matrix(-1f, 0f, 0f, -1f, box.lowerLeftX + vw / 2 + w / 2, box.lowerLeftY + box.height - 24f)
+                    270 -> Matrix(0f, -1f, 1f, 0f, box.lowerLeftX + 24f, box.lowerLeftY + vw / 2 + w / 2)
+                    else -> Matrix(1f, 0f, 0f, 1f, box.lowerLeftX + vw / 2 - w / 2, box.lowerLeftY + 20f)
+                }
+                cs.beginText()
+                cs.setFont(font, size)
+                cs.setNonStrokingColor(0.25f, 0.25f, 0.28f)
+                cs.setTextMatrix(m)
+                cs.showText(text)
+                cs.endText()
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ comprimir, senha, fotos
+    /** Reduz as imagens (lado maior até maxPx, JPEG). Devolve quantas imagens foram recomprimidas. */
+    fun compress(doc: PDDocument, maxPx: Int, quality: Float): Int {
+        var n = 0
+        val seen = HashSet<COSBase>()
+        for (page in doc.pages) {
+            val res = page.resources ?: continue
+            for (name in res.xObjectNames) {
+                val xo = runCatching { res.getXObject(name) }.getOrNull() as? com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject ?: continue
+                if (!seen.add(xo.cosObject)) continue
+                val big = maxOf(xo.width, xo.height)
+                if (big <= maxPx && xo.cosObject.getDictionaryObject(COSName.FILTER)?.toString()?.contains("DCT") == true) continue
+                val bmp = runCatching { xo.image }.getOrNull() ?: continue
+                val scale = if (big > maxPx) maxPx.toFloat() / big else 1f
+                val small = if (scale < 1f) Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * scale).toInt()), maxOf(1, (bmp.height * scale).toInt()), true) else bmp
+                val opaque = if (small.hasAlpha()) small.copy(Bitmap.Config.RGB_565, false) else small
+                val jpg = com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory.createFromImage(doc, opaque, quality)
+                res.put(name, jpg)
+                n++
+            }
+        }
+        return n
+    }
+
+    fun protect(doc: PDDocument, userPwd: String, ownerPwd: String, allowPrint: Boolean, allowCopy: Boolean, allowEdit: Boolean) {
+        val ap = com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission()
+        ap.setCanPrint(allowPrint)
+        ap.setCanExtractContent(allowCopy)
+        ap.setCanModify(allowEdit)
+        val policy = com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy(ownerPwd.ifEmpty { userPwd + "_lumen" }, userPwd, ap)
+        policy.encryptionKeyLength = 256
+        doc.protect(policy)
+    }
+
+    fun unprotect(doc: PDDocument) {
+        doc.isAllSecurityToBeRemoved = true
+    }
+
+    /** Fotos para PDF: uma página por imagem, no tamanho A4 (retrato ou paisagem conforme a foto). */
+    fun imagesToPdf(images: List<Bitmap>, dst: File) {
+        PDDocument().use { doc ->
+            for (bmp in images) {
+                val land = bmp.width > bmp.height
+                val pw = if (land) 842f else 595f
+                val ph = if (land) 595f else 842f
+                val page = PDPage(PDRectangle(pw, ph))
+                doc.addPage(page)
+                val img = com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory.createFromImage(doc, bmp, 0.85f)
+                val margin = 18f
+                val s = minOf((pw - 2 * margin) / bmp.width, (ph - 2 * margin) / bmp.height)
+                val w = bmp.width * s
+                val h = bmp.height * s
+                PDPageContentStream(doc, page).use { it.drawImage(img, (pw - w) / 2, (ph - h) / 2, w, h) }
+            }
+            dst.outputStream().buffered().use { doc.save(it) }
         }
     }
 }

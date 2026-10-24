@@ -43,6 +43,9 @@ import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -103,14 +106,15 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
     Surface(shadowElevation = 8.dp, color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.navigationBarsPadding()) {
             val hint = when (d.tool) {
-                Tool.NONE -> "Toque e segure no texto para destacar · toque num campo para preencher"
+                Tool.NONE -> "Toque e segure no texto para destacar · toque num comentário para editar"
                 Tool.INK -> "Desenhe com o dedo. Toque em Concluir para gravar."
                 Tool.NOTE -> "Toque onde quer colocar a nota"
                 Tool.TEXT -> "Toque onde quer escrever"
                 Tool.CHECK -> "Toque para marcar ✓"
                 Tool.CROSS -> "Toque para marcar ✗"
-                Tool.SIGN -> "Toque onde quer colocar sua rubrica"
-                Tool.CERT -> "Toque onde a assinatura digital deve ficar"
+                Tool.SIGN -> "Toque ou arraste onde quer colocar sua rubrica"
+                Tool.CERT -> "Toque ou arraste onde a assinatura digital deve ficar"
+                Tool.EDITTEXT -> "Toque numa linha de texto para alterá-la"
             }
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
@@ -119,10 +123,13 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 fun pick(t: Tool) {
                     if (d.tool == Tool.INK && t != Tool.INK) d.strokes.clear()
+                    d.placing = null
+                    d.selAnnot = null
                     d.tool = if (d.tool == t) Tool.NONE else t
                     d.selection = null
                 }
                 ToolButton(Icons.Filled.TouchApp, "Selecionar", d.tool == Tool.NONE) { pick(Tool.NONE) }
+                ToolButton(Icons.Filled.EditNote, "Editar texto", d.tool == Tool.EDITTEXT) { pick(Tool.EDITTEXT) }
                 ToolButton(Icons.Filled.Gesture, "Desenhar", d.tool == Tool.INK) { pick(Tool.INK) }
                 ToolButton(Icons.Filled.StickyNote2, "Nota", d.tool == Tool.NOTE) { pick(Tool.NOTE) }
                 ToolButton(Icons.Filled.TextFields, "Texto", d.tool == Tool.TEXT) { pick(Tool.TEXT) }
@@ -174,7 +181,7 @@ fun SelectionBar(vm: AppVm, d: ViewerDoc, onCopy: (String) -> Unit) {
         modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
         Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton({ onCopy(sel.text); d.selection = null }) { Icon(Icons.Filled.ContentCopy, "Copiar") }
-            listOf(Triple(Markup.HIGHLIGHT, Icons.Filled.Highlight, 0xFFFFD400),
+            listOf(Triple(Markup.HIGHLIGHT, Icons.Filled.Highlight, vm.prefs.highlightColor),
                 Triple(Markup.UNDERLINE, Icons.Filled.FormatUnderlined, 0xFF2D9D78),
                 Triple(Markup.STRIKEOUT, Icons.Filled.FormatStrikethrough, 0xFFD7373F)).forEach { (kind, icon, color) ->
                 IconButton({
@@ -317,4 +324,50 @@ private fun saveSignature(ctx: Context, strokes: List<List<Offset>>, area: IntSi
         c.drawPath(p, paint)
     }
     signatureFile(ctx).outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+}
+
+/** Confirmação da caixa posicionada (rubrica, assinatura digital ou comentário movido). */
+@Composable
+fun PlacementBar(d: ViewerDoc, onConfirm: (Placement) -> Unit) {
+    val p = d.placing ?: return
+    Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
+        Row(Modifier.padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Arraste para mover · puxe o canto para o tamanho", style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f, fill = false))
+            TextButton({ d.placing = null }) { Text("Cancelar") }
+            TextButton({ d.placing = null; onConfirm(p) }) { Text(if (p.kind == Tool.NONE) "Mover" else "Confirmar") }
+        }
+    }
+}
+
+/** Ações sobre um comentário selecionado. */
+@Composable
+fun AnnotBar(vm: AppVm, d: ViewerDoc, onEditNote: (Editor.AnnotRef) -> Unit) {
+    val a = d.selAnnot ?: return
+    val frac = d.annots.firstOrNull { it.first == a }?.second
+    Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(a.label + if (a.contents.isNotBlank()) ": ${a.contents.take(60)}" else "", style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(start = 6.dp, top = 4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                (listOf(0xFFFFD400) + INK_COLORS).forEach { c ->
+                    Box(Modifier.padding(3.dp).size(24.dp).clip(CircleShape).background(Color(c)).clickable {
+                        d.selAnnot = null
+                        vm.edit(d, "mudar a cor") { Editor.recolorAnnot(it, a, c) }
+                    })
+                }
+                if (a.subtype == "Text") IconButton({ onEditNote(a) }) { Icon(Icons.Filled.EditNote, "Editar nota") }
+                if (a.movable && frac != null) IconButton({
+                    d.selAnnot = null
+                    d.placing = Placement(Tool.NONE, a.page, frac.l, frac.t, frac.r, frac.b, (frac.r - frac.l) / (frac.b - frac.t).coerceAtLeast(0.001f), a)
+                }) { Icon(Icons.Filled.OpenWith, "Mover") }
+                IconButton({ d.selAnnot = null; vm.edit(d, "excluir o comentário") { Editor.deleteAnnot(it, a) } }) {
+                    Icon(Icons.Filled.Delete, "Excluir comentário", tint = Color(0xFFD7373F))
+                }
+                IconButton({ d.selAnnot = null }) { Icon(Icons.Filled.Close, "Fechar") }
+            }
+        }
+    }
 }

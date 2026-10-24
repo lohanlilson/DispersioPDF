@@ -32,6 +32,9 @@ data class TocItem(val title: String, val page: Int, val level: Int)
 
 class PasswordNeeded : Exception()
 
+/** Linha de texto tocada (para editar): rect em coordenadas do PDF, frac na tela, tamanho e linha de base. */
+data class TextLine(val page: Int, val text: String, val rect: RectF, val frac: FracRect, val size: Float, val x: Float, val baseline: Float)
+
 data class TextSelection(val page: Int, val start: Int, val end: Int, val text: String,
                          val rects: List<FracRect>, val pdfRects: List<RectF>)
 
@@ -155,6 +158,41 @@ class PdfEngine(context: Context) {
                 var i = tp.textPageGetCharIndexAtPos(pt.x.toDouble(), pt.y.toDouble(), 4.0, 4.0)
                 if (i < 0) i = tp.textPageGetCharIndexAtPos(pt.x.toDouble(), pt.y.toDouble(), 14.0, 10.0)
                 i
+            }
+        }
+    }
+
+    suspend fun lineAt(pdf: OpenPdf, page: Int, fx: Float, fy: Float): TextLine? = withContext(dispatcher) {
+        pdf.doc.openPage(page).use { p ->
+            val pt = toPdf(p, pdf.sizes[page], fx, fy)
+            p.openTextPage().use { tp ->
+                val n = tp.textPageCountChars()
+                val i = tp.textPageGetCharIndexAtPos(pt.x.toDouble(), pt.y.toDouble(), 6.0, 6.0)
+                if (i < 0 || i >= n) return@withContext null
+                fun box(k: Int): RectF? = tp.textPageGetCharBox(k)?.takeIf { kotlin.math.abs(it.right - it.left) > 0.01f }
+                val b0 = box(i) ?: return@withContext null
+                val mid = (b0.top + b0.bottom) / 2
+                val h = kotlin.math.abs(b0.top - b0.bottom).coerceAtLeast(2f)
+                fun sameLine(k: Int): Boolean {
+                    val c = tp.textPageGetUnicode(k)
+                    if (c == '\n' || c == '\r') return false
+                    val b = box(k) ?: return true   // espaço sem caixa: continua
+                    return kotlin.math.abs((b.top + b.bottom) / 2 - mid) < h * 0.6f
+                }
+                var a = i
+                while (a > 0 && sameLine(a - 1)) a--
+                var e = i
+                while (e < n - 1 && sameLine(e + 1)) e++
+                val boxes = (a..e).mapNotNull { box(it) }
+                val l = boxes.minOf { minOf(it.left, it.right) }
+                val r = boxes.maxOf { maxOf(it.left, it.right) }
+                val top = boxes.maxOf { maxOf(it.top, it.bottom) }
+                val bottom = boxes.minOf { minOf(it.top, it.bottom) }
+                val base = boxes.map { minOf(it.top, it.bottom) }.sorted().let { it[it.size / 2] }
+                val rect = RectF(l, top, r, bottom)
+                val size = tp.getFontSize(i).toFloat().takeIf { it > 1f } ?: (top - bottom)
+                TextLine(page, (tp.textPageGetText(a, e - a + 1) ?: "").trimEnd('\r', '\n'), rect,
+                    frac(p, pdf.sizes[page], rect), size, l, base)
             }
         }
     }

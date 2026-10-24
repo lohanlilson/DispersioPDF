@@ -33,6 +33,7 @@ private val Dark = darkColorScheme(
 )
 
 @Composable
-fun LumenTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+fun LumenTheme(theme: String = "sistema", content: @Composable () -> Unit) {
+    val dark = when (theme) { "claro" -> false; "escuro" -> true; else -> isSystemInDarkTheme() }
+    MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
 }

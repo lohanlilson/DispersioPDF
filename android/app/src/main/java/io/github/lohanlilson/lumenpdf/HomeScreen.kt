@@ -27,6 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.MergeType
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Card
@@ -105,6 +107,7 @@ fun HomeScreen(vm: AppVm) {
             items(vm.recentList, key = { it.uri }) { r -> RecentRow(vm, r) }
         }
     }
+    if (vm.showSettings) SettingsScreen(vm) { vm.showSettings = false }
 }
 
 @Composable
@@ -170,9 +173,20 @@ private fun QuickActions(vm: AppVm) {
         if (list.size >= 2) vm.mergeAndOpen(list) else if (list.size == 1) vm.open(list[0], fromPicker = true)
     }
     val scan = rememberScanner { vm.openScanned(it) }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        ActionCard(Icons.Filled.DocumentScanner, "Escanear", "Câmera → PDF", Modifier.weight(1f)) { scan() }
-        ActionCard(Icons.Filled.MergeType, "Juntar PDFs", "Vários em um", Modifier.weight(1f)) { merge.launch(arrayOf("application/pdf")) }
+    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(60)) { list: List<Uri> ->
+        if (list.isNotEmpty()) vm.imagesToPdf(list)
+    }
+    Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ActionCard(Icons.Filled.DocumentScanner, "Escanear", "Câmera → PDF", Modifier.weight(1f)) { scan() }
+            ActionCard(Icons.Filled.MergeType, "Juntar PDFs", "Vários em um", Modifier.weight(1f)) { merge.launch(arrayOf("application/pdf")) }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ActionCard(Icons.Filled.PhotoLibrary, "Fotos → PDF", "Da galeria", Modifier.weight(1f)) {
+                photos.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            }
+            ActionCard(Icons.Filled.Settings, "Preferências", "Tema, nome, rubrica…", Modifier.weight(1f)) { vm.showSettings = true }
+        }
     }
 }
 
