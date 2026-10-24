@@ -47,7 +47,7 @@ class Leva2Test {
     }
 
     @Test
-    fun ocrDePaginaEscaneada() = runBlocking {
+    fun ocrDePaginaEscaneada(): Unit = runBlocking {
         val f = pdf("scan.pdf", listOf("CONTRATO DE CESSAO", "Valor total 10000 reais"), asImage = true)
         val pdf = engine.open(ctx, Uri.fromFile(f))
         val words = Ocr.page(engine, pdf, 0)
@@ -63,6 +63,7 @@ class Leva2Test {
         val pdf2 = engine.open(ctx, Uri.fromFile(out))
         assertEquals(1, engine.search(pdf2, "CONTRATO").size)
         engine.close(pdf2)
+        Unit
     }
 
     @Test
@@ -80,7 +81,7 @@ class Leva2Test {
     }
 
     @Test
-    fun detectarCampos() = runBlocking {
+    fun detectarCampos(): Unit = runBlocking {
         val f = pdf("form.pdf", listOf("Nome completo: ________________________________", "CPF: ............................",
             "Aceita?  ( ) Sim   ( ) Não")) { c ->
             val line = Paint().apply { color = Color.BLACK; strokeWidth = 1f }
@@ -108,7 +109,7 @@ class Leva2Test {
     }
 
     @Test
-    fun compararETarjar() = runBlocking {
+    fun compararETarjar(): Unit = runBlocking {
         val a = pdf("v1.pdf", listOf("O preço é R$ 10.000,00 à vista.", "CPF do cedente: 123.456.789-00"))
         val b = pdf("v2.pdf", listOf("O preço é R$ 12.500,00 à vista.", "CPF do cedente: 123.456.789-00", "Cláusula nova."))
         val pa = engine.open(ctx, Uri.fromFile(a)); val pb = engine.open(ctx, Uri.fromFile(b))

@@ -43,7 +43,7 @@ class ToolsTest {
     private fun text(f: File, pwd: String = "") = PDDocument.load(f, pwd).use { PDFTextStripper().getText(it) }
 
     @Test
-    fun comentariosEditarTexto() = runBlocking {
+    fun comentariosEditarTexto(): Unit = runBlocking {
         val src = pdf()
         val a = File(dir, "a.pdf")
         Editor.apply(src, a, null) { d -> Editor.note(d, 0, 300f, 700f, "Conferir", 0xFFFFD400) + Editor.ink(d, 0, listOf(floatArrayOf(100f, 400f, 200f, 450f)), 0xFFD7373F, 2f) }
