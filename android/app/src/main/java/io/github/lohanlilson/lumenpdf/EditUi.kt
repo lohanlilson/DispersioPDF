@@ -201,7 +201,7 @@ fun SelectionBar(vm: AppVm, d: ViewerDoc, onCopy: (String) -> Unit) {
 
 @Composable
 fun TextInputDialog(title: String, label: String, initial: String = "", multiline: Boolean = true, withSize: Boolean = false,
-                    onDismiss: () -> Unit, onOk: (String, Float) -> Unit) {
+                    note: String? = null, onDismiss: () -> Unit, onOk: (String, Float) -> Unit) {
     var text by remember { mutableStateOf(initial) }
     var size by remember { mutableFloatStateOf(11f) }
     AlertDialog(
@@ -213,6 +213,8 @@ fun TextInputDialog(title: String, label: String, initial: String = "", multilin
                     minLines = if (multiline) 3 else 1,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     modifier = Modifier.fillMaxWidth())
+                note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)) }
                 if (withSize) {
                     Text("Tamanho: ${size.toInt()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
                     Slider(size, { size = it }, valueRange = 7f..28f, steps = 20)

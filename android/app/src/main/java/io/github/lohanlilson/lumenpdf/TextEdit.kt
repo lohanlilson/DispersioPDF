@@ -187,8 +187,12 @@ object TextEdit {
 
     /** Caracteres do trecho tocado: mesma linha (lineRect), mesmo estilo e contíguos ao ponto (px, py). */
     private fun runGlyphs(all: List<Glyph>, lineRect: RectF, px: Float, py: Float): List<Glyph> {
-        val line = all.filter { inside(lineRect, it) }
-        if (line.isEmpty()) return emptyList()
+        val found = all.filter { inside(lineRect, it) }
+        if (found.isEmpty()) return emptyList()
+        // ordem visual na linha (o arquivo pode desenhar os trechos fora de ordem)
+        val ang = found.first().angle
+        val dx = kotlin.math.cos(ang).toFloat(); val dy = kotlin.math.sin(ang).toFloat()
+        val line = found.sortedBy { it.x * dx + it.y * dy }
         line.forEach { it.styleKey = key(it) }
         // espaços herdam o estilo do vizinho (muitos PDFs desenham espaços com outra fonte)
         for (i in line.indices) if (line[i].unicode.isBlank() && i > 0) line[i].styleKey = line[i - 1].styleKey

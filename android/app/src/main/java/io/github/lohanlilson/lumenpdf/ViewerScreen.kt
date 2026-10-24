@@ -582,8 +582,8 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     }
     editLine?.let { line ->
         val run = editRun
-        TextInputDialog("Editar texto", run?.style?.description ?: "Texto da linha", run?.text ?: line.text, multiline = false,
-            onDismiss = { editLine = null; editRun = null }) { t, _ ->
+        TextInputDialog("Editar texto", "Texto da linha", run?.text ?: line.text, multiline = false,
+            note = run?.style?.let { "Mantém o estilo: ${it.description}" }, onDismiss = { editLine = null; editRun = null }) { t, _ ->
             editLine = null
             editRun = null
             vm.replaceText(d, line, editPt.x, editPt.y, t)
