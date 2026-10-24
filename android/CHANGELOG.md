@@ -1,5 +1,12 @@
 # Novidades do Lumen PDF para Android
 
+## 0.4.0
+
+- **Validação ICP-Brasil:** o painel de assinaturas confirma se o certificado de quem assinou pertence à ICP-Brasil (cadeia até a AC Raiz), se estava dentro da validade na data da assinatura e, com internet, se não foi revogado.
+- **Senha do certificado com a digital:** marque "Lembrar a senha com a digital" na primeira assinatura. Nas próximas, basta tocar em Assinar e encostar o dedo.
+- **Preencher com meus dados:** salve nome, CPF, RG, endereço, e-mail e outros dados uma vez (Preferências › Formulários). No documento, use ⋮ › "Preencher com meus dados": o app mostra o que vai preencher e você confirma.
+- **Atalhos no ícone:** segure o ícone do Lumen PDF para Escanear, Abrir PDF ou reabrir os 2 últimos documentos. Os atalhos também podem ser arrastados para a tela inicial.
+
 ## 0.3.0
 
 Inclui tudo da 0.2.0 e mais:
