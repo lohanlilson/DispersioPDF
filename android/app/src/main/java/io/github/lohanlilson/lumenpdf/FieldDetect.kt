@@ -92,11 +92,11 @@ object FieldDetect {
 
     private fun labelAbove(words: List<Word>, r: RectF): String =
         words.filter { it.r.bottom >= r.top - 1 && it.r.bottom <= r.top + 18 && it.r.left < r.left + (r.right - r.left) / 2 && it.r.right > r.left - 4 }
-            .sortedWith(compareBy({ -it.r.top }, { it.r.left })).take(5).joinToString(" ") { it.text }.trimEnd(':', ' ')
+            .sortedWith(compareBy({ -Math.round(it.r.bottom / 4f) }, { it.r.left })).take(5).joinToString(" ") { it.text }.trimEnd(':', ' ')
 
     private fun labelBelow(words: List<Word>, r: RectF): String =
         words.filter { it.r.top <= r.bottom + 1 && it.r.top >= r.bottom - 16 && it.r.left < r.right && it.r.right > r.left }
-            .sortedWith(compareBy({ -it.r.top }, { it.r.left })).take(6).joinToString(" ") { it.text }
+            .sortedWith(compareBy({ -Math.round(it.r.bottom / 4f) }, { it.r.left })).take(6).joinToString(" ") { it.text }
 
     /** Linhas e caixas desenhadas na página (coordenadas do PDF). */
     private class Shapes(page: PDPage) : PDFGraphicsStreamEngine(page) {
