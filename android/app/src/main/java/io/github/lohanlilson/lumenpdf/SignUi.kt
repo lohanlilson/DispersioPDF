@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import java.io.File
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -78,10 +80,15 @@ fun CertSignDialog(vm: AppVm, fieldName: String?, onDismiss: () -> Unit,
     var reason by remember { mutableStateOf(prefs.getString("sign_reason", "") ?: "") }
     var location by remember { mutableStateOf(prefs.getString("sign_location", "") ?: "") }
     var tsa by remember { mutableStateOf(prefs.getBoolean("sign_tsa", true)) }
+    val bio = remember { PasswordVault.available(ctx) }
+    var saved by remember(pfx) { mutableStateOf(pfx?.let { PasswordVault.has(ctx, it.name) } ?: false) }
+    var rememberPwd by remember { mutableStateOf(true) }
+    var bioMsg by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         if (u != null) vm.importPfx(u)?.let { f -> pfxList = Certs.storedPfx(ctx); pfx = f; useAndroid = false }
     }
-    val ready = if (useAndroid) alias != null else pfx != null && pwd.isNotEmpty()
+    val ready = if (useAndroid) alias != null else pfx != null && (pwd.isNotEmpty() || saved)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (fieldName != null) "Assinar “$fieldName”" else "Assinar com certificado digital") },
@@ -99,9 +106,22 @@ fun CertSignDialog(vm: AppVm, fieldName: String?, onDismiss: () -> Unit,
                     OutlinedButton({ picker.launch(arrayOf("application/x-pkcs12", "application/octet-stream", "*/*")) }) {
                         Text("Importar arquivo .pfx…")
                     }
-                    if (pfx != null) OutlinedTextField(pwd, { pwd = it }, label = { Text("Senha do certificado") }, singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth())
+                    if (pfx != null && saved) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Fingerprint, null, tint = MaterialTheme.colorScheme.primary)
+                            Text("Senha guardada: toque em Assinar e confirme com a digital",
+                                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 6.dp).weight(1f))
+                        }
+                        TextButton({ pfx?.let { PasswordVault.forget(ctx, it.name) }; saved = false }) { Text("Esquecer a senha guardada") }
+                    } else if (pfx != null) {
+                        OutlinedTextField(pwd, { pwd = it }, label = { Text("Senha do certificado") }, singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth())
+                        if (bio) Row(Modifier.fillMaxWidth().clickable { rememberPwd = !rememberPwd }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(rememberPwd, { rememberPwd = it }); Text("Lembrar a senha com a digital", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    bioMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Color(0xFFD7373F)) }
                 }
                 Row(Modifier.fillMaxWidth().selectable(useAndroid) { useAndroid = true }, verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(useAndroid, { useAndroid = true }); Text("Certificado instalado no Android")
@@ -131,7 +151,23 @@ fun CertSignDialog(vm: AppVm, fieldName: String?, onDismiss: () -> Unit,
                 val a = alias
                 val f = pfx
                 val p = pwd
-                onSign(if (useAndroid) ({ Certs.fromKeyChain(ctx, a!!) }) else ({ Certs.fromPfx(f!!, p) }), reason, location, tsa)
+                val keep = bio && rememberPwd
+                if (useAndroid) onSign({ Certs.fromKeyChain(ctx, a!!) }, reason, location, tsa)
+                else if (p.isEmpty() && saved && f != null) {
+                    val act = ctx.findActivity() as? androidx.fragment.app.FragmentActivity ?: return@TextButton
+                    scope.launch {
+                        when (val r = PasswordVault.unlock(act, f.name)) {
+                            is PasswordVault.Result.Ok -> onSign({
+                                try { Certs.fromPfx(f, r.password) } catch (e: Exception) { PasswordVault.forget(ctx, f.name); throw e }
+                            }, reason, location, tsa)
+                            is PasswordVault.Result.Failed -> { bioMsg = r.message; saved = PasswordVault.has(ctx, f.name) }
+                            PasswordVault.Result.Cancelled -> { saved = false; bioMsg = null }
+                        }
+                    }
+                } else onSign({
+                    // a senha só é guardada depois de abrir o certificado com ela (senha conferida)
+                    Certs.fromPfx(f!!, p).also { if (keep) runCatching { PasswordVault.store(ctx, f.name, p) } }
+                }, reason, location, tsa)
             }) { Text("Assinar") }
         },
         dismissButton = { TextButton(onDismiss) { Text("Cancelar") } },
@@ -145,17 +181,20 @@ private val fmt = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
 fun SignatureBanner(d: ViewerDoc, onOpen: () -> Unit) {
     val sigs = d.signatures
     if (sigs.isEmpty()) return
-    val bad = sigs.any { !it.ok }
+    val bad = sigs.any { !it.ok || it.badCert }
     val later = !bad && sigs.any { !it.coversWhole } && d.dirty.not() && sigs.last().coversWhole.not()
+    val untrusted = !bad && sigs.any { it.untrusted }
     val (bg, fg, icon) = when {
         bad -> Triple(Color(0xFFFDE8E9), Color(0xFFD7373F), Icons.Filled.Error)
-        later -> Triple(Color(0xFFFFF6DD), Color(0xFFC58A00), Icons.Filled.Warning)
+        later || untrusted -> Triple(Color(0xFFFFF6DD), Color(0xFFC58A00), Icons.Filled.Warning)
         else -> Triple(Color(0xFFE7F6EE), Color(0xFF2D9D78), Icons.Filled.CheckCircle)
     }
+    val icp = sigs.all { it.identity?.status == IcpTrust.Status.TRUSTED || it.identity?.status == IcpTrust.Status.NO_REVOCATION_CHECK }
     val msg = when {
-        bad -> "Pelo menos uma assinatura é inválida"
-        sigs.size == 1 -> "Assinado por ${sigs[0].signer} — assinatura íntegra"
-        else -> "${sigs.size} assinaturas — todas íntegras"
+        sigs.any { !it.ok } -> "Pelo menos uma assinatura é inválida"
+        bad -> "Certificado revogado ou vencido na assinatura"
+        sigs.size == 1 -> "Assinado por ${sigs[0].signer} — " + (if (icp) "assinatura válida (ICP-Brasil)" else "íntegra, identidade não confirmada")
+        else -> "${sigs.size} assinaturas — " + (if (icp) "todas válidas (ICP-Brasil)" else "íntegras, identidade não confirmada")
     }
     Surface(color = bg, modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -186,13 +225,22 @@ fun SignaturesSheet(d: ViewerDoc, onChanges: (SigInfo) -> Unit = {}, onDismiss: 
                         s.coversWhole -> "O documento não foi alterado desde a assinatura"
                         else -> "Houve acréscimos depois desta assinatura (outras assinaturas, campos ou comentários)"
                     }, style = MaterialTheme.typography.bodySmall)
+                    s.identity?.let { id ->
+                        val (c, mark) = when (id.status) {
+                            IcpTrust.Status.TRUSTED -> Color(0xFF2D9D78) to "✔ "
+                            IcpTrust.Status.NO_REVOCATION_CHECK -> Color(0xFF2D9D78) to "✔ "
+                            IcpTrust.Status.UNTRUSTED -> Color(0xFFC58A00) to "⚠ "
+                            else -> Color(0xFFD7373F) to "✖ "
+                        }
+                        Text(mark + id.detail, style = MaterialTheme.typography.bodySmall, color = c)
+                        if (id.chain.size > 1) Text("Cadeia: " + id.chain.drop(1).joinToString(" › "),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     if (s.issuer.isNotBlank()) Text("Emitido por: ${s.issuer}" + (s.validUntil?.let { " · válido até ${fmt.format(it).take(10)}" } ?: ""),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     s.reason?.let { Text("Motivo: $it", style = MaterialTheme.typography.bodySmall) }
                     s.location?.let { Text("Local: $it", style = MaterialTheme.typography.bodySmall) }
                     if (!s.coversWhole && s.ok && s.revisionEnd > 0) TextButton({ onChanges(s) }) { Text("O que mudou depois desta assinatura") }
-                    Text("A identidade (cadeia ICP-Brasil) é conferida no Lumen PDF do computador.",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 HorizontalDivider()
             }

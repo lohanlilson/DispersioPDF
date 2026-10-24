@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Lumen PDF</string>
+    <string name="sc_scan">Escanear</string>
+    <string name="sc_scan_long">Escanear documento</string>
+    <string name="sc_open">Abrir PDF</string>
+    <string name="sc_open_long">Abrir um PDF</string>
 </resources>

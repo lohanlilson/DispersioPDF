@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Carimbo de tempo (RFC 3161) usa HTTP; a resposta é assinada pela autoridade e conferida pelo app. -->
+<!-- Carimbo de tempo (RFC 3161), listas de revogação (LCR) e certificados das ACs da ICP-Brasil são publicados
+     em HTTP por dezenas de domínios diferentes. O conteúdo é assinado e o app confere a assinatura de tudo o que baixa. -->
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">timestamp.digicert.com</domain>
-        <domain includeSubdomains="false">timestamp.sectigo.com</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

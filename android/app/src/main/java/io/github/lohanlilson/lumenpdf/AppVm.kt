@@ -94,8 +94,12 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     var update by mutableStateOf<UpdateInfo?>(null)
     private var checkedUpdate = false
 
+    /** pedido vindo de um atalho do ícone: "scan" | "open" */
+    var pendingAction by mutableStateOf<String?>(null)
+
     fun refreshRecents() {
         recentList = recents.list()
+        Shortcuts.updateRecents(getApplication(), recentList)
     }
 
     /** fromPicker = escolhido pelo seletor do Android (permissão permanente); senão, recebido de outro app. */
@@ -238,12 +242,19 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         }.getOrDefault(emptyList())
         d.annots = ann.filter { it.page < d.pageCount }.map { it to engine.fracOf(d.pdf, it.page, it.rect) }
         d.selAnnot = null
-        d.signatures = if (list.any { it.kind == FormField.Kind.SIGNATURE && it.value.isNotEmpty() }) runCatching {
-            withContext(Dispatchers.IO) {
-                val bytes = d.work?.readBytes() ?: app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { it.readBytes() }
-                PdfSigner.validate(bytes)
-            }
-        }.getOrDefault(emptyList()) else emptyList()
+        val signed = list.any { it.kind == FormField.Kind.SIGNATURE && it.value.isNotEmpty() }
+        val pdfNow = d.pdf
+        val bytes = if (signed) runCatching {
+            withContext(Dispatchers.IO) { d.work?.readBytes() ?: app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { it.readBytes() } }
+        }.getOrNull() else null
+        d.signatures = bytes?.let { b ->
+            runCatching { withContext(Dispatchers.IO) { IcpTrust.init(app); PdfSigner.validate(b) } }.getOrNull()
+        } ?: emptyList()
+        // depois, com internet: listas de revogação (pode demorar; a tela já mostra o resultado sem elas)
+        if (bytes != null && d.signatures.any { it.identity?.status == IcpTrust.Status.NO_REVOCATION_CHECK }) {
+            val online = runCatching { withContext(Dispatchers.IO) { PdfSigner.validate(bytes, online = true) } }.getOrNull()
+            if (online != null && d.pdf === pdfNow) d.signatures = online
+        }
     }
 
     /** Assina com certificado digital (gravação incremental) e abre a versão assinada. */

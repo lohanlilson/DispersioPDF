@@ -16,5 +16,6 @@ class LumenApp : Application() {
         engine = PdfEngine(this)
         recents = Recents(this)
         prefs = Prefs(this)
+        Thread { runCatching { IcpTrust.init(this) } }.start()
     }
 }

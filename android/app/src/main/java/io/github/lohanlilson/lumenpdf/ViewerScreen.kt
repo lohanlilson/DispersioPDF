@@ -269,6 +269,10 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     })
                                     DropdownMenuItem(text = { Text("Reconhecer texto (OCR)") }, onClick = { menu = false; vm.ocr(d) })
                                     DropdownMenuItem(text = { Text("Converter…") }, onClick = { menu = false; dlg = "converter" })
+                                    DropdownMenuItem(text = { Text("Preencher com meus dados") }, onClick = {
+                                        menu = false
+                                        dlg = if (Autofill.hasAny(ctx)) "autofill" else "meusdados"
+                                    })
                                     DropdownMenuItem(text = { Text("Detectar campos de formulário") }, onClick = { menu = false; guarded { vm.detectFields(d) } })
                                     DropdownMenuItem(text = { Text("Comparar com outro PDF…") }, onClick = { menu = false; pickCompare.launch(arrayOf("application/pdf")) })
                                     DropdownMenuItem(text = { Text("Comprimir…") }, onClick = { menu = false; dlg = "comprimir" })
@@ -540,6 +544,13 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             guarded { vm.pages(d, "numerar as páginas") { doc, _ -> Editor.pageNumbers(doc, f) } }
         }
         "prefs" -> SettingsScreen(vm) { dlg = "" }
+        "meusdados" -> MyDataDialog { dlg = if (Autofill.hasAny(ctx)) "autofill" else "" }
+        "autofill" -> AutofillDialog(remember(d.fields) { Autofill.plan(d.fields.map { it.first }, Autofill.load(ctx)) },
+            onEditData = { dlg = "meusdados" }, onDismiss = { dlg = "" }) { fills ->
+            dlg = ""
+            vm.edit(d, "preencher os campos") { doc -> fills.flatMap { Editor.setField(doc, it.field.name, it.value) } }
+            vm.toast = "${fills.size} campo(s) preenchido(s). Confira e toque em Salvar."
+        }
         "converter" -> AlertDialog(onDismissRequest = { dlg = "" }, title = { Text("Converter para") },
             text = {
                 Column {

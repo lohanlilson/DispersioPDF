@@ -4,12 +4,13 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.fragment.app.FragmentActivity
 
-class MainActivity : ComponentActivity() {
+/** FragmentActivity: a janela de digital/rosto (BiometricPrompt) precisa dela. */
+class MainActivity : FragmentActivity() {
     private val vm: AppVm by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,6 +32,13 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND ->
                 if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
                 else i.getParcelableExtra(Intent.EXTRA_STREAM)
+            Shortcuts.SCAN -> { vm.pendingAction = "scan"; null }
+            Shortcuts.OPEN -> { vm.pendingAction = "open"; null }
+            Shortcuts.RECENT -> {
+                val key = i.getStringExtra(Shortcuts.EXTRA_URI)
+                vm.recents.list().firstOrNull { it.uri == key }?.let { vm.openRecent(it) }
+                null
+            }
             else -> null
         }
         if (uri != null) vm.open(uri, fromPicker = false)

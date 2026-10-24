@@ -53,6 +53,7 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
     var pads by remember { mutableStateOf(0) }
     var certs by remember { mutableStateOf(Certs.storedPfx(ctx)) }
     var signPad by remember { mutableStateOf(false) }
+    var myData by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = { vm.setAuthorName(name); onClose() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Scaffold(topBar = {
@@ -70,6 +71,12 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
                     }
                 }
                 Toggle("Verificar atualizações automaticamente", p.autoUpdate) { p.autoUpdate = it }
+
+                Section("Formulários")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (Autofill.hasAny(ctx)) "Meus dados salvos" else "Nenhum dado salvo", Modifier.weight(1f))
+                    TextButton({ myData = true }) { Text("Editar meus dados") }
+                }
 
                 Section("Leitura")
                 Toggle("Abrir documentos no modo noturno", p.nightPages) { p.nightPages = it }
@@ -99,8 +106,12 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 certs.forEach { f ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(f.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        IconButton({ f.delete(); certs = Certs.storedPfx(ctx) }) { Icon(Icons.Filled.Delete, "Remover ${f.name}") }
+                        Column(Modifier.weight(1f)) {
+                            Text(f.name, style = MaterialTheme.typography.bodyMedium)
+                            if (PasswordVault.has(ctx, f.name)) Text("Senha guardada com a digital", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton({ PasswordVault.forget(ctx, f.name); f.delete(); certs = Certs.storedPfx(ctx) }) { Icon(Icons.Filled.Delete, "Remover ${f.name}") }
                     }
                 }
 
@@ -113,6 +124,7 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
             }
         }
     }
+    if (myData) MyDataDialog { myData = false; pads++ }
     if (signPad) SignaturePad(ctx, onDismiss = { signPad = false }) { signPad = false; pads++ }
 }
 

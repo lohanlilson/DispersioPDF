@@ -38,6 +38,21 @@ jobs:
           echo "VERSAO=$V" >> $GITHUB_ENV
           if gh release view "android-v$V" >/dev/null 2>&1; then echo "publicar=nao" >> $GITHUB_OUTPUT; else echo "publicar=sim" >> $GITHUB_OUTPUT; fi
 
+      - name: Conferir certificados ICP-Brasil embutidos
+        run: |
+          # baixa o pacote oficial do ITI por outra rede e confere que as raízes embutidas no app são as mesmas
+          if ! curl -sSf -m 120 -o ac.zip http://acraiz.icpbrasil.gov.br/credenciadas/CertificadosAC-ICP-Brasil/ACcompactado.zip; then
+            echo "::warning::Não foi possível baixar o pacote do ITI para conferir"; exit 0
+          fi
+          mkdir icp && unzip -q ac.zip -d icp
+          for f in icp/*; do openssl x509 -in "$f" -inform DER -noout -fingerprint -sha256 2>/dev/null || openssl x509 -in "$f" -noout -fingerprint -sha256; done | sort -u > iti.txt
+          awk '/BEGIN/{n++; f="r" n ".pem"} {print > f}' android/app/src/main/assets/icp/raizes.pem
+          for f in r*.pem; do openssl x509 -in "$f" -noout -fingerprint -sha256; done | sort -u > app.txt
+          cat app.txt
+          comm -23 app.txt iti.txt > diferentes.txt
+          if [ -s diferentes.txt ]; then echo "::error::Raiz embutida não confere com o ITI"; cat diferentes.txt; exit 1; fi
+          rm -rf icp r*.pem ac.zip
+
       - name: Compilar
         working-directory: android
         env:

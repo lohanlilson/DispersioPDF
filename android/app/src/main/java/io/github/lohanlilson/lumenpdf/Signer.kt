@@ -84,8 +84,12 @@ data class SigInfo(
     val field: String, val signer: String, val document: String?, val date: Date?, val tsaDate: Date?,
     val intact: Boolean, val coversWhole: Boolean, val reason: String?, val location: String?,
     val issuer: String, val validUntil: Date?, val error: String?, val revisionEnd: Int = 0,
+    val identity: IcpTrust.Identity? = null,
 ) {
     val ok get() = intact && error == null
+    /** assinatura íntegra mas com certificado revogado/vencido */
+    val badCert get() = identity?.status == IcpTrust.Status.REVOKED || identity?.status == IcpTrust.Status.EXPIRED
+    val untrusted get() = identity == null || identity.status == IcpTrust.Status.UNTRUSTED
 }
 
 object Certs {
@@ -353,7 +357,8 @@ object PdfSigner {
     }
 
     // ------------------------------------------------------------ validação
-    fun validate(bytes: ByteArray): List<SigInfo> {
+    /** online = também consultar as listas de revogação (LCR) das ACs. */
+    fun validate(bytes: ByteArray, online: Boolean = false): List<SigInfo> {
         val out = ArrayList<SigInfo>()
         PDDocument.load(bytes).use { doc ->
             val names = doc.signatureFields.associate { it.cosObject.getDictionaryObject(COSName.V) to it.fullyQualifiedName }
@@ -376,9 +381,15 @@ object PdfSigner {
                         runCatching { TimeStampToken(org.bouncycastle.asn1.cms.ContentInfo.getInstance(it.attrValues.getObjectAt(0))).timeStampInfo.genTime }.getOrNull()
                     }
                     val (name, docId) = Certs.splitName(Certs.cn(cert))
+                    val conv = org.bouncycastle.cert.jcajce.JcaX509CertificateConverter().setProvider(Certs.BC)
+                    @Suppress("UNCHECKED_CAST")
+                    val embedded = (cms.certificates.getMatches(null) as Collection<X509CertificateHolder>)
+                        .mapNotNull { h -> runCatching { conv.getCertificate(h) }.getOrNull() }
+                    val at = tsa ?: sig.signDate?.time ?: Date()
+                    val identity = runCatching { IcpTrust.check(cert, embedded, at, online) }.getOrNull()
                     out += SigInfo(field, name, docId, sig.signDate?.time, tsa, ok, covers, sig.reason, sig.location,
                         runCatching { X500Name.getInstance(cert.issuerX500Principal.encoded).getRDNs(BCStyle.CN).first().first.value.toString() }.getOrDefault(""),
-                        cert.notAfter, null, end)
+                        cert.notAfter, null, end, identity)
                 } catch (e: Exception) {
                     out += SigInfo(field, sig.name ?: "?", null, sig.signDate?.time, null, false, false, sig.reason, sig.location,
                         "", null, e.message ?: e.javaClass.simpleName)

@@ -35,6 +35,17 @@ import kotlinx.coroutines.launch
 @Composable
 fun LumenRoot(vm: AppVm) {
     val d = vm.doc
+    // atalhos do ícone do app
+    val scan = rememberScanner { vm.openScanned(it) }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.open(u, fromPicker = true) }
+    LaunchedEffect(vm.pendingAction) {
+        when (vm.pendingAction) {
+            "scan" -> scan()
+            "open" -> pick.launch(arrayOf("application/pdf"))
+        }
+        vm.pendingAction = null
+    }
     if (d == null) {
         HomeScreen(vm)
     } else {
