@@ -193,7 +193,9 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     }
     fun doSave() = vm.save(d) { saveAs.launch(d.name) }
     // "Editar texto": deixa o documento aberto para leitura antes do primeiro toque
-    LaunchedEffect(d.tool, d.pdf) { if (d.editing && d.tool == Tool.EDITTEXT) vm.prewarmRead(d) }
+    LaunchedEffect(d.tool, d.pdf, d.page) {
+        if (d.editing && d.tool == Tool.EDITTEXT) { kotlinx.coroutines.delay(400); vm.prewarmRead(d, d.page) }
+    }
     LaunchedEffect(vm.toast) {
         vm.toast?.let { Toast.makeText(ctx, it, Toast.LENGTH_SHORT).show(); vm.toast = null }
     }

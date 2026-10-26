@@ -126,6 +126,9 @@ class TextEditTest {
             val pdf = e.open(ctx, android.net.Uri.fromFile(out2), null)
             val bmp = e.render(pdf, 0, 600)
             assertTrue(bmp.width > 0)
+            // o PDFium (que desenha a tela) também lê o texto novo: a fonte embutida tem as letras
+            assertEquals(1, e.search(pdf, "revisado").size)
+            assertEquals(1, e.search(pdf, "BELTRANO").size)
             e.close(pdf)
         }
         out2.copyTo(File(File(ctx.getExternalFilesDir(null), "capturas").apply { mkdirs() }, "texto_estilos.pdf"), overwrite = true)

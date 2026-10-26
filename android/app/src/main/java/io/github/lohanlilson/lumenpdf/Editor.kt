@@ -76,6 +76,7 @@ object Editor {
                         val set = HashSet<COSDictionary>()
                         changed.forEach { d -> set += d; d.isNeedToBeUpdated = true }
                         doc.documentCatalog.cosObject.isNeedToBeUpdated = true
+                        subsetFonts(doc)
                         doc.saveIncremental(out, set)
                     }
                     true
@@ -88,6 +89,18 @@ object Editor {
             if (!ok) dst.outputStream().buffered().use { doc.save(it) }
             after(doc)
         }
+    }
+
+    /**
+     * Fontes embutidas como subconjunto só recebem as letras no save() completo; a gravação incremental
+     * do PDFBox pula essa etapa e a fonte ficaria vazia (texto invisível na tela). Faz aqui.
+     */
+    fun subsetFonts(doc: PDDocument) {
+        val f = PDDocument::class.java.getDeclaredField("fontsToSubset").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val fonts = f.get(doc) as MutableSet<com.tom_roush.pdfbox.pdmodel.font.PDFont>
+        for (font in fonts.toList()) runCatching { font.subset() }.onFailure { android.util.Log.w("LumenPdf", "subconjunto da fonte", it) }
+        fonts.clear()
     }
 
     private fun addAnnot(page: PDPage, a: PDAnnotation): List<COSDictionary> {

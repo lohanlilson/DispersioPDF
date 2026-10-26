@@ -64,7 +64,8 @@ class DesempenhoTest {
         t("3b posições na tela (uma abertura por página)") { runBlocking { e.fracOfAll(pdf, parsed.annots.map { it.page to it.rect }) } }
         t("desenhar página 1") { runBlocking { e.render(pdf, 0, 1080) } }
         PDDocument.load(out).use { doc ->
-            t("4 editar texto: analisar o toque (documento já aberto)") { TextEdit.analyze(doc, 0, rect, 60f, 783f) }
+            t("4a editar texto: 1º toque na página") { TextEdit.analyze(doc, 0, rect, 60f, 783f) }
+            t("4b editar texto: toques seguintes") { TextEdit.analyze(doc, 0, rect, 60f, 783f) }
         }
         runBlocking { e.close(first); e.close(pdf) }
     }

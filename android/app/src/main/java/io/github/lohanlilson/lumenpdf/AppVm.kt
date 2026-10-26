@@ -251,7 +251,10 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     }
 
     /** Abre o documento para leitura com antecedência (ao escolher a ferramenta "Editar texto"). */
-    fun prewarmRead(d: ViewerDoc) = viewModelScope.launch { runCatching { withReadDoc(d) { it.numberOfPages } } }
+    fun prewarmRead(d: ViewerDoc, page: Int = d.page) = viewModelScope.launch {
+        // processa a página uma vez (carrega as fontes): o primeiro toque já sai rápido
+        runCatching { withReadDoc(d) { TextEdit.analyze(it, page, android.graphics.RectF(0f, 0f, 0f, 0f), 0f, 0f) } }
+    }
 
     private fun dropReadDoc() {
         val cur = readDoc ?: return
