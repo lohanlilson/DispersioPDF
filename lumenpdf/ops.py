@@ -502,8 +502,9 @@ def _covers(font, text):
     return all(font.has_glyph(ord(c)) for c in text if not c.isspace())
 
 
-def resolve_font(page, span, text):
+def resolve_font(page, span, text, system=True):
     """Escolhe a fonte para reescrever um trecho mantendo a aparência original.
+    system=False: não usa fontes instaladas no computador (só a do PDF ou a padrão equivalente).
     Retorna (fontname, fontbuffer|None, fontfile|None, descrição)."""
     want = _norm_font(span.get("font", ""))
     # 1) a própria fonte embutida no PDF, se tiver todos os caracteres do novo texto
@@ -520,7 +521,7 @@ def resolve_font(page, span, text):
         pass
     # 2) a mesma fonte instalada no computador (ex.: Arial, Calibri, Segoe UI)
     try:
-        path = system_fonts().get(want)
+        path = system_fonts().get(want) if system else None
         if path:
             f = pymupdf.Font(fontfile=path)
             if _covers(f, text):
@@ -1468,7 +1469,8 @@ def replace_all(doc, find, repl, match_case=False, whole_word=False, pages=None)
                 if not txt.strip():
                     x += pymupdf.Font("helv").text_length(txt, fontsize=sp["size"])
                     continue
-                fn, buf, path, _ = resolve_font(page, sp, txt)
+                # sem fontes do Windows aqui: em alguns casos elas estragam os espaços no texto extraído
+                fn, buf, path, _ = resolve_font(page, sp, txt, system=False)
                 if (buf or path) and fn not in loaded:
                     page.insert_font(fontname=fn, fontbuffer=buf, fontfile=path)
                     loaded[fn] = True
