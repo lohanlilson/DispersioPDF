@@ -114,7 +114,7 @@ class Leva5Test {
     }
 
     @Test
-    fun brancoEndireitarRecortar() = runBlocking {
+    fun brancoEndireitarRecortar(): Unit = runBlocking {
         val f = scanPdf("scan.pdf", 2.5f, null, 0f)
         val pdf = engine.open(ctx, Uri.fromFile(f))
         val blank = (0 until 3).filter { PageAnalysis.isBlank(engine, pdf, it, false) }
@@ -143,6 +143,7 @@ class Leva5Test {
         Log.i("LumenTest", "recorte: $cb")
         assertTrue(cb.width < 560 && cb.height < 800)
         cropped.copyTo(File(out, "scan_endireitado.pdf"), overwrite = true)
+        Unit
     }
 
     @Test
