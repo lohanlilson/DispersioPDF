@@ -342,6 +342,12 @@ class PageChars(val page: Int, val text: String, val frac: Array<FracRect?>, val
         return a to b
     }
 
+    /** Seleção de palavras inteiras, do caractere a até o b (em qualquer direção). */
+    fun wordSelection(a: Int, b: Int): TextSelection {
+        val (s, e) = if (a <= b) word(a).first to word(b).second else word(b).first to word(a).second
+        return selection(s, e)
+    }
+
     fun selection(a: Int, b: Int): TextSelection {
         val s = minOf(a, b).coerceIn(0, size - 1)
         val e = maxOf(a, b).coerceIn(0, size - 1)

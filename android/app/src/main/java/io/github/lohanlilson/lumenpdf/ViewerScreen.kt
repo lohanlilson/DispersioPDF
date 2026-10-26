@@ -742,12 +742,12 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                             onDragStart = { o ->
                                 val pc = chars
                                 anchor = pc?.charAt(o.x / pageW, o.y / pageW) ?: -1
-                                if (pc != null && anchor >= 0) d.selection = pc.selection(anchor, anchor)
+                                if (pc != null && anchor >= 0) d.selection = pc.wordSelection(anchor, anchor)
                                 else if (pc == null) scope.launch {
                                     val c = vm.engine.pageChars(d.pdf, i)
                                     chars = c
                                     anchor = c.charAt(o.x / pageW, o.y / pageW)
-                                    if (anchor >= 0) d.selection = c.selection(anchor, anchor)
+                                    if (anchor >= 0) d.selection = c.wordSelection(anchor, anchor)
                                 }
                             },
                             onDrag = { ch, _ ->
@@ -755,7 +755,7 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                                 val pc = chars
                                 if (pc != null && anchor >= 0) {
                                     val c = pc.charAt(ch.position.x / pageW, ch.position.y / pageW, strict = false)
-                                    if (c >= 0) d.selection = pc.selection(anchor, c)
+                                    if (c >= 0) d.selection = pc.wordSelection(anchor, c)
                                 }
                             },
                             onDragEnd = {
@@ -786,7 +786,7 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                                 val pc = chars
                                 if (pc != null && anchor >= 0) {
                                     val c = pc.charAt(ch.position.x / pageW, ch.position.y / pageW, strict = false)
-                                    if (c >= 0) d.selection = pc.selection(anchor, c)
+                                    if (c >= 0) d.selection = pc.wordSelection(anchor, c)
                                 }
                             },
                         )

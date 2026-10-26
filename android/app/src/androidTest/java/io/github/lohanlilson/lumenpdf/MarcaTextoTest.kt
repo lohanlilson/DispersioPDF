@@ -110,6 +110,8 @@ class MarcaTextoTest {
             compose.onNodeWithText("Salvar").performClick()
             Thread.sleep(2500)
         }
+        // não deixa este documento nos recentes (a tela inicial dos outros testes espera a lista vazia)
+        ctx.getSharedPreferences("recentes", 0).edit().clear().commit()
         PDDocument.load(f).use { doc ->
             val marks = doc.getPage(0).annotations.filterIsInstance<PDAnnotationTextMarkup>().filter { it.subtype == "Highlight" }
             val strip = com.tom_roush.pdfbox.text.PDFTextStripperByArea()
@@ -121,7 +123,7 @@ class MarcaTextoTest {
             }
             Log.i("LumenTest", "destaques: $texts")
             assertEquals(2, marks.size)
-            assertTrue(texts.any { it.startsWith("Contrato de") })
+            assertTrue("$texts", texts.any { it.startsWith("Contrato de") })
             assertTrue(texts.any { it.startsWith("Cláusula") && it.length < 14 })
         }
     }
