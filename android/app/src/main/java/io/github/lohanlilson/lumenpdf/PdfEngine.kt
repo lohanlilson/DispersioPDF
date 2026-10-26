@@ -150,6 +150,33 @@ class PdfEngine(context: Context) {
         pdf.doc.openPage(page).use { p -> frac(p, pdf.sizes[page], r) }
     }
 
+    /** Caracteres da página (uma vez por versão do documento). */
+    suspend fun pageChars(pdf: OpenPdf, page: Int): PageChars {
+        pdf.chars[page]?.let { return it }
+        return withContext(dispatcher) {
+            pdf.chars.getOrPut(page) {
+                pdf.doc.openPage(page).use { p ->
+                    p.openTextPage().use { tp ->
+                        val n = tp.textPageCountChars()
+                        val sb = StringBuilder(n)
+                        val fr = arrayOfNulls<FracRect>(n)
+                        val pr = arrayOfNulls<RectF>(n)
+                        for (k in 0 until n) {
+                            val c = tp.textPageGetUnicode(k)
+                            sb.append(c)
+                            val b = tp.textPageGetCharBox(k)
+                            if (b != null && kotlin.math.abs(b.right - b.left) > 0.01f && c != '\n' && c != '\r') {
+                                pr[k] = b
+                                fr[k] = frac(p, pdf.sizes[page], b)
+                            }
+                        }
+                        PageChars(page, sb.toString(), fr, pr)
+                    }
+                }
+            }
+        }
+    }
+
     /** Índice do caractere sob o dedo (-1 se não houver texto perto). */
     suspend fun charAt(pdf: OpenPdf, page: Int, fx: Float, fy: Float): Int = withContext(dispatcher) {
         pdf.doc.openPage(page).use { p ->
@@ -282,4 +309,63 @@ class OpenPdf(
     val id: String,
 ) {
     val links = HashMap<Int, List<PageLink>>()
+    val chars = java.util.concurrent.ConcurrentHashMap<Int, PageChars>()
+}
+
+/**
+ * Caracteres de uma página guardados em memória: a seleção e o marca-texto acompanham o dedo
+ * sem consultar o PDFium a cada movimento.
+ */
+class PageChars(val page: Int, val text: String, val frac: Array<FracRect?>, val pdf: Array<RectF?>) {
+    val size get() = frac.size
+
+    /** Caractere sob o ponto; strict = só se estiver perto de algum texto. */
+    fun charAt(fx: Float, fy: Float, strict: Boolean = true): Int {
+        var best = -1
+        var bd = Float.MAX_VALUE
+        for (k in frac.indices) {
+            val r = frac[k] ?: continue
+            if (fx in r.l..r.r && fy in r.t..r.b) return k
+            val dx = maxOf(r.l - fx, 0f, fx - r.r)
+            val dy = maxOf(r.t - fy, 0f, fy - r.b)
+            val dd = dx + dy * 3
+            if (dd < bd) { bd = dd; best = k }
+        }
+        return if (strict && bd > 0.02f) -1 else best
+    }
+
+    /** Palavra que contém o caractere k (início, fim). */
+    fun word(k: Int): Pair<Int, Int> {
+        var a = k; var b = k
+        while (a > 0 && text.getOrNull(a - 1)?.isLetterOrDigit() == true) a--
+        while (b < text.length - 1 && text.getOrNull(b + 1)?.isLetterOrDigit() == true) b++
+        return a to b
+    }
+
+    fun selection(a: Int, b: Int): TextSelection {
+        val s = minOf(a, b).coerceIn(0, size - 1)
+        val e = maxOf(a, b).coerceIn(0, size - 1)
+        val fr = ArrayList<FracRect>()
+        val pr = ArrayList<RectF>()
+        var cf: FracRect? = null
+        var cp: RectF? = null
+        for (k in s..e) {
+            val f = frac[k] ?: continue
+            val p = pdf[k] ?: continue
+            val c = cf
+            val h = f.b - f.t
+            val sameLine = c != null && kotlin.math.abs((f.t + f.b) / 2 - (c.t + c.b) / 2) < maxOf(h, c.b - c.t) * 0.6f && f.l >= c.l - h
+            if (c != null && sameLine) {
+                cf = FracRect(minOf(c.l, f.l), minOf(c.t, f.t), maxOf(c.r, f.r), maxOf(c.b, f.b))
+                val q = cp!!
+                cp = RectF(minOf(q.left, p.left), maxOf(q.top, p.top), maxOf(q.right, p.right), minOf(q.bottom, p.bottom))
+            } else {
+                c?.let { fr += it; pr += cp!! }
+                cf = f
+                cp = RectF(minOf(p.left, p.right), maxOf(p.top, p.bottom), maxOf(p.left, p.right), minOf(p.top, p.bottom))
+            }
+        }
+        cf?.let { fr += it; pr += cp!! }
+        return TextSelection(page, s, e, text.substring(s, minOf(e + 1, text.length)).replace("\r\n", "\n"), fr, pr)
+    }
 }

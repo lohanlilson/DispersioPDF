@@ -132,7 +132,7 @@ class PdfView(QGraphicsView):
         self._drag_rect = None
         self._ink = []
         self._annot_drag = None
-        self.before_change = lambda: None
+        self.before_change = lambda page=None: None
         self.after_change = lambda pages=None, structure=False: None
         self.request_tool = lambda name, **kw: None
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
@@ -655,7 +655,7 @@ class PdfView(QGraphicsView):
         p = self.sel[0]
         page = self._page(p)
         quads = [ (r * page.derotation_matrix).quad for r in self.sel_rects[p]]
-        self.before_change()
+        self.before_change(page=p)
         fn = {"highlight": page.add_highlight_annot, "underline": page.add_underline_annot,
               "strikeout": page.add_strikeout_annot, "squiggly": page.add_squiggly_annot}[kind]
         a = fn(quads)
@@ -670,7 +670,7 @@ class PdfView(QGraphicsView):
             return
         p = self.sel[0]
         page = self._page(p)
-        self.before_change()
+        self.before_change(page=p)
         for r in self.sel_rects[p]:
             page.add_redact_annot(ops.to_unrot(page, r), fill=(0, 0, 0))
         self.clear_selection()
@@ -943,7 +943,7 @@ class PdfView(QGraphicsView):
                 pts = self._ink[1]
                 if len(pts) > 1:
                     page = self._page(i)
-                    self.before_change()
+                    self.before_change(page=i)
                     a = page.add_ink_annot([[tuple(p * page.derotation_matrix) for p in pts]])
                     self._style(a, "ink", stroke=True)
                     a.update()
@@ -977,7 +977,7 @@ class PdfView(QGraphicsView):
         if m in ("line", "arrow"):
             if small:
                 return
-            self.before_change()
+            self.before_change(page=i)
             a = page.add_line_annot(p0 * page.derotation_matrix, p1 * page.derotation_matrix)
             if m == "arrow":
                 a.set_line_ends(pymupdf.PDF_ANNOT_LE_NONE, pymupdf.PDF_ANNOT_LE_OPEN_ARROW)
@@ -995,19 +995,19 @@ class PdfView(QGraphicsView):
             return
         unrot = ops.to_unrot(page, rect)
         if m in ("rect", "ellipse"):
-            self.before_change()
+            self.before_change(page=i)
             a = page.add_rect_annot(unrot) if m == "rect" else page.add_circle_annot(unrot)
             self._style(a, m, stroke=True)
             a.update()
             self.after_change([i])
         elif m == "area_highlight" or (m == "highlight"):
-            self.before_change()
+            self.before_change(page=i)
             a = page.add_highlight_annot(unrot.quad)
             self._style(a, "highlight", stroke=True)
             a.update()
             self.after_change([i])
         elif m == "redact":
-            self.before_change()
+            self.before_change(page=i)
             a = page.add_redact_annot(unrot, fill=(0, 0, 0))
             a.set_info(title=self.author)
             a.update()
@@ -1015,7 +1015,7 @@ class PdfView(QGraphicsView):
         elif m == "freetext":
             text, ok = QInputDialog.getMultiLineText(self, "Caixa de texto", "Texto:")
             if ok and text:
-                self.before_change()
+                self.before_change(page=i)
                 col = ops.hex_to_rgb(self.colors["freetext"])
                 a = page.add_freetext_annot(unrot, text, fontsize=12, fontname="Helv", text_color=col,
                                             border_color=col, border_width=1, fill_color=(1, 1, 1),
@@ -1027,7 +1027,7 @@ class PdfView(QGraphicsView):
             if not self.signature_png:
                 self.request_tool("create_signature")
             if self.signature_png:
-                self.before_change()
+                self.before_change(page=i)
                 a = page.add_stamp_annot(unrot, stamp=self.signature_png)
                 a.set_info(title=self.author, content="Assinatura")
                 a.update()
@@ -1081,7 +1081,7 @@ class PdfView(QGraphicsView):
         if not ok:
             return
         page = self._page(i)
-        self.before_change()
+        self.before_change(page=i)
         a = page.add_text_annot(pt * page.derotation_matrix, text, icon="Comment")
         a.set_colors(stroke=ops.hex_to_rgb(self.colors["note"]))
         a.set_info(title=self.author, content=text)
@@ -1107,7 +1107,7 @@ class PdfView(QGraphicsView):
         w = max(150, len(label) * 13 + 30)
         rect = pymupdf.Rect(pt.x - w / 2, pt.y - 25, pt.x + w / 2, pt.y + 25)
         c = ops.hex_to_rgb(col)
-        self.before_change()
+        self.before_change(page=i)
         a = page.add_freetext_annot(ops.to_unrot(page, rect), txt, fontsize=13, fontname="Helv", text_color=c,
                                     border_color=c, border_width=2.5, fill_color=(1, 1, 1),
                                     align=pymupdf.TEXT_ALIGN_CENTER, rotate=page.rotation, opacity=0.9)

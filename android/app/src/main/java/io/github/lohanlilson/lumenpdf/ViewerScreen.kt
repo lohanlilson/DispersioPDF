@@ -362,6 +362,15 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                 d.placing = Placement(Tool.SIGN, pg, fx - w / 2, fy - h / 2, fx + w / 2, fy + h / 2, aspect)
                             }
                         }
+                        d.editing && d.tool == Tool.HIGHLIGHT -> {
+                            val pc = vm.engine.pageChars(d.pdf, pg)
+                            val k = pc.charAt(fx, fy)
+                            if (k < 0) Toast.makeText(ctx, "Nenhum texto neste ponto", Toast.LENGTH_SHORT).show()
+                            else {
+                                val (a, b) = pc.word(k)
+                                vm.markup(d, pc.selection(a, b), Markup.HIGHLIGHT, vm.prefs.highlightColor)
+                            }
+                        }
                         d.editing && d.tool == Tool.EDITTEXT -> {
                             val line = vm.engine.lineAt(d.pdf, pg, fx, fy)
                             if (line == null || line.text.isBlank()) Toast.makeText(ctx, "Nenhum texto neste ponto", Toast.LENGTH_SHORT).show()
@@ -420,7 +429,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             ) {
                 LazyColumn(
                     state = list,
-                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.REDACT && d.placing == null,
+                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.REDACT && !(d.editing && d.tool == Tool.HIGHLIGHT) && d.placing == null,
                     modifier = Modifier.width(with(density) { contentW.toDp() }).fillMaxHeight()
                         .graphicsLayer {
                             scaleX = gesture
@@ -624,6 +633,14 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
     val renderW = min(pageW, MAX_RENDER_PX)
     // mostra a última imagem desta página (zoom anterior ou versão antes da edição) enquanto a nova é gerada
     var shown by remember(d, i) { mutableStateOf(d.lastBitmaps.get(i)) }
+    // caracteres da página em memória (carregados logo depois da imagem; a seleção não espera o PDFium)
+    var chars by remember(d.pdf, i) { mutableStateOf(d.pdf.chars[i]) }
+    LaunchedEffect(d.pdf, i) {
+        if (chars == null) {
+            kotlinx.coroutines.delay(250)
+            chars = runCatching { vm.engine.pageChars(d.pdf, i) }.getOrNull()
+        }
+    }
     val pdf = d.pdf
     LaunchedEffect(pdf, i, renderW) {
         val b = vm.engine.render(pdf, i, renderW).asImageBitmap()
@@ -718,32 +735,58 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                                 if (d.strokes.isNotEmpty()) d.strokes[d.strokes.lastIndex] = i to cur.toList()
                             },
                         )
+                    } else if (d.editing && d.tool == Tool.HIGHLIGHT) {
+                        // marca-texto: arrastar sobre o texto já destaca (sem precisar segurar antes)
+                        var anchor = -1
+                        detectDragGestures(
+                            onDragStart = { o ->
+                                val pc = chars
+                                anchor = pc?.charAt(o.x / pageW, o.y / pageW) ?: -1
+                                if (pc != null && anchor >= 0) d.selection = pc.selection(anchor, anchor)
+                                else if (pc == null) scope.launch {
+                                    val c = vm.engine.pageChars(d.pdf, i)
+                                    chars = c
+                                    anchor = c.charAt(o.x / pageW, o.y / pageW)
+                                    if (anchor >= 0) d.selection = c.selection(anchor, anchor)
+                                }
+                            },
+                            onDrag = { ch, _ ->
+                                ch.consume()
+                                val pc = chars
+                                if (pc != null && anchor >= 0) {
+                                    val c = pc.charAt(ch.position.x / pageW, ch.position.y / pageW, strict = false)
+                                    if (c >= 0) d.selection = pc.selection(anchor, c)
+                                }
+                            },
+                            onDragEnd = {
+                                val sel = d.selection
+                                d.selection = null
+                                if (sel != null && sel.page == i && anchor >= 0) vm.markup(d, sel, Markup.HIGHLIGHT, vm.prefs.highlightColor)
+                                anchor = -1
+                            },
+                            onDragCancel = { d.selection = null; anchor = -1 },
+                        )
                     } else {
-                        // tocar e segurar no texto: seleciona; arrastar estende a seleção
+                        // tocar e segurar no texto: seleciona a palavra; arrastar estende a seleção
                         var anchor = -1
                         detectDragGesturesAfterLongPress(
                             onDragStart = { o ->
                                 scope.launch {
-                                    anchor = vm.engine.charAt(d.pdf, i, o.x / pageW, o.y / pageW)
-                                    if (anchor >= 0) {
-                                        // começa pela palavra inteira
-                                        val txt = vm.engine.selection(d.pdf, i, maxOf(0, anchor - 40), anchor + 40)
-                                        val rel = anchor - txt.start
-                                        val t = txt.text
-                                        var a = rel; var b = rel
-                                        while (a > 0 && t.getOrNull(a - 1)?.isLetterOrDigit() == true) a--
-                                        while (b < t.length - 1 && t.getOrNull(b + 1)?.isLetterOrDigit() == true) b++
-                                        anchor = txt.start + a
-                                        d.selection = vm.engine.selection(d.pdf, i, txt.start + a, txt.start + b)
+                                    val pc = chars ?: vm.engine.pageChars(d.pdf, i).also { chars = it }
+                                    val k = pc.charAt(o.x / pageW, o.y / pageW)
+                                    if (k >= 0) {
+                                        val (a, b) = pc.word(k)
+                                        anchor = a
+                                        d.selection = pc.selection(a, b)
                                     }
                                 }
                             },
                             onDrag = { ch, _ ->
                                 ch.consume()
-                                val pos = ch.position
-                                if (anchor >= 0) scope.launch {
-                                    val c = vm.engine.charAt(d.pdf, i, pos.x / pageW, pos.y / pageW)
-                                    if (c >= 0) d.selection = vm.engine.selection(d.pdf, i, anchor, c)
+                                val pc = chars
+                                if (pc != null && anchor >= 0) {
+                                    val c = pc.charAt(ch.position.x / pageW, ch.position.y / pageW, strict = false)
+                                    if (c >= 0) d.selection = pc.selection(anchor, c)
                                 }
                             },
                         )
@@ -791,7 +834,8 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
             val fields = if (vm.prefs.highlightFields) d.fields.filter { it.first.page == i } else emptyList()
             val sel = d.selection?.takeIf { it.page == i }
             val strokes = d.strokes.filter { it.first == i }
-            if (fields.isNotEmpty() || sel != null || strokes.isNotEmpty()) {
+            val marks = d.pendingMarks.filter { it.first == i }
+            if (fields.isNotEmpty() || sel != null || strokes.isNotEmpty() || marks.isNotEmpty()) {
                 Canvas(Modifier.fillMaxSize()) {
                     val w = size.width
                     for ((f, r) in fields) {
@@ -804,7 +848,13 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                             }
                         } else if (!f.readOnly) drawRect(Color(0x40CCD7FF), tl, sz2)
                     }
-                    sel?.rects?.forEach { r -> drawRect(Color(0x553D7BFF), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w)) }
+                    val selColor = if (d.editing && d.tool == Tool.HIGHLIGHT) Color(vm.prefs.highlightColor).copy(alpha = 0.45f) else Color(0x553D7BFF)
+                    sel?.rects?.forEach { r -> drawRect(selColor, Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w),
+                        blendMode = androidx.compose.ui.graphics.BlendMode.Multiply) }
+                    for ((pg, rs, c) in marks) if (pg == i) rs.forEach { r ->
+                        drawRect(Color(c).copy(alpha = 0.55f), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w),
+                            blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
+                    }
                     val px = d.inkWidth * w / sz.w
                     for ((_, pts) in strokes) {
                         if (pts.size < 2) continue

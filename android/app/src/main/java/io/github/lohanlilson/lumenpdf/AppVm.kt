@@ -18,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Tool { NONE, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT }
+enum class Tool { NONE, HIGHLIGHT, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT }
 
 /** Comparação aberta: as duas versões e a lista de alterações. */
 class CompareState(val a: OpenPdf, val b: OpenPdf, val nameA: String, val nameB: String, val changes: List<Change>,
@@ -67,6 +67,8 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var annots by mutableStateOf<List<Pair<Editor.AnnotRef, FracRect>>>(emptyList())
     var selAnnot by mutableStateOf<Editor.AnnotRef?>(null)
     val redactions = mutableStateListOf<Pair<Int, FracRect>>()
+    /** destaques já pedidos, mostrados na hora enquanto o arquivo é gravado */
+    val pendingMarks = mutableStateListOf<Triple<Int, List<FracRect>, Long>>()
     /** últimas imagens exibidas por página (marcador enquanto a nova renderização não fica pronta) */
     val lastBitmaps = android.util.LruCache<Int, androidx.compose.ui.graphics.ImageBitmap>(10)
 }
@@ -199,6 +201,15 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         d.pdf = newPdf
         engine.close(old)
         loadFields(d)
+    }
+
+    /** Destaque/sublinhado/tachado do trecho selecionado. Aparece na hora; o arquivo é gravado em seguida. */
+    fun markup(d: ViewerDoc, sel: TextSelection, kind: Markup, color: Long) {
+        if (sel.pdfRects.isEmpty()) return
+        val mark = Triple(sel.page, sel.rects, if (kind == Markup.HIGHLIGHT) color else 0L)
+        if (kind == Markup.HIGHLIGHT) d.pendingMarks += mark
+        edit(d, kind.label.lowercase()) { Editor.markup(it, sel.page, sel.pdfRects, kind, color) }
+            .invokeOnCompletion { d.pendingMarks.remove(mark) }
     }
 
     /** Trecho de texto (mesmo estilo) sob o dedo, para a ferramenta "Editar texto". */

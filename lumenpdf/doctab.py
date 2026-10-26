@@ -255,8 +255,16 @@ class DocTab(QWidget):
             self.view.recolor_selected_annot(c)
 
     # ------------------------------------------------------------ desfazer / alterações
-    def checkpoint(self):
-        self.undo_stack.append(self.doc.tobytes())
+    def checkpoint(self, page=None):
+        """Ponto de desfazer. Com page=, a alteração só acrescenta anotações nessa página: guarda apenas quais
+        já existiam (instantâneo; a cópia do documento inteiro, lenta em PDFs grandes, só é feita ao desfazer)."""
+        entry = None
+        if page is not None:
+            try:
+                entry = ("anotacoes", page, {a.xref for a in self.doc[page].annots()})
+            except Exception:
+                entry = None
+        self.undo_stack.append(entry if entry is not None else self.doc.tobytes())
         if len(self.undo_stack) > MAX_UNDO:
             self.undo_stack.pop(0)
         self.redo_stack.clear()
@@ -308,8 +316,19 @@ class DocTab(QWidget):
     def undo(self):
         if not self.undo_stack:
             return
+        top = self.undo_stack.pop()
         self.redo_stack.append(self.doc.tobytes())
-        self._load_bytes(self.undo_stack.pop())
+        if isinstance(top, tuple):
+            _, page, before = top
+            pg = self.doc[page]
+            for xref in [a.xref for a in pg.annots() if a.xref not in before]:
+                a = pg.load_annot(xref)
+                if a:
+                    pg.delete_annot(a)
+            self.view.sel_annot = None
+            self.changed([page])
+        else:
+            self._load_bytes(top)
         self.modified = True
         self.titleChanged.emit()
 

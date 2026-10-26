@@ -92,7 +92,7 @@ class CompareWindow(QWidget):
                          f"<span style='color:gray'>({doc.page_count} pág.)</span>")
             cl.addWidget(lab)
             v = PdfView()
-            v.before_change = lambda: None
+            v.before_change = lambda page=None: None
             v.after_change = lambda *a, **k: None
             v.request_tool = lambda *a, **k: None
             v.zoom_mode = "fit_width"

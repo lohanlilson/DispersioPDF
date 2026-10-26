@@ -108,7 +108,8 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
     Surface(shadowElevation = 8.dp, color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.navigationBarsPadding()) {
             val hint = when (d.tool) {
-                Tool.NONE -> "Toque e segure no texto para destacar · toque num comentário para editar"
+                Tool.NONE -> "Toque e segure no texto para selecionar · toque num comentário para editar"
+                Tool.HIGHLIGHT -> "Arraste o dedo sobre o texto para destacar · toque numa palavra para destacá-la"
                 Tool.INK -> "Desenhe com o dedo. Toque em Concluir para gravar."
                 Tool.NOTE -> "Toque onde quer colocar a nota"
                 Tool.TEXT -> "Toque onde quer escrever"
@@ -133,6 +134,7 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                     d.selection = null
                 }
                 ToolButton(Icons.Filled.TouchApp, "Selecionar", d.tool == Tool.NONE) { pick(Tool.NONE) }
+                ToolButton(Icons.Filled.Highlight, "Marca-texto", d.tool == Tool.HIGHLIGHT) { pick(Tool.HIGHLIGHT) }
                 ToolButton(Icons.Filled.EditNote, "Editar texto", d.tool == Tool.EDITTEXT) { pick(Tool.EDITTEXT) }
                 ToolButton(Icons.Filled.Gesture, "Desenhar", d.tool == Tool.INK) { pick(Tool.INK) }
                 ToolButton(Icons.Filled.StickyNote2, "Nota", d.tool == Tool.NOTE) { pick(Tool.NOTE) }
@@ -191,7 +193,7 @@ fun SelectionBar(vm: AppVm, d: ViewerDoc, onCopy: (String) -> Unit) {
                 Triple(Markup.STRIKEOUT, Icons.Filled.FormatStrikethrough, 0xFFD7373F)).forEach { (kind, icon, color) ->
                 IconButton({
                     d.selection = null
-                    vm.edit(d, kind.label.lowercase()) { Editor.markup(it, sel.page, sel.pdfRects, kind, color) }
+                    vm.markup(d, sel, kind, color)
                 }) { Icon(icon, kind.label, tint = Color(color)) }
             }
             IconButton({ d.selection = null }) { Icon(Icons.Filled.Close, "Cancelar seleção") }
