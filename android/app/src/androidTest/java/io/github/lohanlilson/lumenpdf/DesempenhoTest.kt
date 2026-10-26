@@ -47,6 +47,9 @@ class DesempenhoTest {
         return r
     }
 
+    @org.junit.After
+    fun limparRecentes() { ctx.getSharedPreferences("recentes", 0).edit().clear().commit() }
+
     @Test
     fun edicaoEmPdfGrande() {
         val src = big()
