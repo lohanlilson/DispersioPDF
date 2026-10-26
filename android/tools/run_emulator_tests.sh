@@ -4,11 +4,13 @@ set -u
 APK=android/app/build/outputs/apk
 adb install -r "$APK/debug/app-debug.apk"
 adb install -r "$APK/androidTest/debug/app-debug-androidTest.apk"
+adb logcat -G 16M || true
 adb logcat -c || true
 sleep 8
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS || true
 adb shell am instrument -w -r io.github.lohanlilson.lumenpdf.test/androidx.test.runner.AndroidJUnitRunner | tee instr.txt
 adb logcat -d | grep -E "LumenTest|LumenPdf" | grep -v "printToLog\|Node #\||" | tail -80
+adb logcat -d | grep "DESEMPENHO" || true
 mkdir -p capturas
 adb pull /sdcard/Android/data/io.github.lohanlilson.lumenpdf/files/capturas/. capturas/ || true
 # APK de publicação (código otimizado pelo R8): abre e confere que não fecha sozinho
