@@ -168,7 +168,7 @@ class ViewerTest {
             shot("06_selecao")
             compose.onNodeWithContentDescription("Destacar").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Salvar").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithContentDescription("Marcar ✓").performClick()
+            compose.onNodeWithContentDescription("Marcar ✓").performScrollTo().performClick()
             compose.onNodeWithContentDescription("Página 1").performTouchInput { click(Offset(width * 0.85f, height * 0.25f)) }
             // o toque simples espera o tempo do toque duplo: avança o relógio da interface do teste
             compose.mainClock.advanceTimeBy(1000)
