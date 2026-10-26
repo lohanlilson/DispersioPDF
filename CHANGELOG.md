@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.7.1
+
+- **Novo ícone dos arquivos PDF**: folha índigo escura com o prisma do Lumen e o espectro de luz. Aparece no Explorador do Windows, nas abas e na tela inicial.
+
 ## 1.7.0
 
 - **Medir distâncias e áreas** (Ferramentas › Medir): defina a escala da planta (ex.: 1:100) ou calibre desenhando sobre uma medida conhecida. As medidas ficam no PDF com o valor escrito (ex.: 10,58 m; 93,34 m²).

@@ -168,49 +168,83 @@ def prism_symbol(s, cx, cy, scale, page_bg=(255, 255, 255)):
     return layer
 
 
+def light_symbol(s, cx, cy, scale, clip):
+    """Símbolo claro para a folha escura: feixe branco com brilho, prisma claro e leque de luz colorido."""
+    u = s / 1024 * scale
+    ox, oy = cx - 512 * u, cy - 512 * u
+    P = lambda *pts: [(ox + x * u, oy + y * u) for x, y in pts]  # noqa: E731
+    layer = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    beam = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(beam).line(P((-300, 760), (430, 560)), fill=255, width=max(2, int(30 * u)))
+    _put(layer, beam.filter(ImageFilter.GaussianBlur(20 * u)), (255, 255, 255, 200))
+    _put(layer, beam, (255, 255, 255, 255))
+    apex = (ox + 600 * u, oy + 520 * u)
+    for (ex, ey), c in zip([(1500, 260), (1500, 560), (1500, 860)],
+                           [(196, 170, 255, 235), (120, 160, 255, 235), (255, 200, 110, 240)]):
+        ex, ey = ox + ex * u, oy + ey * u
+        ang = math.atan2(ey - apex[1], ex - apex[0]) + math.pi / 2
+        dx, dy = math.cos(ang) * 70 * u, math.sin(ang) * 70 * u
+        m = Image.new("L", (s, s), 0)
+        ImageDraw.Draw(m).polygon([apex, (ex - dx, ey - dy), (ex + dx, ey + dy)], fill=255)
+        _put(layer, m.filter(ImageFilter.GaussianBlur(16 * u)), c[:3] + (120,))
+        _put(layer, m, c)
+    tri = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(tri).polygon(P((500, 250), (730, 690), (270, 690)), fill=255)
+    tri = tri.filter(ImageFilter.GaussianBlur(26 * u)).point(lambda v: 255 if v > 150 else 0)
+    tri = tri.filter(ImageFilter.GaussianBlur(max(1, 2 * u)))
+    sh = Image.new("L", (s, s), 0)
+    sh.paste(tri, (0, int(18 * u)))
+    _put(layer, sh.filter(ImageFilter.GaussianBlur(20 * u)).point(lambda v: int(v * 0.5)), (16, 0, 50))
+    _put(layer, tri, linear((s, s), [(0, (255, 255, 255)), (1, (222, 208, 255))], 100).convert("RGBA"))
+    layer.putalpha(ImageChops.multiply(layer.getchannel("A"), clip))
+    return layer
+
+
 def doc_icon(s=S):
-    """Ícone dos arquivos .pdf (como o do Adobe): folha branca com o símbolo completo da marca e a etiqueta PDF."""
+    """Ícone dos arquivos .pdf ("Noite"): folha índigo escura, o prisma brilhando com o espectro de luz e PDF em branco."""
     u = s / 1024
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    x0, y0, x1, y1, f, r = 176 * u, 48 * u, 848 * u, 976 * u, 230 * u, 50 * u
-    pm = page_mask((s, s), x0, y0, x1, y1, f, r)
+    x0, y0, x1, y1, f = 150 * u, 40 * u, 874 * u, 984 * u, 240 * u
+    pm = page_mask((s, s), x0, y0, x1, y1, f, 70 * u)
+    # sombra
     sh = Image.new("L", (s, s), 0)
     sh.paste(pm, (int(6 * u), int(18 * u)))
     shadow = Image.new("RGBA", (s, s), (20, 10, 50, 255))
     shadow.putalpha(sh.filter(ImageFilter.GaussianBlur(22 * u)).point(lambda v: int(v * 0.45)))
     img.alpha_composite(shadow)
-    edge = pm.filter(ImageFilter.MaxFilter(9))
-    img.paste(Image.new("RGBA", (s, s), (206, 202, 222, 255)), (0, 0), edge)
-    img.paste(Image.new("RGBA", (s, s), (255, 255, 255, 255)), (0, 0), pm)
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([x1 - f, y0, x1, y0 + f], radius=36 * u, fill=(236, 230, 252, 255),
-                        outline=(206, 202, 222, 255), width=int(8 * u))
-    corner = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(corner).polygon([(x1 - f + 6 * u, y0 - 6 * u), (x1 + 6 * u, y0 + f - 6 * u), (x1 + 6 * u, y0 - 6 * u)],
-                                   fill=255)
-    img.paste(Image.new("RGBA", (s, s), (0, 0, 0, 0)), (0, 0), corner)
-    d = ImageDraw.Draw(img)
-    d.line([(x1 - f, y0 + 3 * u), (x1 - 3 * u, y0 + f)], fill=(206, 202, 222, 255), width=int(8 * u))
-    # símbolo completo no centro da folha
-    sym = prism_symbol(s, 512 * u, 500 * u, 0.62)
-    m = ImageChops.multiply(sym.getchannel("A"), pm)
-    sym.putalpha(m)
-    img.alpha_composite(sym)
+    # borda e fundo
+    img.paste(Image.new("RGBA", (s, s), (80, 60, 160, 255)), (0, 0), pm.filter(ImageFilter.MaxFilter(9)))
+    img.paste(linear((s, s), [(0, (18, 12, 52)), (1, (52, 26, 130))], angle=75).convert("RGBA"), (0, 0), pm)
+    glow = radial((s, s), (500 * u, 430 * u), 460 * u, (140, 90, 255), 0.55)
+    glow.putalpha(ImageChops.multiply(glow.getchannel("A"), pm))
+    img.alpha_composite(glow)
+    img.alpha_composite(light_symbol(s, 470 * u, 420 * u, 0.64, pm))
+    # canto dobrado
+    tri = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(tri).polygon([(x1 - f, y0), (x1 - f, y0 + f), (x1, y0 + f)], fill=255)
+    fs = Image.new("RGBA", (s, s), (20, 10, 50, 255))
+    fs.putalpha(tri.filter(ImageFilter.GaussianBlur(14 * u)).point(lambda v: int(v * 0.35)))
+    off = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    off.paste(fs, (int(-10 * u), int(12 * u)))
+    off.putalpha(ImageChops.multiply(off.getchannel("A"), pm))
+    img.alpha_composite(off)
+    m = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(m).rounded_rectangle([x1 - f, y0, x1, y0 + f], radius=int(40 * u), fill=255)
+    ImageDraw.Draw(m).polygon([(x1 - f + 2 * u, y0 - 4 * u), (x1 + 4 * u, y0 + f - 2 * u), (x1 + 4 * u, y0 - 4 * u)], fill=0)
+    _put(img, m, (110, 80, 210, 255))
     # etiqueta PDF
-    try:
-        from PIL import ImageFont
-        fnt = None
-        for fp in ("C:/Windows/Fonts/segoeuib.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
-            try:
-                fnt = ImageFont.truetype(fp, int(118 * u))
-                break
-            except OSError:
-                pass
-        if fnt:
-            d = ImageDraw.Draw(img)
-            d.text((512 * u, 820 * u), "PDF", font=fnt, fill=(80, 40, 190, 255), anchor="mm")
-    except Exception:
-        pass
+    from PIL import ImageFont
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    for fp in (os.path.join(here, "fontes", "InterDisplay-ExtraBold.otf"), "/usr/share/fonts/opentype/inter/InterDisplay-ExtraBold.otf",
+               "C:/Windows/Fonts/segoeuib.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
+        try:
+            fnt = ImageFont.truetype(fp, int(160 * u))
+            break
+        except OSError:
+            fnt = None
+    if fnt:
+        ImageDraw.Draw(img).text((512 * u, 840 * u), "PDF", font=fnt, fill=(255, 255, 255, 255), anchor="mm")
     return img
 
 
