@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Tool { NONE, HIGHLIGHT, INK, SHAPE, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT }
+enum class Tool { NONE, HIGHLIGHT, INK, SHAPE, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT, CROP }
 
 /** Comparação aberta: as duas versões e a lista de alterações. */
 class CompareState(val a: OpenPdf, val b: OpenPdf, val nameA: String, val nameB: String, val changes: List<Change>,
@@ -64,7 +64,9 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     val strokes = mutableStateListOf<Pair<Int, List<Offset>>>()
     /** forma escolhida: Square | Circle | Arrow; e a que está sendo desenhada (página, início, fim em frações) */
     var shapeKind by mutableStateOf("Square")
-    var shapeDraft by mutableStateOf<Triple<Int, Offset, Offset>?>(null)   // (página, pontos em frações da largura)
+    var shapeDraft by mutableStateOf<Triple<Int, Offset, Offset>?>(null)
+    /** área desenhada com a ferramenta Recortar (página, retângulo em frações) */
+    var cropDraft by mutableStateOf<Pair<Int, FracRect>?>(null)   // (página, pontos em frações da largura)
     var busy by mutableStateOf(false)
     var signatures by mutableStateOf<List<SigInfo>>(emptyList())
     var placing by mutableStateOf<Placement?>(null)
@@ -496,6 +498,103 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             d.canUndo = d.undo.isNotEmpty()
             d.canRedo = d.redo.isNotEmpty()
             editLock.unlock()
+        }
+    }
+
+    private suspend fun workFile(d: ViewerDoc, name: String): File = d.work ?: withContext(Dispatchers.IO) {
+        val app = getApplication<Application>()
+        File(app.cacheDir, name).also { f -> app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { i -> f.outputStream().use { i.copyTo(it) } } }
+    }
+
+    /** Páginas em branco (sem texto, comentários nem conteúdo visível). */
+    suspend fun findBlank(d: ViewerDoc): List<Int> {
+        progress = "Procurando páginas em branco…"
+        try {
+            val withAnnots = d.annots.map { it.first.page }.toSet() + d.fields.map { it.first.page }.toSet()
+            return (0 until d.pageCount).filter { p ->
+                progress = "Procurando páginas em branco… ${p + 1} de ${d.pageCount}"
+                PageAnalysis.isBlank(engine, d.pdf, p, p in withAnnots)
+            }
+        } finally {
+            progress = null
+        }
+    }
+
+    /** Endireita as páginas digitalizadas tortas. */
+    fun deskew(d: ViewerDoc) = viewModelScope.launch {
+        try {
+            val fixes = ArrayList<Pair<Int, Double>>()
+            for (p in 0 until d.pageCount) {
+                progress = "Verificando inclinação… página ${p + 1} de ${d.pageCount}"
+                val chars = engine.pageChars(d.pdf, p).text.count { !it.isWhitespace() && it != '\u0000' }
+                if (chars > 15) continue   // página com texto digital: não é digitalização
+                val a = PageAnalysis.skew(engine, d.pdf, p)
+                if (kotlin.math.abs(a) >= 0.3) fixes += p to a
+            }
+            progress = null
+            if (fixes.isEmpty()) { toast = "Nenhuma página digitalizada torta encontrada."; return@launch }
+            edit(d, "endireitar as páginas") { doc -> fixes.flatMap { (p, a) -> PageEdit.rotateContent(doc, p, a) } }.join()
+            d.lastBitmaps.evictAll()
+            toast = "Endireitadas: " + fixes.joinToString(", ") { (p, a) -> "pág. ${p + 1} (%+.1f°)".format(a) } + ". Dá para desfazer."
+        } catch (e: Exception) {
+            error = "Não foi possível endireitar.\n${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            progress = null
+        }
+    }
+
+    /** Recorta páginas: rects = página → retângulo em frações (null = automático, pelas bordas do conteúdo). */
+    fun crop(d: ViewerDoc, pages: List<Int>, area: FracRect?) = viewModelScope.launch {
+        try {
+            val boxes = HashMap<Int, FloatArray>()
+            for ((k, p) in pages.withIndex()) {
+                progress = "Analisando margens… ${k + 1} de ${pages.size}"
+                val r = area ?: PageAnalysis.contentBox(engine, d.pdf, p) ?: continue
+                boxes[p] = engine.pdfPoints(d.pdf, p, listOf(r.l to r.t, r.r to r.b))
+            }
+            progress = null
+            if (boxes.isEmpty()) { toast = "Nada para recortar."; return@launch }
+            pages(d, "recortar") { doc, _ -> boxes.forEach { (p, b) -> PageEdit.crop(doc, p, b[0], b[1], b[2], b[3]) } }.join()
+            toast = "${boxes.size} página(s) recortada(s). Dá para desfazer."
+        } catch (e: Exception) {
+            error = "Não foi possível recortar.\n${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            progress = null
+        }
+    }
+
+    fun extractImages(d: ViewerDoc) = viewModelScope.launch {
+        try {
+            progress = "Extraindo imagens…"
+            val app = getApplication<Application>()
+            val src = workFile(d, "imagens-origem.pdf")
+            val n = withContext(Dispatchers.IO) { PageEdit.extractImages(app, src, d.password, d.name.removeSuffix(".pdf").removeSuffix(".PDF")) }
+            toast = if (n == 0) "Este documento não tem imagens." else "$n imagem(ns) salvas na galeria (Imagens › Lumen PDF)"
+        } catch (e: Exception) {
+            error = "Não foi possível extrair as imagens.\n${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            progress = null
+        }
+    }
+
+    fun saveAsPdfA(d: ViewerDoc, target: Uri) = viewModelScope.launch {
+        try {
+            progress = "Convertendo para PDF/A…"
+            val app = getApplication<Application>()
+            val src = workFile(d, "pdfa-origem.pdf")
+            val problems = withContext(Dispatchers.IO) {
+                val out = File(app.cacheDir, "pdfa-saida.pdf")
+                val title = d.name.removeSuffix(".pdf").removeSuffix(".PDF")
+                val pr = PdfA.convert(app, src, d.password, out, title)
+                app.contentResolver.openOutputStream(target, "wt")!!.use { o -> out.inputStream().use { it.copyTo(o) } }
+                pr
+            }
+            if (problems.isEmpty()) toast = "Salvo como PDF/A-2b."
+            else error = "Salvo como PDF/A-2b, com avisos:\n• " + problems.joinToString("\n• ")
+        } catch (e: Exception) {
+            error = "Não foi possível converter para PDF/A.\n${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            progress = null
         }
     }
 

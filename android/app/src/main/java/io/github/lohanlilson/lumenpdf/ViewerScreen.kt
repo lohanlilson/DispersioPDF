@@ -174,6 +174,11 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var editPt by remember { mutableStateOf(android.graphics.PointF()) }
     var dlg by remember { mutableStateOf("") }
     var splitReq by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var reading by remember { mutableStateOf(false) }
+    var blankList by remember { mutableStateOf<List<Int>?>(null) }
+    val pdfaTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { u ->
+        if (u != null) vm.saveAsPdfA(d, u)
+    }
     val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
         val r = splitReq
         splitReq = null
@@ -287,7 +292,24 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     })
                                     DropdownMenuItem(text = { Text("Detectar campos de formulário") }, onClick = { menu = false; guarded { vm.detectFields(d) } })
                                     DropdownMenuItem(text = { Text("Comparar com outro PDF…") }, onClick = { menu = false; pickCompare.launch(arrayOf("application/pdf")) })
+                                    DropdownMenuItem(text = { Text("Modo leitura") }, onClick = { menu = false; reading = true })
                                     DropdownMenuItem(text = { Text("Dividir…") }, onClick = { menu = false; dlg = "dividir" })
+                                    DropdownMenuItem(text = { Text("Recortar margens…") }, onClick = { menu = false; dlg = "recortar" })
+                                    DropdownMenuItem(text = { Text("Remover páginas em branco") }, onClick = {
+                                        menu = false
+                                        scope.launch {
+                                            val l = vm.findBlank(d)
+                                            if (l.isEmpty()) vm.toast = "Nenhuma página em branco encontrada."
+                                            else if (l.size == d.pageCount) vm.toast = "Todas as páginas parecem em branco; nada foi removido."
+                                            else blankList = l
+                                        }
+                                    })
+                                    DropdownMenuItem(text = { Text("Endireitar páginas escaneadas") }, onClick = { menu = false; vm.deskew(d) })
+                                    DropdownMenuItem(text = { Text("Extrair imagens") }, onClick = { menu = false; vm.extractImages(d) })
+                                    DropdownMenuItem(text = { Text("Salvar como PDF/A…") }, onClick = {
+                                        menu = false
+                                        pdfaTarget.launch(d.name.removeSuffix(".pdf").removeSuffix(".PDF") + "_PDFA.pdf")
+                                    })
                                     DropdownMenuItem(text = { Text("Comprimir…") }, onClick = { menu = false; dlg = "comprimir" })
                                     DropdownMenuItem(text = { Text("Proteger com senha…") }, onClick = { menu = false; dlg = "senha" })
                                     DropdownMenuItem(text = { Text("Marca d'água…") }, onClick = { menu = false; dlg = "marca" })
@@ -441,7 +463,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             ) {
                 LazyColumn(
                     state = list,
-                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.SHAPE && d.tool != Tool.REDACT && !(d.editing && d.tool == Tool.HIGHLIGHT) && d.placing == null,
+                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.SHAPE && d.tool != Tool.REDACT && d.tool != Tool.CROP && !(d.editing && d.tool == Tool.HIGHLIGHT) && d.placing == null,
                     modifier = Modifier.width(with(density) { contentW.toDp() }).fillMaxHeight()
                         .graphicsLayer {
                             scaleX = gesture
@@ -470,6 +492,18 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                             Icon(if (r.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (r.playing) "Pausar" else "Continuar")
                         }
                         IconButton({ r.release(); reader = null }) { Icon(Icons.Filled.Stop, "Parar leitura") }
+                    }
+                }
+            }
+            d.cropDraft?.let { (pg, r) ->
+                Box(Modifier.align(Alignment.BottomCenter)) {
+                    androidx.compose.material3.Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
+                        Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton({ d.cropDraft = null; d.tool = Tool.NONE; guarded { vm.crop(d, listOf(pg), r) } }) { Text("Recortar esta página") }
+                            TextButton({ d.cropDraft = null; d.tool = Tool.NONE; guarded { vm.crop(d, (0 until d.pageCount).toList(), r) } }) { Text("Todas") }
+                            TextButton({ d.cropDraft = null }) { Text("Cancelar") }
+                        }
                     }
                 }
             }
@@ -572,6 +606,21 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             guarded { vm.pages(d, "numerar as páginas") { doc, _ -> Editor.pageNumbers(doc, f) } }
         }
         "prefs" -> SettingsScreen(vm) { dlg = "" }
+        "recortar" -> AlertDialog(onDismissRequest = { dlg = "" }, title = { Text("Recortar margens") },
+            text = {
+                Column {
+                    TextButton({ dlg = ""; guarded { vm.crop(d, (0 until d.pageCount).toList(), null) } }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Automático em todas as páginas (bordas brancas ou pretas)", Modifier.fillMaxWidth())
+                    }
+                    TextButton({ dlg = ""; guarded { vm.crop(d, listOf(d.page), null) } }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Automático só nesta página", Modifier.fillMaxWidth())
+                    }
+                    TextButton({ dlg = ""; d.editing = true; d.tool = Tool.CROP; d.cropDraft = null }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Desenhar a área a manter…", Modifier.fillMaxWidth())
+                    }
+                }
+            },
+            confirmButton = {}, dismissButton = { TextButton({ dlg = "" }) { Text("Cancelar") } })
         "versoes" -> VersionsDialog(d, onDismiss = { dlg = "" }) { f -> dlg = ""; vm.restoreVersion(d, f) }
         "dividir" -> SplitDialog(d.pageCount, onDismiss = { dlg = "" }) { m, v ->
             dlg = ""
@@ -601,6 +650,18 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             },
             confirmButton = {}, dismissButton = { TextButton({ dlg = "" }) { Text("Cancelar") } })
     }
+    blankList?.let { l ->
+        AlertDialog(onDismissRequest = { blankList = null }, title = { Text("Páginas em branco") },
+            text = { Text("Encontradas: páginas " + l.joinToString(", ") { (it + 1).toString() } + ".\n\nRemover? Dá para desfazer.") },
+            confirmButton = {
+                TextButton({
+                    blankList = null
+                    guarded { vm.pages(d, "remover as páginas em branco") { doc, _ -> l.sortedDescending().forEach { doc.removePage(it) } } }
+                }) { Text("Remover") }
+            },
+            dismissButton = { TextButton({ blankList = null }) { Text("Cancelar") } })
+    }
+    if (reading) ReadingMode(vm, d) { reading = false }
     confirmSigned?.let { act ->
         AlertDialog(onDismissRequest = { confirmSigned = null }, title = { Text("Documento assinado") },
             text = { Text("Esta alteração regrava o documento inteiro e invalida as assinaturas digitais. Continuar?") },
@@ -742,6 +803,18 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                                 if (last != null && (last.second.r - last.second.l) * pageW < 8) d.redactions.removeAt(d.redactions.lastIndex)
                             },
                         )
+                    } else if (d.tool == Tool.CROP) {
+                        // recortar: arrastar desenha a área que fica
+                        var start = Offset.Zero
+                        detectDragGestures(
+                            onDragStart = { o -> start = Offset(o.x / pageW, o.y / pageW); d.cropDraft = i to FracRect(start.x, start.y, start.x, start.y) },
+                            onDrag = { ch, _ ->
+                                ch.consume()
+                                val p = Offset(ch.position.x / pageW, ch.position.y / pageW)
+                                d.cropDraft = i to FracRect(minOf(start.x, p.x), minOf(start.y, p.y), maxOf(start.x, p.x), maxOf(start.y, p.y))
+                            },
+                            onDragEnd = { d.cropDraft?.let { (_, r) -> if ((r.r - r.l) * pageW < 30 || (r.b - r.t) * pageW < 30) d.cropDraft = null } },
+                        )
                     } else if (d.editing && d.tool == Tool.SHAPE) {
                         // formas: arrastar do início ao fim; ao soltar, grava
                         detectDragGestures(
@@ -868,6 +941,17 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
             val sel = d.selection?.takeIf { it.page == i }
             val strokes = d.strokes.filter { it.first == i }
             val marks = d.pendingMarks.filter { it.first == i }
+            d.cropDraft?.takeIf { it.first == i }?.let { (_, r) ->
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width; val h = size.height
+                    val dim = Color(0x88000000)
+                    drawRect(dim, Offset.Zero, Size(w, r.t * w))
+                    drawRect(dim, Offset(0f, r.b * w), Size(w, h - r.b * w))
+                    drawRect(dim, Offset(0f, r.t * w), Size(r.l * w, (r.b - r.t) * w))
+                    drawRect(dim, Offset(r.r * w, r.t * w), Size(w - r.r * w, (r.b - r.t) * w))
+                    drawRect(Color(0xFF6D3CF0), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w), style = Stroke(3f))
+                }
+            }
             val shp = d.shapeDraft?.takeIf { it.first == i }
             if (shp != null) Canvas(Modifier.fillMaxSize()) {
                 val w = size.width

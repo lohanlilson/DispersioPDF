@@ -123,6 +123,7 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 Tool.CERT -> "Toque ou arraste onde a assinatura digital deve ficar"
                 Tool.EDITTEXT -> "Toque numa linha de texto para alterá-la"
                 Tool.REDACT -> "Arraste sobre o que deve ser apagado (tarja preta definitiva)"
+                Tool.CROP -> "Arraste para marcar a área que deve ficar (o resto da página é cortado)"
             }
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
