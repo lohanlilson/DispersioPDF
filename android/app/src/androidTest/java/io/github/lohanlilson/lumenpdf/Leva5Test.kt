@@ -127,7 +127,7 @@ class Leva5Test {
         assertTrue(kotlin.math.abs(a2) < 0.3)
         val box = PageAnalysis.contentBox(engine, pdf, 2)!!
         Log.i("LumenTest", "conteúdo: $box")
-        assertTrue(box.l > 0.1f && box.r < 0.97f)
+        assertTrue("$box", box.l > 0.05f && box.r < 0.95f && box.t > 0.05f && box.b < 1.35f)
         val pts = engine.pdfPoints(pdf, 2, listOf(box.l to box.t, box.r to box.b))
         engine.close(pdf)
         val fixed = File(ctx.cacheDir, "scan2.pdf")
