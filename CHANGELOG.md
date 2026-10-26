@@ -4,7 +4,7 @@ As notas de cada versão aparecem na janela de atualização do programa.
 
 ## 1.7.1
 
-- **Novo ícone dos arquivos PDF**: folha índigo escura com o prisma do Lumen e o espectro de luz. Aparece no Explorador do Windows, nas abas e na tela inicial.
+- **Nova identidade visual "Noite"**: o logo do programa e o ícone dos arquivos PDF ganharam o fundo índigo escuro, com o prisma brilhando e o espectro de luz em violeta, azul e dourado. Aparece no Explorador do Windows, no menu Iniciar, nas abas e na tela inicial.
 
 ## 1.7.0
 

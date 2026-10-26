@@ -1,5 +1,5 @@
 """Gera os ícones do app Android a partir da arte do Prisma (assets/make_icon.py).
-Adaptativo: fundo violeta (camada de trás) + feixe/leque/prisma (frente, dentro da zona segura)."""
+Adaptativo: fundo índigo escuro (camada de trás) + feixe/leque/prisma (frente, dentro da zona segura)."""
 import math, os, sys
 from PIL import Image, ImageDraw, ImageFilter
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,12 +11,17 @@ S = 1024
 
 
 def background(s=S):
-    img = mi.linear((s, s), [(0, (60, 24, 150)), (1, (130, 80, 255))], angle=60).convert("RGBA")
-    img.alpha_composite(mi.radial((s, s), (620 * s / 1024, 520 * s / 1024), 420 * s / 1024, (200, 160, 255), 0.4))
-    return img
+    return mi.night_bg(s, glow_at=(540, 500), glow_r=420)
 
 
 def foreground(s=S, mono=False):
+    if not mono:   # mesma arte do logo ("Noite"): feixe com brilho e leque até a borda
+        full = Image.new("L", (s, s), 255)
+        return mi.light_symbol(s, s * 0.49, s * 0.49, 0.56, full)
+    return _mono(s)
+
+
+def _mono(s=S, mono=True):
     """Arte desenhada em 1024 e reduzida para caber nos 66% centrais (zona segura do ícone adaptativo)."""
     big = 1024
     u = 1

@@ -107,38 +107,29 @@ def _put(img, m, color, clip=None):
     img.alpha_composite(layer)
 
 
-def app_icon(s=S):
-    """Prisma suave: a luz branca entra, atravessa o prisma e se abre em violeta e dourado."""
+NIGHT = [(0, (18, 12, 52)), (1, (52, 26, 130))]       # fundo índigo escuro ("Noite")
+NIGHT_GLOW = (140, 90, 255)
+FAN = [(196, 170, 255, 235), (120, 160, 255, 235), (255, 200, 110, 240)]   # violeta, azul e dourado
+
+
+def night_bg(s, glow_at=(560, 470), glow_r=470):
     u = s / 1024
-    P = lambda *pts: [(x * u, y * u) for x, y in pts]  # noqa: E731
+    img = linear((s, s), NIGHT, angle=75).convert("RGBA")
+    img.alpha_composite(radial((s, s), (glow_at[0] * u, glow_at[1] * u), glow_r * u, NIGHT_GLOW, 0.55))
+    return img
+
+
+def app_icon(s=S):
+    """Prisma na noite: a luz branca entra, atravessa o prisma e se abre em violeta, azul e dourado."""
+    u = s / 1024
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     box = [int(56 * u), int(56 * u), int(s - 56 * u), int(s - 56 * u)]
     clip = squircle_mask((s, s), box, int(236 * u))
-    img.paste(linear((s, s), [(0, (60, 24, 150)), (1, (130, 80, 255))], angle=60).convert("RGBA"), (0, 0), clip)
-    img.alpha_composite(radial((s, s), (640 * u, 520 * u), 420 * u, (200, 160, 255), 0.4))
-    # feixe de luz branca entrando
-    beam = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(beam).line(P((60, 660), (430, 560)), fill=255, width=int(26 * u))
-    _put(img, beam.filter(ImageFilter.GaussianBlur(18 * u)), (255, 255, 255, 170), clip)
-    _put(img, beam, (255, 255, 255, 255), clip)
-    # leque de luz saindo
-    apex = (600 * u, 520 * u)
-    for (ex, ey), c in zip([(1000, 380), (1000, 520), (1000, 660)],
-                           [(214, 196, 255, 220), (170, 125, 255, 230), (255, 200, 110, 220)]):
-        ang = math.atan2(ey * u - apex[1], ex * u - apex[0]) + math.pi / 2
-        dx, dy = math.cos(ang) * 40 * u, math.sin(ang) * 40 * u
-        m = Image.new("L", (s, s), 0)
-        ImageDraw.Draw(m).polygon([apex, (ex * u - dx, ey * u - dy), (ex * u + dx, ey * u + dy)], fill=255)
-        _put(img, m, c, clip)
-    # prisma de cantos arredondados
-    tri = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(tri).polygon(P((500, 250), (730, 690), (270, 690)), fill=255)
-    tri = tri.filter(ImageFilter.GaussianBlur(26 * u)).point(lambda v: 255 if v > 150 else 0)
-    tri = tri.filter(ImageFilter.GaussianBlur(2 * u))
-    sh = Image.new("L", (s, s), 0)
-    sh.paste(tri, (0, int(20 * u)))
-    _put(img, sh.filter(ImageFilter.GaussianBlur(24 * u)).point(lambda v: int(v * 0.45)), (16, 0, 50), clip)
-    _put(img, tri, linear((s, s), [(0, (255, 255, 255)), (1, (226, 212, 255))], 100).convert("RGBA"))
+    img.paste(night_bg(s), (0, 0), clip)
+    # contorno sutil para destacar em fundos escuros
+    inner = clip.filter(ImageFilter.MinFilter(max(3, int(6 * u)) | 1))
+    _put(img, ImageChops.subtract(clip, inner), (120, 96, 210, 200))
+    img.alpha_composite(light_symbol(s, 500 * u, 500 * u, 0.78, clip))
     return img
 
 
