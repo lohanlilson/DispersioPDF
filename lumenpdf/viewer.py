@@ -1,4 +1,5 @@
 """Área de visualização do documento: rolagem contínua, zoom, seleção de texto, busca e ferramentas de comentário."""
+import os
 from datetime import datetime
 
 import pymupdf
@@ -15,7 +16,8 @@ MOVABLE = {pymupdf.PDF_ANNOT_TEXT, pymupdf.PDF_ANNOT_FREE_TEXT, pymupdf.PDF_ANNO
            pymupdf.PDF_ANNOT_CIRCLE, pymupdf.PDF_ANNOT_STAMP, pymupdf.PDF_ANNOT_FILE_ATTACHMENT}
 TEXT_MARKUP_MODES = {"highlight", "underline", "strikeout", "squiggly"}
 DRAG_RECT_MODES = {"rect", "ellipse", "redact", "freetext", "image", "link", "field_text", "field_check",
-                   "field_combo", "crop", "area_highlight", "signature", "certsign"}
+                   "field_combo", "crop", "area_highlight", "signature", "certsign", "snapshot"}
+LINE_MODES = ("line", "arrow", "measure", "measure_cal")
 STAMPS = [("APROVADO", "#2d9d78"), ("REPROVADO", "#d7373f"), ("CONFIDENCIAL", "#d7373f"),
           ("RASCUNHO", "#1473e6"), ("RECEBIDO", "#2d9d78"), ("PAGO", "#2d9d78"),
           ("CONFERIDO", "#1473e6"), ("CÓPIA", "#6e6e6e"), ("URGENTE", "#e68619")]
@@ -117,7 +119,7 @@ class PdfView(QGraphicsView):
         self.colors = {"highlight": "#ffd400", "underline": "#2d9d78", "strikeout": "#d7373f",
                        "squiggly": "#e68619", "note": "#ffd400", "freetext": "#1473e6", "ink": "#d7373f",
                        "rect": "#d7373f", "ellipse": "#d7373f", "line": "#d7373f", "arrow": "#d7373f",
-                       "area_highlight": "#ffd400"}
+                       "area_highlight": "#ffd400", "measure": "#1473e6", "measure_area": "#1473e6", "snapshot": "#6d3cf0"}
         self.stroke_width = 2.0
         self.opacity = 1.0
         self.author = "Usuário"
@@ -131,6 +133,12 @@ class PdfView(QGraphicsView):
         self._press = None
         self._drag_rect = None
         self._ink = []
+        self._poly = None          # medir área: [página, [pontos]]
+        self._img_sel = None       # editar imagens: (página, xref, retângulo de exibição)
+        self._img_drag = None      # {"kind": "move"|"resize", "start": ponto, "rect": retângulo novo}
+        self._hover = None
+        # escala das medidas: unidades reais por ponto do PDF (padrão: tamanho real do papel, em cm)
+        self.measure = {"factor": 2.54 / 72, "unit": "cm", "label": "tamanho real do papel"}
         self._annot_drag = None
         self.before_change = lambda page=None, annot=None: None
         self.after_change = lambda pages=None, structure=False: None
@@ -473,11 +481,35 @@ class PdfView(QGraphicsView):
             p.setBrush(fill)
             if self.mode == "ellipse":
                 p.drawEllipse(qr(dr))
-            elif self.mode in ("line", "arrow"):
+            elif self.mode in LINE_MODES:
                 p.drawLine(QPointF(self._drag_rect[1].x * s, self._drag_rect[1].y * s),
                            QPointF(self._drag_rect[2].x * s, self._drag_rect[2].y * s))
             else:
                 p.drawRect(qr(dr))
+        if self._drag_rect and self._drag_rect[0] == item.index and self.mode in ("measure", "measure_cal"):
+            a, b = self._drag_rect[1], self._drag_rect[2]
+            txt = ops.fmt_measure(self.measure_value([a, b]), self.measure["unit"]) if self.mode == "measure" else f"{abs(b - a):.0f} pt"
+            p.setPen(QColor(self.colors["measure"]))
+            f = p.font(); f.setPixelSize(13); f.setBold(True); p.setFont(f)
+            p.drawText(QPointF(b.x * s + 10, b.y * s - 8), txt)
+        if self._poly and self._poly[0] == item.index and self._poly[1]:
+            pts = self._poly[1] + ([self._hover] if self._hover else [])
+            col = QColor(self.colors["measure_area"])
+            fill = QColor(col); fill.setAlpha(45)
+            p.setPen(QPen(col, 1.5, Qt.DashLine)); p.setBrush(fill)
+            p.drawPolygon([QPointF(q.x * s, q.y * s) for q in pts])
+            if len(pts) >= 3:
+                f = p.font(); f.setPixelSize(13); f.setBold(True); p.setFont(f)
+                p.setPen(col)
+                p.drawText(QPointF(pts[-1].x * s + 10, pts[-1].y * s - 8),
+                           ops.fmt_measure(self.measure_value(pts, True), self.measure["unit"], True) + "  (duplo clique conclui)")
+        if self._img_sel and self._img_sel[0] == item.index and self.mode == "image_edit":
+            r = (self._img_drag or {}).get("rect") or self._img_sel[2]
+            col = QColor(theme.current["accent"])
+            p.setPen(QPen(col, 1.5, Qt.DashLine)); p.setBrush(QColor(109, 60, 240, 25))
+            p.drawRect(qr(r))
+            p.setPen(Qt.NoPen); p.setBrush(col)
+            p.drawEllipse(QPointF(r.x1 * s, r.y1 * s), 6, 6)
         if self._ink and self._ink[0] == item.index and len(self._ink[1]) > 1:
             path = QPainterPath(QPointF(self._ink[1][0].x * s, self._ink[1][0].y * s))
             for pt in self._ink[1][1:]:
@@ -708,6 +740,10 @@ class PdfView(QGraphicsView):
     # ------------------------------------------------------------ modos
     def set_mode(self, mode):
         self.mode = mode
+        if mode != "measure_area":
+            self._poly = None
+        if mode != "image_edit":
+            self._img_sel = None
         self.setDragMode(QGraphicsView.ScrollHandDrag if mode == "hand" else QGraphicsView.NoDrag)
         cursors = {"select": Qt.IBeamCursor, "hand": Qt.OpenHandCursor, "edittext": Qt.IBeamCursor,
                    "note": Qt.PointingHandCursor, "addtext": Qt.IBeamCursor, "stamp": Qt.PointingHandCursor}
@@ -722,6 +758,11 @@ class PdfView(QGraphicsView):
             "certsign": "Arraste para definir a área da assinatura digital.", "crop": "Arraste para definir a área de corte.",
             "stamp": "Clique onde deseja aplicar o carimbo.", "image": "Arraste para definir a área da imagem.",
             "link": "Arraste para definir a área do link.",
+            "measure": "Arraste para medir a distância (Ferramentas › Escala das medidas define a escala).",
+            "measure_cal": "Arraste sobre uma medida conhecida da planta para calibrar a escala.",
+            "measure_area": "Clique nos cantos da área; duplo clique (ou Enter) conclui.",
+            "snapshot": "Arraste sobre a área para capturar como imagem.",
+            "image_edit": "Clique numa imagem para selecioná-la.",
         }
         if mode in hints:
             self.status.emit(hints[mode])
@@ -877,8 +918,15 @@ class PdfView(QGraphicsView):
                 self._press = (i, pt, "area")
         elif m == "ink":
             self._ink = [i, [pt]]
-        elif m in DRAG_RECT_MODES or m in ("line", "arrow"):
+        elif m in DRAG_RECT_MODES or m in LINE_MODES:
             self._drag_rect = [i, pt, pt]
+        elif m == "measure_area":
+            if not self._poly or self._poly[0] != i:
+                self._poly = [i, []]
+            self._poly[1].append(pt)
+            self._press = None
+        elif m == "image_edit":
+            self._press_image(i, pt)
         self.viewport().update()
 
     def mouseMoveEvent(self, e):
@@ -898,6 +946,9 @@ class PdfView(QGraphicsView):
             over_link = over_sig or any(ln["from"].contains(pt) for ln in self.links(i))
             self.viewport().setCursor(Qt.PointingHandCursor if over_link else (
                 Qt.SizeAllCursor if self.annot_at(i, pt) else Qt.IBeamCursor))
+        if self.mode == "measure_area" and self._poly and i == self._poly[0]:
+            self._hover = pt
+            self.viewport().update()
         if not self._press or self.mode == "hand":
             return super().mouseMoveEvent(e)
         pi = self._press[0]
@@ -908,7 +959,17 @@ class PdfView(QGraphicsView):
             s = self.scale()
             w, h = self.page_size(pi)
             pt = pymupdf.Point(min(max((sp.x() - it.x()) / s, 0), w), min(max((sp.y() - it.y()) / s, 0), h))
-        if self._annot_drag:
+        if self._img_drag:
+            st, r0 = self._img_drag["start"], self._img_sel[2]
+            dx, dy = pt.x - st.x, pt.y - st.y
+            if self._img_drag["kind"] == "move":
+                self._img_drag["rect"] = pymupdf.Rect(r0.x0 + dx, r0.y0 + dy, r0.x1 + dx, r0.y1 + dy)
+            else:
+                ratio = r0.height / max(r0.width, 1)
+                w = max(12, r0.width + dx)
+                self._img_drag["rect"] = pymupdf.Rect(r0.x0, r0.y0, r0.x0 + w,
+                                                      r0.y0 + (w * ratio if not (e.modifiers() & Qt.ShiftModifier) else max(12, r0.height + dy)))
+        elif self._annot_drag:
             st = self._annot_drag["start"]
             self._annot_drag["delta"] = (pt.x - st.x, pt.y - st.y)
         elif self._ink:
@@ -935,7 +996,13 @@ class PdfView(QGraphicsView):
         i = self._press[0]
         m = self.mode
         try:
-            if self._annot_drag:
+            if self._img_drag:
+                r = self._img_drag.get("rect")
+                if r is not None and (abs(r.x0 - self._img_sel[2].x0) > 1 or abs(r.y0 - self._img_sel[2].y0) > 1
+                                      or abs(r.width - self._img_sel[2].width) > 1):
+                    self._apply_image_move(r)
+                self._img_drag = None
+            elif self._annot_drag:
                 d = self._annot_drag.get("delta")
                 if d and (abs(d[0]) > 1 or abs(d[1]) > 1):
                     self._move_annot(d)
@@ -974,6 +1041,18 @@ class PdfView(QGraphicsView):
     def _finish_drag(self, i, m, rect, p0, p1):
         small = rect.width < 4 and rect.height < 4
         page = self._page(i)
+        if m in ("measure", "measure_cal"):
+            if abs(p1 - p0) < 3:
+                return
+            if m == "measure_cal":
+                self.request_tool("measure_calibrate", length_pt=abs(p1 - p0))
+                return
+            self._add_measure(i, [p0, p1])
+            return
+        if m == "snapshot":
+            if not small:
+                self.request_tool("rect_snapshot", page=i, rect=rect)
+            return
         if m in ("line", "arrow"):
             if small:
                 return
@@ -1035,6 +1114,114 @@ class PdfView(QGraphicsView):
         elif m in ("image", "link", "crop", "certsign", "field_text", "field_check", "field_combo"):
             self.request_tool("rect_" + m, page=i, rect=rect)
 
+    # ------------------------------------------------------------ medidas
+    def measure_value(self, pts, area=False):
+        f = self.measure["factor"]
+        if area:
+            return ops.polygon_area([(p.x, p.y) for p in pts]) * f * f
+        return sum(abs(b - a) for a, b in zip(pts, pts[1:])) * f
+
+    def _add_measure(self, i, pts, area=False):
+        page = self._page(i)
+        v = self.measure_value(pts, area)
+        label = ops.fmt_measure(v, self.measure["unit"], area)
+        col = ops.hex_to_rgb(self.colors["measure"])
+        self.before_change(page=i)
+        unrot = [p * page.derotation_matrix for p in pts]
+        if area:
+            a = page.add_polygon_annot(unrot)
+            a.set_colors(stroke=col, fill=col)
+            a.set_opacity(0.25)
+            cx = sum(p.x for p in pts) / len(pts); cy = sum(p.y for p in pts) / len(pts)
+        else:
+            a = page.add_line_annot(unrot[0], unrot[1])
+            a.set_line_ends(pymupdf.PDF_ANNOT_LE_BUTT, pymupdf.PDF_ANNOT_LE_BUTT)
+            a.set_colors(stroke=col)
+            cx, cy = (pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2
+            if abs(pts[1].x - pts[0].x) >= abs(pts[1].y - pts[0].y):
+                cy -= 9            # linha mais horizontal: rótulo acima
+            else:
+                cx += 6 + len(label) * 2.7   # mais vertical: rótulo ao lado
+        a.set_border(width=1.2)
+        a.set_info(title=self.author, subject="Medida", content=f"{'Área' if area else 'Distância'}: {label} (escala: {self.measure['label']})")
+        a.update()
+        w = 7 + len(label) * 5.4
+        r = pymupdf.Rect(cx - w / 2, cy - 7, cx + w / 2, cy + 7)
+        t = ops.add_freetext(page, ops.to_unrot(page, r), label, fontsize=9, fontname="Helv", text_color=col,
+                             fill_color=(1, 1, 1), align=pymupdf.TEXT_ALIGN_CENTER, rotate=page.rotation)
+        t.set_info(title=self.author, subject="Medida")
+        t.update()
+        self.after_change([i])
+        self.status.emit(f"{'Área' if area else 'Distância'}: {label}")
+
+    def finish_area(self):
+        if self._poly and len(self._poly[1]) >= 3:
+            i, pts = self._poly
+            self._poly = None
+            self._hover = None
+            self._add_measure(i, pts, area=True)
+        else:
+            self._poly = None
+            self.viewport().update()
+
+    # ------------------------------------------------------------ editar imagens
+    def _press_image(self, i, pt):
+        if self._img_sel and self._img_sel[0] == i:
+            r = self._img_sel[2]
+            handle = 8 / max(self.scale(), 0.1)
+            if abs(pt.x - r.x1) < handle and abs(pt.y - r.y1) < handle:
+                self._img_drag = {"kind": "resize", "start": pt, "rect": None}
+                return
+            if r.contains(pt):
+                self._img_drag = {"kind": "move", "start": pt, "rect": None}
+                return
+        hit = ops.image_at(self._page(i), pt)
+        self._img_sel = (i, hit[0], hit[1]) if hit else None
+        if hit:
+            self._img_drag = {"kind": "move", "start": pt, "rect": None}
+            self.status.emit("Arraste para mover · canto inferior direito redimensiona (Shift: livre) · botão direito: substituir, salvar ou excluir")
+        else:
+            self.status.emit("Nenhuma imagem neste ponto.")
+
+    def _apply_image_move(self, r):
+        i, xref, _ = self._img_sel
+        page = self._page(i)
+        self.before_change()
+        ops.move_image(page, xref, r)
+        self.after_change([i])
+        hit = ops.image_at(self._page(i), pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2))
+        self._img_sel = (i, hit[0], hit[1]) if hit else None
+
+    def replace_selected_image(self):
+        if not self._img_sel:
+            return
+        fn, _ = QFileDialog.getOpenFileName(self, "Substituir imagem", "", "Imagens (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff)")
+        if not fn:
+            return
+        i, xref, r = self._img_sel
+        self.before_change()
+        ops.replace_image(self._page(i), xref, fn)
+        self.after_change([i])
+        hit = ops.image_at(self._page(i), pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2))
+        self._img_sel = (i, hit[0], hit[1]) if hit else None
+
+    def save_selected_image(self):
+        if not self._img_sel:
+            return
+        fn, _ = QFileDialog.getSaveFileName(self, "Salvar imagem", "imagem", "Imagem (*.png *.jpg)")
+        if fn:
+            out = ops.save_image(self.doc, self._img_sel[1], os.path.splitext(fn)[0])
+            self.status.emit(f"Imagem salva em {out}")
+
+    def delete_selected_image(self):
+        if not self._img_sel:
+            return
+        i, xref, _ = self._img_sel
+        self.before_change()
+        ops.delete_image(self._page(i), xref)
+        self._img_sel = None
+        self.after_change([i])
+
     def _move_annot(self, d):
         p, xref = self.sel_annot
         page = self._page(p)
@@ -1054,6 +1241,9 @@ class PdfView(QGraphicsView):
         self.after_change([p])
 
     def mouseDoubleClickEvent(self, e):
+        if self.mode == "measure_area":
+            self.finish_area()
+            return
         i, pt = self.hit(e.position().toPoint())
         if i is None:
             return
@@ -1172,6 +1362,10 @@ class PdfView(QGraphicsView):
             self.copy_selection()
         elif e.matches(QKeySequence.SelectAll):
             self.select_all()
+        elif e.key() in (Qt.Key_Delete, Qt.Key_Backspace) and self._img_sel and self.mode == "image_edit":
+            self.delete_selected_image()
+        elif e.key() in (Qt.Key_Return, Qt.Key_Enter) and self.mode == "measure_area":
+            self.finish_area()
         elif e.key() in (Qt.Key_Delete, Qt.Key_Backspace) and self.sel_annot:
             self.delete_selected_annot()
         elif e.key() == Qt.Key_Escape and self._as_active:
@@ -1179,6 +1373,8 @@ class PdfView(QGraphicsView):
         elif e.key() == Qt.Key_Escape:
             self.clear_selection()
             self.sel_annot = None
+            self._poly = None
+            self._img_sel = None
             self.set_mode("select")
         elif e.key() in (Qt.Key_Right,) and self.zoom_mode == "fit_page":
             self.next_page()
@@ -1196,6 +1392,17 @@ class PdfView(QGraphicsView):
             return
         i, pt = self.hit(e.pos())
         menu = QMenu(self)
+        if self.mode == "image_edit" and i is not None:
+            hit = ops.image_at(self._page(i), pt)
+            if hit:
+                self._img_sel = (i, hit[0], hit[1])
+                self.viewport().update()
+                menu.addAction("Substituir imagem…", self.replace_selected_image)
+                menu.addAction("Salvar imagem…", self.save_selected_image)
+                menu.addSeparator()
+                menu.addAction("Excluir imagem", self.delete_selected_image)
+                menu.exec(e.globalPos())
+                return
         if i is not None and self.annot_at(i, pt):
             self.sel_annot = (i, self.annot_at(i, pt))
             self.viewport().update()

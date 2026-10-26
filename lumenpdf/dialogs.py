@@ -897,3 +897,65 @@ class VersionsDialog(QDialog):
         if it:
             self.chosen = (it.data(Qt.UserRole), action)
             self.accept()
+
+
+class ReplaceDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QCheckBox, QDialogButtonBox
+        self.setWindowTitle("Localizar e substituir")
+        lay = QFormLayout(self)
+        self.find = QLineEdit(); self.repl = QLineEdit()
+        self.case = QCheckBox("Diferenciar maiúsculas e minúsculas")
+        self.word = QCheckBox("Somente palavra inteira")
+        lay.addRow("Localizar:", self.find)
+        lay.addRow("Substituir por:", self.repl)
+        lay.addRow(self.case); lay.addRow(self.word)
+        info = QLabel("Mantém a fonte, o tamanho e a cor de cada trecho; o resto da linha acompanha a nova largura.")
+        info.setWordWrap(True)
+        lay.addRow(info)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Substituir tudo")
+        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
+        lay.addRow(bb)
+
+    def values(self):
+        return self.find.text(), self.repl.text(), self.case.isChecked(), self.word.isChecked()
+
+
+class ScaleDialog(QDialog):
+    """Escala das medidas: escala da planta (1:N) ou calibrar desenhando uma medida conhecida."""
+
+    def __init__(self, parent, current):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QRadioButton, QComboBox, QDialogButtonBox
+        self.setWindowTitle("Escala das medidas")
+        self.calibrate = False
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel(f"Escala atual: {current.get('label', '')}"))
+        self.r_paper = QRadioButton("Tamanho real do papel"); lay.addWidget(self.r_paper)
+        row = QHBoxLayout()
+        self.r_plan = QRadioButton("Escala da planta   1 :"); row.addWidget(self.r_plan)
+        self.n = QSpinBox(); self.n.setRange(1, 100000); self.n.setValue(100); row.addWidget(self.n)
+        row.addStretch(); lay.addLayout(row)
+        row2 = QHBoxLayout(); row2.addWidget(QLabel("Unidade:"))
+        self.unit = QComboBox(); self.unit.addItems(["m", "cm", "mm", "km"]); row2.addWidget(self.unit); row2.addStretch()
+        lay.addLayout(row2)
+        self.r_cal = QRadioButton("Calibrar: desenhar sobre uma medida conhecida (ex.: uma parede com cota)")
+        lay.addWidget(self.r_cal)
+        self.r_plan.setChecked(True)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._ok); bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    def _ok(self):
+        self.calibrate = self.r_cal.isChecked()
+        self.accept()
+
+    def result_scale(self):
+        per_unit = {"m": 1.0, "cm": 100.0, "mm": 1000.0, "km": 0.001}[self.unit.currentText()]
+        paper_m_per_pt = 0.0254 / 72
+        if self.r_paper.isChecked():
+            return {"factor": paper_m_per_pt * per_unit, "unit": self.unit.currentText(), "label": "tamanho real do papel"}
+        n = self.n.value()
+        return {"factor": paper_m_per_pt * n * per_unit, "unit": self.unit.currentText(), "label": f"1:{n}"}

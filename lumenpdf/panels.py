@@ -47,10 +47,17 @@ CATALOG = [
         ("rect", "rect", "Retângulo"), ("ellipse", "ellipse", "Elipse"), ("arrow", "arrow", "Seta"),
         ("line", "line", "Linha"), ("stamp", "stamp", "Carimbos"),
         ("comments_summary", "comments", "Resumo dos comentários"), ("flatten", "flatten", "Nivelar comentários"),
+        ("export_comments", "comments", "Exportar comentários (FDF)"), ("import_comments", "comments", "Importar comentários (FDF)"),
+    ]),
+    ("Medir", [
+        ("measure", "line", "Medir distância"), ("measure_area", "rect", "Medir área"),
+        ("measure_scale", "info", "Escala das medidas"),
     ]),
     ("Editar", [
-        ("edittext", "edittext", "Editar texto"), ("addtext", "addtext", "Adicionar texto"),
+        ("edittext", "edittext", "Editar texto"), ("find_replace", "search", "Localizar e substituir"),
+        ("addtext", "addtext", "Adicionar texto"), ("image_edit", "image", "Mover / trocar imagens"),
         ("image", "image", "Adicionar imagem"), ("link", "link", "Adicionar link"),
+        ("autolink", "link", "Criar links de sites e e-mails"), ("snapshot", "imagefile", "Capturar área como imagem"),
         ("watermark", "watermark", "Marca d'água"), ("pagenum", "pagenum", "Cabeçalho, rodapé e numeração"),
         ("background", "blank", "Cor de fundo"), ("crop", "crop", "Cortar páginas"),
         ("properties", "info", "Propriedades do documento"),

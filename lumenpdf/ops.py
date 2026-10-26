@@ -1386,3 +1386,293 @@ def extract_images(doc, out_dir, base_name):
                 f.write(data)
             files.append(fn)
     return files
+
+
+# ------------------------------------------------------------ localizar e substituir
+def _font_obj(fn, buf, path):
+    """Objeto Font para medir o texto com a fonte que será usada na escrita."""
+    if buf:
+        return pymupdf.Font(fontbuffer=buf)
+    if path:
+        return pymupdf.Font(fontfile=path)
+    return pymupdf.Font(fn)
+
+
+def replace_all(doc, find, repl, match_case=False, whole_word=False, pages=None):
+    """Substitui o texto em todo o documento mantendo fonte, tamanho e cor de cada trecho.
+    O resto da linha acompanha a nova largura. Devolve o número de substituições."""
+    if not find:
+        return 0
+    pat = re.escape(find)
+    if whole_word:
+        pat = rf"(?<!\w){pat}(?!\w)"
+    rx = re.compile(pat, 0 if match_case else re.I)
+    total = 0
+    for pno in (pages if pages is not None else range(doc.page_count)):
+        page = doc[pno]
+        if not page.search_for(find):
+            continue
+        plans = []
+        raw = page.get_text("rawdict", flags=pymupdf.TEXT_PRESERVE_WHITESPACE)
+        for b in raw.get("blocks", []):
+            for ln in b.get("lines", []):
+                if abs(ln["dir"][1]) > 0.01 or ln["dir"][0] < 0:
+                    continue   # só texto horizontal
+                chars = [(ch, sp) for sp in ln["spans"] for ch in sp["chars"]]
+                text = "".join(c["c"] for c, _ in chars)
+                ms = list(rx.finditer(text))
+                if not ms:
+                    continue
+                start = ms[0].start()
+                # trechos a partir da primeira ocorrência: (texto, span de estilo)
+                pieces, k = [], start
+                for m in ms:
+                    i = k
+                    while i < m.start():
+                        sp = chars[i][1]
+                        j = i
+                        while j < m.start() and chars[j][1] is sp:
+                            j += 1
+                        pieces.append(("".join(c["c"] for c, _ in chars[i:j]), sp))
+                        i = j
+                    if repl:
+                        pieces.append((repl, chars[m.start()][1]))
+                    k = m.end()
+                i = k
+                while i < len(chars):
+                    sp = chars[i][1]
+                    j = i
+                    while j < len(chars) and chars[j][1] is sp:
+                        j += 1
+                    pieces.append(("".join(c["c"] for c, _ in chars[i:j]), sp))
+                    i = j
+                c0 = chars[start][0]
+                last = chars[-1][0]
+                size = chars[start][1]["size"]
+                oy = c0["origin"][1]
+                # faixa fina na altura das letras: apaga só esta linha (não encosta nas vizinhas)
+                band = pymupdf.Rect(c0["bbox"][0] + 0.2, oy - size * 0.38, last["bbox"][2] - 0.2, oy - size * 0.22)
+                plans.append((band, c0["origin"], pieces))
+                total += len(ms)
+        if not plans:
+            continue
+        for band, _, _ in plans:
+            page.add_redact_annot(band, fill=False)
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+        loaded = {}
+        for _, origin, pieces in plans:
+            x, y = origin
+            for txt, sp in pieces:
+                if not txt:
+                    continue
+                if not txt.strip():
+                    x += pymupdf.Font("helv").text_length(txt, fontsize=sp["size"])
+                    continue
+                fn, buf, path, _ = resolve_font(page, sp, txt)
+                if (buf or path) and fn not in loaded:
+                    page.insert_font(fontname=fn, fontbuffer=buf, fontfile=path)
+                    loaded[fn] = True
+                col = pymupdf.sRGB_to_pdf(sp["color"])
+                page.insert_text(pymupdf.Point(x, y) * page.derotation_matrix if page.rotation else (x, y), txt,
+                                 fontsize=sp["size"], fontname=fn, color=col, rotate=page.rotation)
+                try:
+                    x += _font_obj(fn, buf, path).text_length(txt, fontsize=sp["size"])
+                except Exception:
+                    x += pymupdf.Font("helv").text_length(txt, fontsize=sp["size"])
+    return total
+
+
+# ------------------------------------------------------------ links automáticos
+_URL = re.compile(r"(?:https?://|www\.)[^\s<>()\"']+[^\s<>()\"'.,;:!?)]", re.I)
+_MAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def autolink(doc):
+    """Transforma endereços de sites e e-mails do texto em links clicáveis. Devolve quantos criou."""
+    n = 0
+    for page in doc:
+        text = page.get_text()
+        found = []
+        for m in _URL.finditer(text):
+            u = m.group(0)
+            found.append((u, u if u.lower().startswith("http") else "https://" + u))
+        for m in _MAIL.finditer(text):
+            found.append((m.group(0), "mailto:" + m.group(0)))
+        if not found:
+            continue
+        existing = [ln["from"] for ln in page.get_links()]
+        for shown, uri in dict(found).items():
+            for r in page.search_for(shown) or []:
+                if any(r.intersects(e) for e in existing):
+                    continue
+                page.insert_link({"kind": pymupdf.LINK_URI, "from": r, "uri": uri})
+                existing.append(r)
+                n += 1
+    return n
+
+
+# ------------------------------------------------------------ comentários: FDF
+_SKIP_ANNOTS = {"Popup", "Link", "Widget"}
+
+
+def _inline(doc, src, depth=0):
+    """Troca referências 'N 0 R' pelo conteúdo do objeto (sem fluxos), para levar o comentário sozinho."""
+    if depth > 4:
+        return re.sub(r"\d+\s+0\s+R", "null", src)
+
+    def rep(m):
+        x = int(m.group(1))
+        try:
+            if doc.xref_is_stream(x):
+                return "null"
+            return _inline(doc, doc.xref_object(x, compressed=True), depth + 1)
+        except Exception:
+            return "null"
+    return re.sub(r"(\d+)\s+0\s+R", rep, src)
+
+
+def _strip_keys(src, keys):
+    for k in keys:
+        src = re.sub(rf"/{k}\s*(\d+\s+0\s+R|<<(?:[^<>]|<<[^<>]*>>)*>>|\[[^\]]*\]|/\w+|\([^)]*\)|-?[\d.]+)", "", src)
+    return src
+
+
+def export_fdf(doc, pdf_name):
+    """Comentários do documento em FDF (abre no Acrobat, Foxit, PDF-XChange…). Devolve (bytes, quantidade)."""
+    objs = []
+    for pno, page in enumerate(doc):
+        for a in page.annots() or []:
+            if a.type[1] in _SKIP_ANNOTS:
+                continue
+            src = doc.xref_object(a.xref, compressed=True)
+            src = _strip_keys(src, ("P", "Popup", "Parent", "AP", "IRT", "StructParent"))
+            src = _inline(doc, src)
+            src = src.strip()
+            if src.endswith(">>"):
+                src = src[:-2] + f"/Page {pno}>>"
+            objs.append(src)
+    out = ["%FDF-1.2\n%\xe2\xe3\xcf\xd3\n"]
+    refs = " ".join(f"{i + 2} 0 R" for i in range(len(objs)))
+    name = pdf_name.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    out.append(f"1 0 obj\n<</FDF<</Annots[{refs}]/F({name})>>>>\nendobj\n")
+    for i, o in enumerate(objs):
+        out.append(f"{i + 2} 0 obj\n{o}\nendobj\n")
+    out.append("trailer\n<</Root 1 0 R>>\n%%EOF\n")
+    return "".join(out).encode("latin-1", "replace"), len(objs)
+
+
+def import_fdf(doc, data):
+    """Acrescenta ao documento os comentários de um FDF. Devolve quantos foram importados."""
+    txt = data.decode("latin-1")
+    objs = {int(m.group(1)): m.group(2).strip() for m in re.finditer(r"(\d+)\s+0\s+obj\s*(.*?)\s*endobj", txt, re.S)}
+    m = re.search(r"/Annots\s*\[([^\]]*)\]", txt)
+    if not m:
+        return 0
+    refs = [int(r) for r in re.findall(r"(\d+)\s+0\s+R", m.group(1))]
+
+    def resolve(src, depth=0):
+        if depth > 4:
+            return re.sub(r"\d+\s+0\s+R", "null", src)
+        return re.sub(r"(\d+)\s+0\s+R", lambda mm: resolve(objs.get(int(mm.group(1)), "null"), depth + 1)
+                      if "stream" not in objs.get(int(mm.group(1)), "") else "null", src)
+
+    n = 0
+    for r in refs:
+        src = objs.get(r)
+        if not src or "stream" in src:
+            continue
+        sub = re.search(r"/Subtype\s*/(\w+)", src)
+        if not sub or sub.group(1) in _SKIP_ANNOTS:
+            continue
+        pm = re.search(r"/Page\s+(\d+)", src)
+        pno = int(pm.group(1)) if pm else 0
+        if pno >= doc.page_count:
+            continue
+        src = _strip_keys(resolve(src), ("Page", "P", "Popup", "Parent", "AP", "IRT", "StructParent"))
+        page = doc[pno]
+        x = doc.get_new_xref()
+        doc.update_object(x, src)
+        doc.xref_set_key(x, "P", f"{page.xref} 0 R")
+        t, v = doc.xref_get_key(page.xref, "Annots")
+        if t == "array":
+            doc.xref_set_key(page.xref, "Annots", v.rstrip()[:-1] + f" {x} 0 R]")
+        elif t == "xref":
+            ax = int(v.split()[0])
+            arr = doc.xref_object(ax).strip()
+            doc.update_object(ax, arr[:-1] + f" {x} 0 R]")
+        else:
+            doc.xref_set_key(page.xref, "Annots", f"[{x} 0 R]")
+        page = doc.reload_page(page)
+        a = page.load_annot(x)
+        if a is not None:
+            try:
+                a.update()
+            except Exception:
+                pass
+        n += 1
+    return n
+
+
+# ------------------------------------------------------------ imagens: mover, substituir, excluir
+def image_at(page, disp_point):
+    """(xref, retângulo de exibição) da imagem sob o ponto, a de cima primeiro."""
+    pt = pymupdf.Point(disp_point) * page.derotation_matrix
+    best = None
+    for info in page.get_image_info(xrefs=True):
+        r = pymupdf.Rect(info["bbox"])
+        if info.get("xref") and r.contains(pt):
+            best = (info["xref"], r * page.rotation_matrix)
+    return best
+
+
+def move_image(page, xref, new_disp_rect):
+    """Coloca a imagem num novo retângulo (coordenadas de exibição)."""
+    doc = page.parent
+    pm = pymupdf.Pixmap(doc, xref)
+    if pm.n - pm.alpha >= 4:
+        pm = pymupdf.Pixmap(pymupdf.csRGB, pm)
+    info = doc.extract_image(xref) or {}
+    stream = info.get("image") if info.get("ext") in ("jpeg", "jpg", "png") and not info.get("smask") else None
+    page.delete_image(xref)
+    r = pymupdf.Rect(new_disp_rect) * page.derotation_matrix
+    if stream:
+        page.insert_image(r, stream=stream, keep_proportion=False)
+    else:
+        page.insert_image(r, pixmap=pm, keep_proportion=False)
+
+
+def replace_image(page, xref, filename):
+    page.replace_image(xref, filename=filename)
+
+
+def delete_image(page, xref):
+    page.delete_image(xref)
+
+
+def save_image(doc, xref, path_no_ext):
+    info = doc.extract_image(xref)
+    ext = info.get("ext", "png") if info else "png"
+    if not info or ext not in ("png", "jpeg", "jpg"):
+        pm = pymupdf.Pixmap(doc, xref)
+        if pm.n - pm.alpha >= 4:
+            pm = pymupdf.Pixmap(pymupdf.csRGB, pm)
+        fn = path_no_ext + ".png"
+        pm.save(fn)
+        return fn
+    fn = f"{path_no_ext}.{ext}"
+    with open(fn, "wb") as f:
+        f.write(info["image"])
+    return fn
+
+
+# ------------------------------------------------------------ medidas
+def fmt_measure(v, unit, area=False):
+    s = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{s} {unit}²" if area else f"{s} {unit}"
+
+
+def polygon_area(points):
+    a = 0.0
+    for (x0, y0), (x1, y1) in zip(points, points[1:] + points[:1]):
+        a += x0 * y1 - x1 * y0
+    return abs(a) / 2

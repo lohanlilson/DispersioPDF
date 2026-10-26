@@ -1,5 +1,6 @@
 """Janela principal: abas (Início + documentos), barra superior, painel de ferramentas e controlador."""
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime
@@ -752,8 +753,11 @@ class MainWindow(QMainWindow):
         v = tab.view if tab else None
         simple_modes = {"note", "highlight", "underline", "strikeout", "freetext", "ink", "rect", "ellipse",
                         "arrow", "line", "stamp", "edittext", "addtext", "image", "link", "redact", "crop",
-                        "field_text", "field_check", "field_combo", "select", "hand"}
+                        "field_text", "field_check", "field_combo", "select", "hand",
+                        "measure", "measure_area", "measure_cal", "snapshot", "image_edit"}
         if name in simple_modes:
+            if name.startswith("measure"):
+                self._load_scale(tab)
             tab.set_mode(name)
             if name == "edittext":
                 self.tools.set_tab("edit")
@@ -1363,6 +1367,124 @@ class MainWindow(QMainWindow):
             n = ops.apply_redactions(tab.doc)
             tab.changed(structure=True)
             self.statusBar().showMessage(f"Ocultações aplicadas em {n} página(s).", 6000)
+
+    # --- localizar e substituir, links, captura, medidas, comentários em FDF
+    def tool_find_replace(self, tab, **kw):
+        d = dialogs.ReplaceDialog(self)
+        if not d.exec():
+            return
+        find, repl, case, word = d.values()
+        if not find:
+            return
+        if tab.has_signatures and QMessageBox.question(self, APP, "Substituir texto altera o conteúdo e invalida as assinaturas digitais. Continuar?") != QMessageBox.Yes:
+            return
+        tab.checkpoint()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            n = ops.replace_all(tab.doc, find, repl, match_case=case, whole_word=word)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if n:
+            tab.changed()
+            self.statusBar().showMessage(f"{n} substituição(ões) de “{find}”. Dá para desfazer.", 8000)
+        else:
+            tab.undo_stack.pop()
+            QMessageBox.information(self, APP, f"“{find}” não foi encontrado no documento.")
+
+    def tool_autolink(self, tab, **kw):
+        tab.checkpoint()
+        n = ops.autolink(tab.doc)
+        if n:
+            tab.changed()
+            self.statusBar().showMessage(f"{n} link(s) criado(s). Dá para desfazer.", 6000)
+        else:
+            tab.undo_stack.pop()
+            QMessageBox.information(self, APP, "Nenhum endereço de site ou e-mail sem link foi encontrado.")
+
+    def tool_rect_snapshot(self, tab, page, rect, **kw):
+        pg = tab.doc[page]
+        clip = ops.to_unrot(pg, rect)
+        pix = pg.get_pixmap(dpi=220, clip=clip, annots=True)
+        img = QImage.fromData(pix.tobytes("png"))
+        QApplication.clipboard().setImage(img)
+        r = QMessageBox.question(self, APP, "Área copiada como imagem (cole com Ctrl+V).\n\nSalvar também como arquivo PNG?")
+        if r == QMessageBox.Yes:
+            base = os.path.splitext(tab.path or os.path.join(os.path.expanduser("~"), "Documento.pdf"))[0] + f"_pag{page + 1}.png"
+            fn, _ = QFileDialog.getSaveFileName(self, "Salvar imagem", base, "PNG (*.png)")
+            if fn:
+                pix.save(fn)
+
+    def _scale_key(self, tab):
+        return "escala/" + (os.path.normcase(os.path.abspath(tab.path)) if tab.path else "")
+
+    def _load_scale(self, tab):
+        v = self.settings.value(self._scale_key(tab)) if tab.path else None
+        if v:
+            try:
+                f, unit, label = str(v).split("|", 2)
+                tab.view.measure = {"factor": float(f), "unit": unit, "label": label}
+            except ValueError:
+                pass
+
+    def _save_scale(self, tab):
+        m = tab.view.measure
+        if tab.path:
+            self.settings.setValue(self._scale_key(tab), f"{m['factor']}|{m['unit']}|{m['label']}")
+
+    def tool_measure_scale(self, tab, **kw):
+        self._load_scale(tab)
+        d = dialogs.ScaleDialog(self, tab.view.measure)
+        if not d.exec():
+            return
+        if d.calibrate:
+            tab.set_mode("measure_cal")
+            return
+        tab.view.measure = d.result_scale()
+        self._save_scale(tab)
+        self.statusBar().showMessage(f"Escala: {tab.view.measure['label']}", 6000)
+
+    def tool_measure_calibrate(self, tab, length_pt, **kw):
+        txt, ok = QInputDialog.getText(self, "Calibrar escala", "Medida real da linha que você desenhou (ex.: 3,5 m ou 120 cm):")
+        tab.set_mode("measure")
+        if not ok or not txt.strip():
+            return
+        m = re.match(r"\s*([\d.,]+)\s*(km|m|cm|mm)?\s*$", txt.strip().lower())
+        if not m:
+            QMessageBox.warning(self, APP, "Não entendi a medida. Use, por exemplo: 3,5 m")
+            return
+        v = float(m.group(1).replace(".", "").replace(",", ".") if "," in m.group(1) else m.group(1))
+        unit = m.group(2) or "m"
+        tab.view.measure = {"factor": v / length_pt, "unit": unit, "label": f"calibrada ({txt.strip()})"}
+        self._save_scale(tab)
+        self.statusBar().showMessage(f"Escala calibrada: {txt.strip()}. Agora é só medir.", 8000)
+
+    def tool_export_comments(self, tab, **kw):
+        base = os.path.splitext(tab.path or os.path.join(os.path.expanduser("~"), "Documento.pdf"))[0] + "_comentarios.fdf"
+        fn, _ = QFileDialog.getSaveFileName(self, "Exportar comentários", base, "Comentários FDF (*.fdf)")
+        if not fn:
+            return
+        data, n = ops.export_fdf(tab.doc, os.path.basename(tab.path or "Documento.pdf"))
+        if not n:
+            QMessageBox.information(self, APP, "Este documento não tem comentários para exportar.")
+            return
+        with open(fn, "wb") as f:
+            f.write(data)
+        self.statusBar().showMessage(f"{n} comentário(s) exportado(s) para {fn}", 8000)
+
+    def tool_import_comments(self, tab, **kw):
+        fn, _ = QFileDialog.getOpenFileName(self, "Importar comentários", os.path.dirname(tab.path or ""), "Comentários FDF (*.fdf)")
+        if not fn:
+            return
+        with open(fn, "rb") as f:
+            data = f.read()
+        tab.checkpoint()
+        n = ops.import_fdf(tab.doc, data)
+        if n:
+            tab.changed()
+            self.statusBar().showMessage(f"{n} comentário(s) importado(s). Dá para desfazer.", 8000)
+        else:
+            tab.undo_stack.pop()
+            QMessageBox.information(self, APP, "Nenhum comentário encontrado nesse arquivo.")
 
     def tool_remove_blank(self, tab, **kw):
         QApplication.setOverrideCursor(Qt.WaitCursor)

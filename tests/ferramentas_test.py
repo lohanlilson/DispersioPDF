@@ -113,6 +113,8 @@ for name in sorted(n[5:] for n in dir(MainWindow) if n.startswith("tool_")):
         kw = dict(page=0, point=pymupdf.Point(120, 96))
     elif name == "add_text_at":
         kw = dict(page=0, point=pymupdf.Point(300, 500))
+    elif name == "measure_calibrate":
+        kw = dict(length_pt=100.0)
     elif name.startswith("rect_"):
         kw = dict(page=0, rect=pymupdf.Rect(100, 300, 260, 360))
     tt = fresh()
