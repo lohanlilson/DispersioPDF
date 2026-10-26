@@ -1,5 +1,11 @@
 # Novidades do Lumen PDF para Android
 
+## 0.4.2
+
+- **Ferramenta Marca-texto** na barra de edição: arraste o dedo sobre o texto e ele já fica destacado. Um toque numa palavra destaca só a palavra. Não precisa mais segurar o dedo antes nem tocar em "Destacar".
+- **Seleção de texto acompanha o dedo** sem atraso, mesmo em páginas cheias de texto.
+- O destaque aparece na hora, enquanto o arquivo é gravado em segundo plano.
+
 ## 0.4.1
 
 - **Editar texto mantém o estilo:** a fonte, o negrito, o itálico, o tamanho e a cor do texto original são preservados. Se a fonte do PDF não tiver alguma letra nova (ex.: ç), o app usa uma fonte de mesmas medidas e estilo (Arial, Times, Courier e Calibri têm equivalentes).

@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.5.1
+
+- **Marca-texto e comentários instantâneos em PDFs grandes:** destacar, sublinhar, tachar, desenhar, notas, carimbos e formas não travam mais o programa ao soltar o mouse (antes podiam levar mais de meio segundo em arquivos grandes). O Desfazer continua funcionando normalmente.
+
 ## 1.5.0
 
 - **Comparar documentos:** as duas versões aparecem lado a lado, com o texto removido em vermelho e o inserido em verde. Há uma lista de alterações para navegar (F3), rolagem sincronizada e relatório para salvar. Fica em Ferramentas › Mais ferramentas › Comparar arquivos.
