@@ -13,6 +13,7 @@ import io.legere.pdfiumandroid.PdfPage
 import io.legere.pdfiumandroid.PdfPasswordException
 import io.legere.pdfiumandroid.PdfiumCore
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
@@ -54,37 +55,86 @@ class PdfEngine(context: Context) {
 
     fun cached(key: String): Bitmap? = cache.get(key)
 
-    suspend fun open(context: Context, uri: Uri, password: String? = null): OpenPdf = withContext(dispatcher) {
-        val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: error("Não foi possível abrir o arquivo")
-        val doc = try {
-            if (password != null) core.newDocument(pfd, password) else core.newDocument(pfd)
-        } catch (e: PdfPasswordException) {
-            pfd.close()
-            throw PasswordNeeded()
-        } catch (e: Exception) {
-            pfd.close()
-            throw e
-        }
-        val n = doc.getPageCount()
-        val sizes = ArrayList<PageSize>(n)
-        for (i in 0 until n) {
-            doc.openPage(i).use { p ->
-                sizes += PageSize(p.getPageWidthPoint().toFloat().coerceAtLeast(1f), p.getPageHeightPoint().toFloat().coerceAtLeast(1f))
+    /** Tarefas em segundo plano (medir o tamanho das páginas). */
+    private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
+    /**
+     * Abre o PDF. Carregar cada página só para saber o tamanho é lento (dezenas de ms por página), então:
+     * known = tamanhos já conhecidos (reabrir depois de uma edição que não muda as páginas) são reaproveitados;
+     * senão, mede a primeira página e as demais em segundo plano (a tela se ajusta quando chegam).
+     */
+    suspend fun open(context: Context, uri: Uri, password: String? = null, known: List<PageSize>? = null): OpenPdf {
+        val pdf = withContext(dispatcher) {
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: error("Não foi possível abrir o arquivo")
+            val doc = try {
+                if (password != null) core.newDocument(pfd, password) else core.newDocument(pfd)
+            } catch (e: PdfPasswordException) {
+                pfd.close()
+                throw PasswordNeeded()
+            } catch (e: Exception) {
+                pfd.close()
+                throw e
+            }
+            val n = doc.getPageCount()
+            if (known != null && known.size == n) {
+                OpenPdf(this@PdfEngine, doc, pfd, androidx.compose.runtime.mutableStateListOf<PageSize>().apply { addAll(known) },
+                    uri.toString(), BooleanArray(n) { true })
+            } else {
+                val first = if (n > 0) doc.openPage(0).use { measure(it) } else PageSize(595f, 842f)
+                val list = androidx.compose.runtime.mutableStateListOf<PageSize>()
+                repeat(n) { list += first }
+                OpenPdf(this@PdfEngine, doc, pfd, list, uri.toString(), BooleanArray(n) { it == 0 })
             }
         }
-        OpenPdf(this@PdfEngine, doc, pfd, sizes, uri.toString())
+        if (pdf.measured.any { !it }) bg.launch { measureAll(pdf) }
+        return pdf
+    }
+
+    private fun measure(p: PdfPage) =
+        PageSize(p.getPageWidthPoint().toFloat().coerceAtLeast(1f), p.getPageHeightPoint().toFloat().coerceAtLeast(1f))
+
+    /** Tamanho real da página (mede na hora se ainda não foi medida). p = página já aberta. */
+    private fun sizeOf(pdf: OpenPdf, page: Int, p: PdfPage): PageSize {
+        if (pdf.measured[page]) return pdf.sizes[page]
+        val sz = measure(p)
+        pdf.measured[page] = true
+        if (sz != pdf.sizes[page]) bg.launch(kotlinx.coroutines.Dispatchers.Main) { if (!pdf.closed) pdf.sizes[page] = sz }
+        return sz
+    }
+
+    suspend fun pageSize(pdf: OpenPdf, page: Int): PageSize =
+        if (pdf.measured[page]) pdf.sizes[page] else withContext(dispatcher) { pdf.doc.openPage(page).use { sizeOf(pdf, page, it) } }
+
+    /** Mede as páginas restantes, uma por vez (a renderização das visíveis passa na frente entre uma e outra). */
+    private suspend fun measureAll(pdf: OpenPdf) {
+        val pending = HashMap<Int, PageSize>()
+        for (i in pdf.measured.indices) {
+            if (pdf.closed) return
+            if (pdf.measured[i]) continue
+            val sz = runCatching {
+                withContext(dispatcher) { if (pdf.closed || pdf.measured[i]) null else pdf.doc.openPage(i).use { measure(it) } }
+            }.getOrNull() ?: continue
+            pdf.measured[i] = true
+            if (sz != pdf.sizes[i]) pending[i] = sz
+            if (pending.size >= 25 || i == pdf.measured.lastIndex) {
+                val batch = HashMap(pending); pending.clear()
+                withContext(kotlinx.coroutines.Dispatchers.Main) { if (!pdf.closed) batch.forEach { (k, v) -> pdf.sizes[k] = v } }
+            }
+        }
+        if (pending.isNotEmpty()) withContext(kotlinx.coroutines.Dispatchers.Main) { if (!pdf.closed) pending.forEach { (k, v) -> pdf.sizes[k] = v } }
     }
 
     suspend fun render(pdf: OpenPdf, page: Int, widthPx: Int): Bitmap = withContext(dispatcher) {
         val key = "${pdf.id}#$page@$widthPx"
         cache.get(key)?.let { return@withContext it }
-        val sz = pdf.sizes[page]
         val w = widthPx.coerceAtLeast(16)
-        val h = (w * sz.ratio).roundToInt().coerceAtLeast(16)
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        bmp.eraseColor(Color.WHITE)
-        pdf.doc.openPage(page).use { p ->
-            p.renderPageBitmap(bmp, 0, 0, w, h, true, false, Color.WHITE, Color.WHITE)
+        val bmp = pdf.doc.openPage(page).use { p ->
+            val sz = sizeOf(pdf, page, p)
+            val h = (w * sz.ratio).roundToInt().coerceAtLeast(16)
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { b ->
+                b.eraseColor(Color.WHITE)
+                p.renderPageBitmap(b, 0, 0, w, h, true, false, Color.WHITE, Color.WHITE)
+            }
         }
         cache.put(key, bmp)
         android.util.Log.d("LumenPdf", "renderizado $key")
@@ -115,7 +165,7 @@ class PdfEngine(context: Context) {
                             val idx = fr.getSchResultIndex()
                             val cnt = fr.getSchCount()
                             val nr = tp.textPageCountRects(idx, cnt)
-                            val rects = (0 until nr).mapNotNull { k -> tp.textPageGetRect(k)?.let { frac(p, pdf.sizes[i], it) } }
+                            val rects = (0 until nr).mapNotNull { k -> tp.textPageGetRect(k)?.let { frac(p, sizeOf(pdf, i, p), it) } }
                             if (rects.isNotEmpty()) out += SearchHit(i, rects)
                         }
                     } finally {
@@ -135,19 +185,31 @@ class PdfEngine(context: Context) {
     }
 
     suspend fun pdfPoint(pdf: OpenPdf, page: Int, fx: Float, fy: Float): android.graphics.PointF = withContext(dispatcher) {
-        pdf.doc.openPage(page).use { p -> toPdf(p, pdf.sizes[page], fx, fy) }
+        pdf.doc.openPage(page).use { p -> toPdf(p, sizeOf(pdf, page, p), fx, fy) }
     }
 
     suspend fun pdfPoints(pdf: OpenPdf, page: Int, pts: List<Pair<Float, Float>>): FloatArray = withContext(dispatcher) {
         pdf.doc.openPage(page).use { p ->
             val out = FloatArray(pts.size * 2)
-            pts.forEachIndexed { i, (x, y) -> val q = toPdf(p, pdf.sizes[page], x, y); out[i * 2] = q.x; out[i * 2 + 1] = q.y }
+            pts.forEachIndexed { i, (x, y) -> val q = toPdf(p, sizeOf(pdf, page, p), x, y); out[i * 2] = q.x; out[i * 2 + 1] = q.y }
             out
         }
     }
 
+    /** Vários retângulos de uma vez (cada página é aberta uma vez só). */
+    suspend fun fracOfAll(pdf: OpenPdf, items: List<Pair<Int, RectF>>): List<FracRect> = withContext(dispatcher) {
+        val out = arrayOfNulls<FracRect>(items.size)
+        items.indices.groupBy { items[it].first }.forEach { (page, idx) ->
+            pdf.doc.openPage(page).use { p ->
+                val sz = sizeOf(pdf, page, p)
+                idx.forEach { k -> out[k] = frac(p, sz, items[k].second) }
+            }
+        }
+        out.map { it!! }
+    }
+
     suspend fun fracOf(pdf: OpenPdf, page: Int, r: RectF): FracRect = withContext(dispatcher) {
-        pdf.doc.openPage(page).use { p -> frac(p, pdf.sizes[page], r) }
+        pdf.doc.openPage(page).use { p -> frac(p, sizeOf(pdf, page, p), r) }
     }
 
     /** Caracteres da página (uma vez por versão do documento). */
@@ -167,7 +229,7 @@ class PdfEngine(context: Context) {
                             val b = tp.textPageGetCharBox(k)
                             if (b != null && kotlin.math.abs(b.right - b.left) > 0.01f && c != '\n' && c != '\r') {
                                 pr[k] = b
-                                fr[k] = frac(p, pdf.sizes[page], b)
+                                fr[k] = frac(p, sizeOf(pdf, page, p), b)
                             }
                         }
                         PageChars(page, sb.toString(), fr, pr)
@@ -180,7 +242,7 @@ class PdfEngine(context: Context) {
     /** Índice do caractere sob o dedo (-1 se não houver texto perto). */
     suspend fun charAt(pdf: OpenPdf, page: Int, fx: Float, fy: Float): Int = withContext(dispatcher) {
         pdf.doc.openPage(page).use { p ->
-            val pt = toPdf(p, pdf.sizes[page], fx, fy)
+            val pt = toPdf(p, sizeOf(pdf, page, p), fx, fy)
             p.openTextPage().use { tp ->
                 var i = tp.textPageGetCharIndexAtPos(pt.x.toDouble(), pt.y.toDouble(), 4.0, 4.0)
                 if (i < 0) i = tp.textPageGetCharIndexAtPos(pt.x.toDouble(), pt.y.toDouble(), 14.0, 10.0)
@@ -202,7 +264,7 @@ class PdfEngine(context: Context) {
 
     suspend fun lineAt(pdf: OpenPdf, page: Int, fx: Float, fy: Float): TextLine? = withContext(dispatcher) {
         pdf.doc.openPage(page).use { p ->
-            val pt = toPdf(p, pdf.sizes[page], fx, fy)
+            val pt = toPdf(p, sizeOf(pdf, page, p), fx, fy)
             p.openTextPage().use { tp ->
                 val n = tp.textPageCountChars()
                 val i = tp.textPageGetCharIndexAtPos(pt.x.toDouble(), pt.y.toDouble(), 6.0, 6.0)
@@ -230,7 +292,7 @@ class PdfEngine(context: Context) {
                 val rect = RectF(l, top, r, bottom)
                 val size = tp.getFontSize(i).toFloat().takeIf { it > 1f } ?: (top - bottom)
                 TextLine(page, (tp.textPageGetText(a, e - a + 1) ?: "").trimEnd('\r', '\n'), rect,
-                    frac(p, pdf.sizes[page], rect), size, l, base)
+                    frac(p, sizeOf(pdf, page, p), rect), size, l, base)
             }
         }
     }
@@ -244,7 +306,7 @@ class PdfEngine(context: Context) {
                 val nr = tp.textPageCountRects(s, n)
                 val pdfRects = (0 until nr).mapNotNull { tp.textPageGetRect(it) }
                 TextSelection(page, s, s + n - 1, tp.textPageGetText(s, n) ?: "",
-                    pdfRects.map { frac(p, pdf.sizes[page], it) }, pdfRects)
+                    pdfRects.map { frac(p, sizeOf(pdf, page, p), it) }, pdfRects)
             }
         }
     }
@@ -252,7 +314,7 @@ class PdfEngine(context: Context) {
     suspend fun links(pdf: OpenPdf, page: Int): List<PageLink> = withContext(dispatcher) {
         pdf.links.getOrPut(page) {
             pdf.doc.openPage(page).use { p ->
-                p.getPageLinks().map { PageLink(frac(p, pdf.sizes[page], it.bounds), it.destPageIdx, it.uri) }
+                p.getPageLinks().map { PageLink(frac(p, sizeOf(pdf, page, p), it.bounds), it.destPageIdx, it.uri) }
             }
         }
     }
@@ -274,6 +336,7 @@ class PdfEngine(context: Context) {
     }
 
     suspend fun close(pdf: OpenPdf) = withContext(dispatcher) {
+        pdf.closed = true
         runCatching { pdf.doc.close() }
         runCatching { pdf.pfd.close() }
     }
@@ -305,9 +368,12 @@ class OpenPdf(
     val engine: PdfEngine,
     val doc: PdfDocument,
     val pfd: ParcelFileDescriptor,
-    val sizes: List<PageSize>,
+    /** tamanhos das páginas (estado observável: os que ainda não foram medidos chegam depois) */
+    val sizes: androidx.compose.runtime.snapshots.SnapshotStateList<PageSize>,
     val id: String,
+    val measured: BooleanArray,
 ) {
+    @Volatile var closed = false
     val links = HashMap<Int, List<PageLink>>()
     val chars = java.util.concurrent.ConcurrentHashMap<Int, PageChars>()
 }

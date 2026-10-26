@@ -684,7 +684,11 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ execução de ferramentas
     def _pages_from(self, text, tab):
-        return ops.parse_ranges(text, tab.doc.page_count)
+        try:
+            return ops.parse_ranges(text, tab.doc.page_count)
+        except ValueError:
+            QMessageBox.warning(self, APP, f"Intervalo de páginas inválido: “{text}”.\n\nUse, por exemplo: 1-3, 5, 8-")
+            raise ops.Cancelled()
 
     def _run_worker(self, label, fn, on_done, maximum=0):
         dlg = QProgressDialog(label, "Cancelar", 0, maximum, self)
@@ -736,7 +740,10 @@ class MainWindow(QMainWindow):
         if h is None:
             QMessageBox.information(self, APP, f"Ferramenta \"{name}\" indisponível.")
             return
-        h(tab, **kw)
+        try:
+            h(tab, **kw)
+        except ops.Cancelled:
+            pass
 
     # --- assinatura e preenchimento
     def _signature_file(self):

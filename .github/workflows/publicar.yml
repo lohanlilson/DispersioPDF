@@ -80,6 +80,8 @@ jobs:
           python tests/sharpness_test.py
           python tests/split_test.py
           python tests/novidades_test.py
+          python tests/desfazer_test.py
+          python tests/ferramentas_test.py
 
       - name: Gerar executável, instalador e patch
         if: steps.versao.outputs.publicar == 'sim'

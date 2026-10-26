@@ -59,19 +59,34 @@ object Editor {
         doc.documentCatalog.acroForm?.fieldTree?.any { it is PDSignatureField && it.signature != null } == true
 
     /** Abre [src], aplica [block] e grava em [dst]. block devolve os objetos alterados (para a gravação incremental). */
-    fun apply(src: File, dst: File, password: String?, block: (PDDocument) -> Collection<COSDictionary>) {
+    fun apply(src: File, dst: File, password: String?, block: (PDDocument) -> Collection<COSDictionary>) =
+        apply(src, dst, password, block) {}
+
+    /** after = roda com o documento ainda aberto, já com a alteração (ex.: ler campos e comentários sem reabrir). */
+    fun apply(src: File, dst: File, password: String?, block: (PDDocument) -> Collection<COSDictionary>, after: (PDDocument) -> Unit) {
         PDDocument.load(src, password ?: "").use { doc ->
             val changed = block(doc)
-            dst.outputStream().buffered().use { out ->
-                if (signed(doc)) {
-                    val set = HashSet<COSDictionary>()
-                    changed.forEach { d -> set += d; d.isNeedToBeUpdated = true }
-                    doc.documentCatalog.cosObject.isNeedToBeUpdated = true
-                    doc.saveIncremental(out, set)
-                } else {
-                    doc.save(out)
+            // gravação incremental: só acrescenta o que mudou (mais rápido e mantém as assinaturas válidas).
+            // Documento protegido por senha: grava o arquivo inteiro.
+            val incremental = signed(doc) || !doc.isEncrypted
+            var ok = false
+            if (incremental) {
+                ok = runCatching {
+                    dst.outputStream().buffered().use { out ->
+                        val set = HashSet<COSDictionary>()
+                        changed.forEach { d -> set += d; d.isNeedToBeUpdated = true }
+                        doc.documentCatalog.cosObject.isNeedToBeUpdated = true
+                        doc.saveIncremental(out, set)
+                    }
+                    true
+                }.getOrElse { e ->
+                    if (signed(doc)) throw e
+                    android.util.Log.w("LumenPdf", "gravação incremental falhou; gravando completo", e)
+                    false
                 }
             }
+            if (!ok) dst.outputStream().buffered().use { doc.save(it) }
+            after(doc)
         }
     }
 

@@ -16,6 +16,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 enum class Tool { NONE, HIGHLIGHT, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT }
@@ -71,9 +72,14 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     val pendingMarks = mutableStateListOf<Triple<Int, List<FracRect>, Long>>()
     /** últimas imagens exibidas por página (marcador enquanto a nova renderização não fica pronta) */
     val lastBitmaps = android.util.LruCache<Int, androidx.compose.ui.graphics.ImageBitmap>(10)
+    /** tamanhos das páginas de cada versão (reabrir sem medir de novo) */
+    val sizesOf = HashMap<String, List<PageSize>>()
 }
 
 const val KEEP_PASSWORD = "\u0000manter"
+
+/** Campos e comentários lidos do documento logo depois da edição (evita reabrir o arquivo). */
+class Parsed(val fields: List<FormField>, val annots: List<Editor.AnnotRef>)
 
 data class PendingPassword(val uri: Uri, val name: String, val wrong: Boolean)
 
@@ -175,15 +181,20 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             }
             d.version++
             val dst = File(src.parentFile, "v${d.version}.pdf")
+            val cur = currentSizes(d)
+            cur?.let { d.sizesOf[src.path] = it }
+            var parsed: Parsed? = null
             withContext(Dispatchers.IO) {
                 Editor.author = authorName()
-                Editor.apply(src, dst, d.password, block)
+                Editor.apply(src, dst, d.password, block) { doc ->
+                    parsed = runCatching { Parsed(Editor.fields(doc), Editor.annotations(doc)) }.getOrNull()
+                }
             }
             d.undo.addLast(src)
             d.redo.clear()
             d.work = dst
             d.dirty = true
-            reopen(d, dst)
+            reopen(d, dst, cur, parsed)
         } catch (e: Exception) {
             error = "Não foi possível $what.\n${e.message ?: e.javaClass.simpleName}"
         } finally {
@@ -194,13 +205,18 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun reopen(d: ViewerDoc, f: File) {
-        val newPdf = engine.open(getApplication(), Uri.fromFile(f), d.password)
-        android.util.Log.i("LumenPdf", "reaberto: ${newPdf.id} (${f.length()} bytes)")
+    private fun currentSizes(d: ViewerDoc): List<PageSize>? = if (d.pdf.measured.all { it }) d.pdf.sizes.toList() else null
+
+    /** known = tamanhos das páginas (edições que não mexem nas páginas); parsed = campos e comentários já lidos. */
+    private suspend fun reopen(d: ViewerDoc, f: File, known: List<PageSize>? = null, parsed: Parsed? = null) {
+        val t0 = System.currentTimeMillis()
+        val newPdf = engine.open(getApplication(), Uri.fromFile(f), d.password, known)
+        android.util.Log.i("LumenPdf", "reaberto: ${newPdf.id} (${f.length()} bytes) em ${System.currentTimeMillis() - t0} ms")
+        known?.let { d.sizesOf[f.path] = it }
         val old = d.pdf
         d.pdf = newPdf
         engine.close(old)
-        loadFields(d)
+        loadFields(d, parsed)
     }
 
     /** Destaque/sublinhado/tachado do trecho selecionado. Aparece na hora; o arquivo é gravado em seguida. */
@@ -212,16 +228,40 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             .invokeOnCompletion { d.pendingMarks.remove(mark) }
     }
 
-    /** Trecho de texto (mesmo estilo) sob o dedo, para a ferramenta "Editar texto". */
-    suspend fun analyzeRun(d: ViewerDoc, line: TextLine, px: Float, py: Float): TextRun? = withContext(Dispatchers.IO) {
-        runCatching {
-            val app = getApplication<Application>()
-            val f = d.work
-            val doc = if (f != null) PDDocument.load(f, d.password ?: "")
-                else app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { PDDocument.load(it, d.password ?: "") }
-            doc.use { TextEdit.analyze(it, line.page, line.rect, px, py) }
-        }.onFailure { android.util.Log.w("LumenPdf", "analisar texto", it) }.getOrNull()
+    /** Documento aberto no PDFBox só para leitura (editar texto), mantido até a versão mudar. */
+    private val readLock = kotlinx.coroutines.sync.Mutex()
+    private var readDoc: Pair<String, PDDocument>? = null
+
+    private suspend fun <T> withReadDoc(d: ViewerDoc, block: (PDDocument) -> T): T = readLock.withLock {
+        withContext(Dispatchers.IO) {
+            val key = (d.work?.path ?: d.uri) + "|" + (d.password ?: "")
+            val cur = readDoc
+            val doc = if (cur != null && cur.first == key) cur.second else {
+                cur?.second?.let { runCatching { it.close() } }
+                readDoc = null
+                val app = getApplication<Application>()
+                val f = d.work
+                val nd = if (f != null) PDDocument.load(f, d.password ?: "")
+                    else app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { PDDocument.load(it, d.password ?: "") }
+                readDoc = key to nd
+                nd
+            }
+            block(doc)
+        }
     }
+
+    /** Abre o documento para leitura com antecedência (ao escolher a ferramenta "Editar texto"). */
+    fun prewarmRead(d: ViewerDoc) = viewModelScope.launch { runCatching { withReadDoc(d) { it.numberOfPages } } }
+
+    private fun dropReadDoc() {
+        val cur = readDoc ?: return
+        viewModelScope.launch { readLock.withLock { if (readDoc === cur) { runCatching { cur.second.close() }; readDoc = null } } }
+    }
+
+    /** Trecho de texto (mesmo estilo) sob o dedo, para a ferramenta "Editar texto". */
+    suspend fun analyzeRun(d: ViewerDoc, line: TextLine, px: Float, py: Float): TextRun? =
+        runCatching { withReadDoc(d) { TextEdit.analyze(it, line.page, line.rect, px, py) } }
+            .onFailure { android.util.Log.w("LumenPdf", "analisar texto", it) }.getOrNull()
 
     /** Troca o texto mantendo fonte, negrito/itálico, tamanho e cor. */
     fun replaceText(d: ViewerDoc, line: TextLine, px: Float, py: Float, text: String) {
@@ -240,44 +280,42 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     fun undo(d: ViewerDoc) = viewModelScope.launch {
         val prev = d.undo.removeLastOrNull() ?: return@launch
-        d.work?.let { d.redo.addLast(it) }
+        d.work?.let { w -> d.redo.addLast(w); currentSizes(d)?.let { d.sizesOf[w.path] = it } }
         d.work = prev
         d.dirty = true
-        reopen(d, prev)
+        reopen(d, prev, d.sizesOf[prev.path])
         d.canUndo = d.undo.isNotEmpty()
         d.canRedo = d.redo.isNotEmpty()
     }
 
     fun redo(d: ViewerDoc) = viewModelScope.launch {
         val next = d.redo.removeLastOrNull() ?: return@launch
-        d.work?.let { d.undo.addLast(it) }
+        d.work?.let { w -> d.undo.addLast(w); currentSizes(d)?.let { d.sizesOf[w.path] = it } }
         d.work = next
         d.dirty = true
-        reopen(d, next)
+        reopen(d, next, d.sizesOf[next.path])
         d.canUndo = d.undo.isNotEmpty()
         d.canRedo = d.redo.isNotEmpty()
     }
 
-    fun loadFields(d: ViewerDoc) = viewModelScope.launch {
+    fun loadFields(d: ViewerDoc, parsed: Parsed? = null) = viewModelScope.launch {
         val app = getApplication<Application>()
-        val list = runCatching {
+        // uma leitura só do arquivo para campos e comentários (ou nenhuma, se a edição já trouxe)
+        val p = parsed ?: runCatching {
             withContext(Dispatchers.IO) {
                 val f = d.work
-                if (f != null) PDDocument.load(f, d.password ?: "").use { Editor.fields(it) }
-                else app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { s ->
-                    PDDocument.load(s, d.password ?: "").use { Editor.fields(it) }
-                }
+                val doc = if (f != null) PDDocument.load(f, d.password ?: "")
+                    else app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { s -> PDDocument.load(s, d.password ?: "") }
+                doc.use { Parsed(Editor.fields(it), Editor.annotations(it)) }
             }
-        }.getOrDefault(emptyList())
-        d.fields = list.filter { it.page < d.pageCount }.map { it to engine.fracOf(d.pdf, it.page, it.rect) }
-        val ann = runCatching {
-            withContext(Dispatchers.IO) {
-                val f = d.work
-                if (f != null) PDDocument.load(f, d.password ?: "").use { Editor.annotations(it) }
-                else app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { s -> PDDocument.load(s, d.password ?: "").use { Editor.annotations(it) } }
-            }
-        }.getOrDefault(emptyList())
-        d.annots = ann.filter { it.page < d.pageCount }.map { it to engine.fracOf(d.pdf, it.page, it.rect) }
+        }.getOrDefault(Parsed(emptyList(), emptyList()))
+        val list = p.fields
+        val pdfNow0 = d.pdf
+        val fl = list.filter { it.page < d.pageCount }
+        val al = p.annots.filter { it.page < d.pageCount }
+        val fr = engine.fracOfAll(pdfNow0, fl.map { it.page to it.rect } + al.map { it.page to it.rect })
+        d.fields = fl.mapIndexed { k, f -> f to fr[k] }
+        d.annots = al.mapIndexed { k, a -> a to fr[fl.size + k] }
         d.selAnnot = null
         val signed = list.any { it.kind == FormField.Kind.SIGNATURE && it.value.isNotEmpty() }
         val pdfNow = d.pdf
@@ -312,11 +350,13 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             d.version++
             val dst = File(src.parentFile, "v${d.version}.pdf")
             withContext(Dispatchers.IO) { dst.writeBytes(res.bytes) }
+            val cur = currentSizes(d)
+            cur?.let { d.sizesOf[src.path] = it }
             d.undo.addLast(src)
             d.redo.clear()
             d.work = dst
             d.dirty = true
-            reopen(d, dst)
+            reopen(d, dst, cur)
             d.tool = Tool.NONE
             toast = "Assinado por ${Certs.splitName(sc.subject).first}" +
                 (if (res.timestamp) " com carimbo de tempo" else "") + ". Toque em Salvar ou Compartilhar." +
@@ -348,6 +388,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             }
             d.version++
             val dst = File(src.parentFile, "v${d.version}.pdf")
+            currentSizes(d)?.let { d.sizesOf[src.path] = it }
             withContext(Dispatchers.IO) { Editor.applyFull(src, dst, d.password, block) }
             if (newPassword != KEEP_PASSWORD) d.password = newPassword
             done(src.length(), dst.length())
@@ -495,6 +536,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     fun closeDoc() {
         val d = doc ?: return
+        dropReadDoc()
         recents.setPage(d.uri, d.page)
         doc = null
         viewModelScope.launch { engine.close(d.pdf) }
@@ -645,13 +687,11 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         ).filterKeys { it in kinds }.values.joinToString("|").toRegex()
         val out = ArrayList<Pair<Int, FracRect>>()
         for (p in 0 until d.pageCount) {
-            val chars = engine.chars(d.pdf, p)
-            val text = String(chars.map { it.first }.toCharArray())
-            for (m in re.findAll(text)) {
-                val boxes = chars.subList(m.range.first, m.range.last + 1).mapNotNull { it.second }
+            val pc = engine.pageChars(d.pdf, p)
+            for (m in re.findAll(pc.text)) {
+                val boxes = (m.range.first..m.range.last).mapNotNull { pc.frac.getOrNull(it) }
                 if (boxes.isEmpty()) continue
-                val r = android.graphics.RectF(boxes.minOf { it.left }, boxes.maxOf { it.top }, boxes.maxOf { it.right }, boxes.minOf { it.bottom })
-                out += p to engine.fracOf(d.pdf, p, r)
+                out += p to FracRect(boxes.minOf { it.l }, boxes.minOf { it.t }, boxes.maxOf { it.r }, boxes.maxOf { it.b })
             }
         }
         return out

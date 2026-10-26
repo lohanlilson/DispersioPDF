@@ -83,7 +83,7 @@ def page_list(sources, o):
         elif o["pages"] == "selected":
             pages = sorted(src.selected) or [src.current]
         else:
-            pages = ops.parse_ranges(o["range_text"], n) or list(range(n))
+            pages = ops.parse_ranges(o["range_text"], n, strict=False) or list(range(n))
         if o["subset"] == "odd":
             pages = [p for p in pages if (p + 1) % 2 == 1]
         elif o["subset"] == "even":

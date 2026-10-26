@@ -50,34 +50,47 @@ class DesempenhoTest {
     @Test
     fun edicaoEmPdfGrande() {
         val src = big()
-        Log.i("LumenTest", "DESEMPENHO arquivo: ${src.length() / 1_000_000} MB")
+        Log.i("LumenTest", "DESEMPENHO arquivo: ${src.length() / 1_000_000} MB, 40 páginas")
         val rect = RectF(40f, 790f, 300f, 776f)
-        val full = File(ctx.cacheDir, "g1.pdf")
-        t("destaque (abrir+gravar completo)") { Editor.apply(src, full, null) { d -> Editor.markup(d, 0, listOf(rect), Markup.HIGHLIGHT, 0xFFFFD400) } }
-        val inc = File(ctx.cacheDir, "g2.pdf")
-        t("destaque (gravação incremental)") {
-            PDDocument.load(src).use { d ->
-                val ch = Editor.markup(d, 0, listOf(rect), Markup.HIGHLIGHT, 0xFFFFD400)
-                inc.outputStream().buffered().use { o -> ch.forEach { it.isNeedToBeUpdated = true }; d.saveIncremental(o, ch.toHashSet()) }
+        val out = File(ctx.cacheDir, "g1.pdf")
+        t("1 gravar destaque (incremental)") { Editor.apply(src, out, null) { d -> Editor.markup(d, 0, listOf(rect), Markup.HIGHLIGHT, 0xFFFFD400) } }
+        val e = PdfEngine(ctx)
+        val first = t("2a abrir (sem tamanhos conhecidos)") { runBlocking { e.open(ctx, Uri.fromFile(src), null) } }
+        runBlocking { kotlinx.coroutines.delay(4000) }   // medição das demais páginas em segundo plano
+        val known = first.sizes.toList()
+        Log.i("LumenTest", "DESEMPENHO 2b todas medidas em segundo plano: ${first.measured.all { it }}")
+        val pdf = t("2c reabrir depois da edição (tamanhos conhecidos)") { runBlocking { e.open(ctx, Uri.fromFile(out), null, known) } }
+        val parsed = t("3a campos + comentários (uma leitura)") { PDDocument.load(out).use { Parsed(Editor.fields(it), Editor.annotations(it)) } }
+        t("3b posições na tela (uma abertura por página)") { runBlocking { e.fracOfAll(pdf, parsed.annots.map { it.page to it.rect }) } }
+        t("desenhar página 1") { runBlocking { e.render(pdf, 0, 1080) } }
+        PDDocument.load(out).use { doc ->
+            t("4 editar texto: analisar o toque (documento já aberto)") { TextEdit.analyze(doc, 0, rect, 60f, 783f) }
+        }
+        runBlocking { e.close(first); e.close(pdf) }
+    }
+
+    @Test
+    fun edicaoCompletaPeloApp() {
+        val src = big()
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(Uri.fromFile(src), "application/pdf")
+            .setClass(ctx, MainActivity::class.java)
+        androidx.test.core.app.ActivityScenario.launch<MainActivity>(intent).use { sc ->
+            lateinit var vm: AppVm
+            sc.onActivity { vm = androidx.lifecycle.ViewModelProvider(it)[AppVm::class.java] }
+            var tries = 0
+            while ((vm.doc == null || vm.loading) && tries++ < 300) Thread.sleep(50)
+            Thread.sleep(5000)
+            val d = vm.doc!!
+            repeat(3) { k ->
+                val sel = runBlocking { vm.engine.pageChars(d.pdf, 0) }.let { it.wordSelection(it.charAt(0.12f, 0.08f + k * 0.013f, false), it.charAt(0.5f, 0.08f + k * 0.013f, false)) }
+                val a = System.nanoTime()
+                InstrumentationRegistry.getInstrumentation().runOnMainSync { vm.markup(d, sel, Markup.HIGHLIGHT, 0xFFFFD400) }
+                var n = 0
+                while ((d.busy || d.pendingMarks.isNotEmpty()) && n++ < 600) Thread.sleep(20)
+                val annots = d.annots.size
+                Log.i("LumenTest", "DESEMPENHO 5 destaque pelo app, do toque até a tela atualizada (${k + 1}ª vez): ${(System.nanoTime() - a) / 1_000_000} ms, comentários=$annots")
             }
         }
-        t("só abrir no PDFBox") { PDDocument.load(full).use { it.numberOfPages } }
-        t("campos + comentários (2 aberturas)") {
-            PDDocument.load(full).use { Editor.fields(it) }
-            PDDocument.load(full).use { Editor.annotations(it) }
-        }
-        val e = PdfEngine(ctx)
-        val pdf = t("reabrir no PDFium") { runBlocking { e.open(ctx, Uri.fromFile(full), null) } }
-        t("desenhar página 1") { runBlocking { e.render(pdf, 0, 1080) } }
-        t("editar texto: analisar o toque") { PDDocument.load(full).use { TextEdit.analyze(it, 0, rect, 60f, 783f) } }
-        t("ler bytes (validação de assinaturas)") { full.readBytes().size }
-        runBlocking { e.close(pdf) }
-        // desenho à mão: cópia da lista de pontos a cada movimento (como no app)
-        val pts = mutableListOf<androidx.compose.ui.geometry.Offset>()
-        t("traço de 1500 pontos (cópias da lista)") {
-            var last: List<androidx.compose.ui.geometry.Offset> = emptyList()
-            repeat(1500) { k -> pts.add(androidx.compose.ui.geometry.Offset(k.toFloat(), k.toFloat())); last = pts.toList() }
-            last.size
-        }
+        ctx.getSharedPreferences("recentes", 0).edit().clear().commit()
     }
 }

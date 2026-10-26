@@ -15,17 +15,18 @@ object Compare {
     suspend fun words(engine: PdfEngine, pdf: OpenPdf): List<PWord> {
         val out = ArrayList<PWord>()
         for (p in 0 until pdf.sizes.size) {
-            val chars = engine.chars(pdf, p)
-            var sb = StringBuilder(); var boxes = ArrayList<RectF>()
-            suspend fun flush() {
+            // caracteres da página já com a posição na tela (uma leitura por página)
+            val pc = engine.pageChars(pdf, p)
+            var sb = StringBuilder(); var boxes = ArrayList<FracRect>()
+            fun flush() {
                 if (sb.isNotBlank() && boxes.isNotEmpty()) {
-                    val r = RectF(boxes.minOf { it.left }, boxes.maxOf { it.top }, boxes.maxOf { it.right }, boxes.minOf { it.bottom })
-                    out += PWord(sb.toString(), p, engine.fracOf(pdf, p, r))
+                    out += PWord(sb.toString(), p, FracRect(boxes.minOf { it.l }, boxes.minOf { it.t }, boxes.maxOf { it.r }, boxes.maxOf { it.b }))
                 }
                 sb = StringBuilder(); boxes = ArrayList()
             }
-            for ((c, r) in chars) {
-                if (c.isWhitespace() || c == '\u0000') flush() else { sb.append(c); r?.let { boxes += it } }
+            for (k in 0 until pc.size) {
+                val c = pc.text[k]
+                if (c.isWhitespace() || c == '\u0000') flush() else { sb.append(c); pc.frac[k]?.let { boxes += it } }
             }
             flush()
         }

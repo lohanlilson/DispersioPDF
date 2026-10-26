@@ -255,19 +255,57 @@ class DocTab(QWidget):
             self.view.recolor_selected_annot(c)
 
     # ------------------------------------------------------------ desfazer / alterações
-    def checkpoint(self, page=None):
-        """Ponto de desfazer. Com page=, a alteração só acrescenta anotações nessa página: guarda apenas quais
-        já existiam (instantâneo; a cópia do documento inteiro, lenta em PDFs grandes, só é feita ao desfazer)."""
+    def checkpoint(self, page=None, annot=None):
+        """Ponto de desfazer. Rápido quando a alteração mexe só em comentários de uma página:
+        page= (só acrescenta anotações) guarda quais já existiam; page= e annot= (mover, apagar, cor, nota)
+        guarda só os objetos daquela anotação. A cópia do documento inteiro, lenta em PDFs grandes,
+        fica para as demais alterações (e para o refazer)."""
         entry = None
         if page is not None:
             try:
-                entry = ("anotacoes", page, {a.xref for a in self.doc[page].annots()})
+                entry = ("objetos", page, self._annot_snapshot(page, annot)) if annot else \
+                    ("anotacoes", page, {a.xref for a in self.doc[page].annots()})
             except Exception:
                 entry = None
         self.undo_stack.append(entry if entry is not None else self.doc.tobytes())
         if len(self.undo_stack) > MAX_UNDO:
             self.undo_stack.pop(0)
         self.redo_stack.clear()
+
+    def _annot_snapshot(self, page, xref):
+        """Objetos de uma anotação (ela, o balão, as aparências) e a lista de anotações da página."""
+        doc = self.doc
+        pg = doc[page]
+        objs = {}
+
+        def take(x):
+            if not x or x <= 0 or x in objs:
+                return
+            objs[x] = (doc.xref_object(x, compressed=False), doc.xref_stream(x) if doc.xref_is_stream(x) else None)
+
+        take(xref)
+        a = pg.load_annot(xref)
+        popup = a.popup_xref if a else 0
+        take(popup)
+        for x in (xref, popup):
+            if x:
+                t, v = doc.xref_get_key(x, "AP/N")
+                if t == "xref":
+                    take(int(v.split()[0]))
+        annots = doc.xref_get_key(pg.xref, "Annots")
+        if annots[0] == "xref":
+            take(int(annots[1].split()[0]))
+        return objs, annots
+
+    def _annot_restore(self, page, snap):
+        objs, annots = snap
+        doc = self.doc
+        for x, (src, stream) in objs.items():
+            doc.update_object(x, src)
+            if stream is not None:
+                doc.update_stream(x, stream)
+        if annots[0] != "xref":
+            doc.xref_set_key(doc[page].xref, "Annots", annots[1] if annots[0] != "null" else "null")
 
     def changed(self, pages=None, structure=False):
         self.modified = True
@@ -319,12 +357,15 @@ class DocTab(QWidget):
         top = self.undo_stack.pop()
         self.redo_stack.append(self.doc.tobytes())
         if isinstance(top, tuple):
-            _, page, before = top
-            pg = self.doc[page]
-            for xref in [a.xref for a in pg.annots() if a.xref not in before]:
-                a = pg.load_annot(xref)
-                if a:
-                    pg.delete_annot(a)
+            kind, page, data = top
+            if kind == "objetos":
+                self._annot_restore(page, data)
+            else:
+                pg = self.doc[page]
+                for xref in [a.xref for a in pg.annots() if a.xref not in data]:
+                    a = pg.load_annot(xref)
+                    if a:
+                        pg.delete_annot(a)
             self.view.sel_annot = None
             self.changed([page])
         else:
@@ -436,7 +477,11 @@ class DocTab(QWidget):
             txt, ok = QInputDialog.getText(self, "Extrair páginas", f"Páginas (ex.: 1-3, 7) de 1 a {self.doc.page_count}:")
             if not ok:
                 return
-            pages = ops.parse_ranges(txt, self.doc.page_count)
+            try:
+                pages = ops.parse_ranges(txt, self.doc.page_count)
+            except ValueError:
+                QMessageBox.warning(self, "Lumen PDF", f"Intervalo de páginas inválido: “{txt}”.\n\nUse, por exemplo: 1-3, 7")
+                return
         if not pages:
             return
         base = os.path.splitext(self.path or "Documento.pdf")[0] + "_extraido.pdf"

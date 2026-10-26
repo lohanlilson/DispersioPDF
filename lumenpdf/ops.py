@@ -13,8 +13,13 @@ import pymupdf
 
 # ---------------------------------------------------------------- utilidades
 
-def parse_ranges(text, page_count):
-    """'1-3, 5, 8-' -> [0,1,2,4,7,...] (base 0). Vazio = todas."""
+class Cancelled(Exception):
+    """A pessoa cancelou ou digitou algo inválido (já avisada): interrompe a ferramenta sem erro."""
+
+
+def parse_ranges(text, page_count, strict=True):
+    """'1-3, 5, 8-' -> [0,1,2,4,7,...] (base 0). Vazio = todas.
+    strict=True: texto inválido gera ValueError; False: ignora as partes inválidas (ex.: enquanto digita)."""
     text = (text or "").strip()
     if not text:
         return list(range(page_count))
@@ -23,14 +28,18 @@ def parse_ranges(text, page_count):
         part = part.strip()
         if not part:
             continue
-        if "-" in part:
-            a, b = part.split("-", 1)
-            a = int(a) if a.strip() else 1
-            b = int(b) if b.strip() else page_count
-            step = 1 if b >= a else -1
-            pages.extend(range(a - 1, b - 1 + step, step))
-        else:
-            pages.append(int(part) - 1)
+        try:
+            if "-" in part:
+                a, b = part.split("-", 1)
+                a = int(a) if a.strip() else 1
+                b = int(b) if b.strip() else page_count
+                step = 1 if b >= a else -1
+                pages.extend(range(a - 1, b - 1 + step, step))
+            else:
+                pages.append(int(part) - 1)
+        except ValueError:
+            if strict:
+                raise
     return [p for p in pages if 0 <= p < page_count]
 
 
@@ -86,7 +95,7 @@ def split(doc, mode, value, out_dir, base_name):
         groups = [list(range(i, min(i + k, n))) for i in range(0, n, k)]
     elif mode == "ranges":
         for part in re.split(r"[;]", value):
-            pages = parse_ranges(part, n)
+            pages = parse_ranges(part, n, strict=False)
             if pages:
                 groups.append(pages)
     elif mode == "bookmarks":
@@ -560,6 +569,57 @@ def replace_span(page, span, new_text, fontsize=None, color=None, fontname=None)
     return used
 
 
+POINT_ANNOTS = {pymupdf.PDF_ANNOT_HIGHLIGHT, pymupdf.PDF_ANNOT_UNDERLINE, pymupdf.PDF_ANNOT_STRIKE_OUT,
+                pymupdf.PDF_ANNOT_SQUIGGLY, pymupdf.PDF_ANNOT_INK, pymupdf.PDF_ANNOT_LINE,
+                pymupdf.PDF_ANNOT_POLYGON, pymupdf.PDF_ANNOT_POLY_LINE}
+
+
+def shift_annot(page, annot, disp_delta):
+    """Desloca uma anotação definida por pontos (sem retângulo próprio) em coordenadas de exibição."""
+    v = (pymupdf.Point(disp_delta) * page.derotation_matrix) - (pymupdf.Point(0, 0) * page.derotation_matrix)
+    dx, dy = v.x, -v.y          # no arquivo, o eixo y cresce para cima
+    doc = page.parent
+    x = annot.xref
+
+    def shifted(arr):
+        nums = [float(t) for t in arr.replace("[", " ").replace("]", " ").split()]
+        return [n + (dx if k % 2 == 0 else dy) for k, n in enumerate(nums)]
+
+    def fmt(nums):
+        return "[" + " ".join(f"{n:.3f}" for n in nums) + "]"
+
+    for key in ("QuadPoints", "Vertices", "L", "Rect"):
+        t, val = doc.xref_get_key(x, key)
+        if t == "array":
+            doc.xref_set_key(x, key, fmt(shifted(val)))
+    t, val = doc.xref_get_key(x, "InkList")
+    if t == "array":
+        inner = val.strip()[1:-1]
+        strokes, depth, cur = [], 0, ""
+        for ch in inner:
+            if ch == "[":
+                depth += 1
+                cur = ""
+            elif ch == "]":
+                depth -= 1
+                strokes.append(fmt(shifted(cur)))
+            elif depth:
+                cur += ch
+        doc.xref_set_key(x, "InkList", "[" + " ".join(strokes) + "]")
+
+
+def add_freetext(page, rect, text, **kw):
+    """Caixa de texto/carimbo. O PyMuPDF 2 só aceita border_color em texto formatado: sem ela,
+    a borda sai na cor do texto (que nos carimbos e caixas do programa é a mesma)."""
+    try:
+        return page.add_freetext_annot(rect, text, **kw)
+    except ValueError as e:
+        if "border_color" not in str(e):
+            raise
+        kw.pop("border_color", None)
+        return page.add_freetext_annot(rect, text, **kw)
+
+
 def add_text(page, disp_point, text, fontsize=12, fontname="helv", color=(0, 0, 0)):
     pt = pymupdf.Point(disp_point) * page.derotation_matrix
     lh = fontsize * 1.2
@@ -628,6 +688,8 @@ def set_background(doc, color, pages=None):
 
 def redact_search(doc, needle, regex=False, case=False, pages=None):
     count = 0
+    if not needle:
+        return 0
     for p in pages if pages is not None else range(doc.page_count):
         page = doc[p]
         rects = []
@@ -640,7 +702,7 @@ def redact_search(doc, needle, regex=False, case=False, pages=None):
                     text_rects.append(pymupdf.Rect(w[:4]))
             rects.extend(text_rects)
         else:
-            rects.extend(page.search_for(needle))
+            rects.extend(page.search_for(needle) or [])
         for r in rects:
             page.add_redact_annot(r, fill=(0, 0, 0))
             count += 1
@@ -664,7 +726,7 @@ def redact_pattern(doc, pattern):
             line = [w for w in text_words if (w[5], w[6]) == line_key]
             s = " ".join(w[4] for w in line)
             for m in rx.finditer(s):
-                for r in page.search_for(m.group(0)):
+                for r in page.search_for(m.group(0)) or []:
                     page.add_redact_annot(r, fill=(0, 0, 0))
                     count += 1
     return count

@@ -132,7 +132,7 @@ class PdfView(QGraphicsView):
         self._drag_rect = None
         self._ink = []
         self._annot_drag = None
-        self.before_change = lambda page=None: None
+        self.before_change = lambda page=None, annot=None: None
         self.after_change = lambda pages=None, structure=False: None
         self.request_tool = lambda name, **kw: None
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
@@ -685,7 +685,7 @@ class PdfView(QGraphicsView):
         if text and self.doc:
             for i in range(self.doc.page_count):
                 page = self._page(i)
-                rects = [r * page.rotation_matrix for r in page.search_for(text)]
+                rects = [r * page.rotation_matrix for r in (page.search_for(text) or [])]
                 if rects:
                     self.search_hits[i] = rects
                     self.hit_list += [(i, k) for k in range(len(rects))]
@@ -1017,7 +1017,7 @@ class PdfView(QGraphicsView):
             if ok and text:
                 self.before_change(page=i)
                 col = ops.hex_to_rgb(self.colors["freetext"])
-                a = page.add_freetext_annot(unrot, text, fontsize=12, fontname="Helv", text_color=col,
+                a = ops.add_freetext(page, unrot, text, fontsize=12, fontname="Helv", text_color=col,
                                             border_color=col, border_width=1, fill_color=(1, 1, 1),
                                             rotate=page.rotation)
                 a.set_info(title=self.author)
@@ -1044,9 +1044,12 @@ class PdfView(QGraphicsView):
         page = self._page(p)
         r = a.rect * page.rotation_matrix
         r = pymupdf.Rect(r.x0 + d[0], r.y0 + d[1], r.x1 + d[0], r.y1 + d[1])
-        self.before_change()
+        self.before_change(page=p, annot=xref)
         a = self._annot(p, xref)
-        a.set_rect(ops.to_unrot(page, r))
+        if a.type[0] in ops.POINT_ANNOTS:
+            ops.shift_annot(page, a, d)   # destaque, desenho, linha…: deslocar os pontos
+        else:
+            a.set_rect(ops.to_unrot(page, r))
         a.update()
         self.after_change([p])
 
@@ -1108,7 +1111,7 @@ class PdfView(QGraphicsView):
         rect = pymupdf.Rect(pt.x - w / 2, pt.y - 25, pt.x + w / 2, pt.y + 25)
         c = ops.hex_to_rgb(col)
         self.before_change(page=i)
-        a = page.add_freetext_annot(ops.to_unrot(page, rect), txt, fontsize=13, fontname="Helv", text_color=c,
+        a = ops.add_freetext(page, ops.to_unrot(page, rect), txt, fontsize=13, fontname="Helv", text_color=c,
                                     border_color=c, border_width=2.5, fill_color=(1, 1, 1),
                                     align=pymupdf.TEXT_ALIGN_CENTER, rotate=page.rotation, opacity=0.9)
         a.set_info(title=self.author, subject="Carimbo")
@@ -1121,7 +1124,7 @@ class PdfView(QGraphicsView):
         p, xref = self.sel_annot
         a = self._annot(p, xref)
         if a:
-            self.before_change()
+            self.before_change(page=p, annot=xref)
             self._page(p).delete_annot(self._annot(p, xref))
             self.sel_annot = None
             self.annotSelected.emit(None)
@@ -1136,7 +1139,7 @@ class PdfView(QGraphicsView):
             return
         text, ok = QInputDialog.getMultiLineText(self, "Comentário", f"{a.type[1]} — conteúdo:", a.info.get("content", ""))
         if ok:
-            self.before_change()
+            self.before_change(page=p, annot=xref)
             a = self._annot(p, xref)
             a.set_info(content=text)
             a.update()
@@ -1149,11 +1152,15 @@ class PdfView(QGraphicsView):
         a = self._annot(p, xref)
         if not a:
             return
-        self.before_change()
+        self.before_change(page=p, annot=xref)
         a = self._annot(p, xref)
         c = ops.hex_to_rgb(hexcolor)
         if a.type[0] == pymupdf.PDF_ANNOT_FREE_TEXT:
-            a.update(text_color=c, border_color=c)
+            try:
+                a.update(text_color=c, border_color=c)
+            except ValueError:
+                # versões novas do PyMuPDF só aceitam cor da borda em texto formatado
+                a.update(text_color=c)
         else:
             a.set_colors(stroke=c)
             a.update()
