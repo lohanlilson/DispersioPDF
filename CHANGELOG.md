@@ -2,6 +2,14 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.6.0
+
+- **Versões anteriores:** cada vez que você salva por cima de um arquivo, a versão anterior fica guardada por até 30 dias (as 10 últimas). Para voltar: Arquivo › Versões anteriores › Restaurar. Dá para desfazer.
+- **Salvar como PDF/A** (arquivamento de longo prazo), em Ferramentas › Converter. Fontes que não estão no arquivo são embutidas com equivalentes de mesmas medidas. O resultado foi conferido com o validador oficial veraPDF.
+- **Remover páginas em branco:** acha as páginas vazias de documentos escaneados e mostra quais são antes de remover.
+- **Endireitar páginas escaneadas:** corrige automaticamente as páginas digitalizadas tortas, sem perder qualidade.
+- **Extrair imagens:** salva as imagens do PDF numa pasta, na resolução original.
+
 ## 1.5.2
 
 - **Mais rápido em PDFs grandes:** mover, apagar, mudar a cor e editar o texto de comentários não travam mais o programa. O Desfazer continua funcionando.

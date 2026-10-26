@@ -1,5 +1,15 @@
 # Novidades do Lumen PDF para Android
 
+## 0.5.0
+
+- **Formas:** retângulo, círculo e seta, com cor e espessura (barra de edição › Formas).
+- **Dividir PDF:** por tamanho máximo em MB (ex.: limite do PJe), a cada N páginas, por intervalos ou pelos capítulos. As partes vão para a pasta que você escolher.
+- **Versões anteriores:** cada vez que você salva por cima, a versão anterior fica guardada por até 30 dias (as 10 últimas). Para voltar: menu ⋮ › Versões anteriores.
+- **Modo leitura:** o texto do PDF em letra grande, que se ajusta à tela, sem precisar de zoom. Tem modo noturno.
+- **Recortar margens:** automático (bordas brancas ou pretas de escaneamento) ou desenhando a área, em uma ou em todas as páginas.
+- **Remover páginas em branco**, **endireitar páginas escaneadas** e **extrair imagens** (vão para a galeria, em Imagens › Lumen PDF).
+- **Salvar como PDF/A** (arquivamento de longo prazo), conferido com o validador oficial veraPDF.
+
 ## 0.4.3
 
 - **Edições muito mais rápidas:** cada destaque, nota, marcação ou rubrica atualiza a tela em menos de 1 segundo (antes eram vários segundos), porque o app não recarrega mais todas as páginas a cada edição e grava só o que mudou.
