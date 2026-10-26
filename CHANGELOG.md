@@ -2,6 +2,14 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.5.2
+
+- **Mais rápido em PDFs grandes:** mover, apagar, mudar a cor e editar o texto de comentários não travam mais o programa. O Desfazer continua funcionando.
+- **Corrigido:** criar caixa de texto e carimbo dava erro.
+- **Corrigido:** mover destaques, sublinhados e desenhos à mão não funcionava.
+- **Corrigido:** um intervalo de páginas digitado errado (ao excluir, extrair ou numerar páginas) mostrava erro. Agora aparece um aviso explicando o formato.
+- **Corrigido:** "Tarjar texto pesquisado" com o campo vazio dava erro.
+
 ## 1.5.1
 
 - **Marca-texto e comentários instantâneos em PDFs grandes:** destacar, sublinhar, tachar, desenhar, notas, carimbos e formas não travam mais o programa ao soltar o mouse (antes podiam levar mais de meio segundo em arquivos grandes). O Desfazer continua funcionando normalmente.

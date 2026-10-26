@@ -1,5 +1,13 @@
 # Novidades do Lumen PDF para Android
 
+## 0.4.3
+
+- **Edições muito mais rápidas:** cada destaque, nota, marcação ou rubrica atualiza a tela em menos de 1 segundo (antes eram vários segundos), porque o app não recarrega mais todas as páginas a cada edição e grava só o que mudou.
+- **Abrir documentos com muitas páginas é bem mais rápido:** a primeira página aparece na hora, e o tamanho das demais é calculado em segundo plano.
+- **Editar texto responde mais rápido ao toque.**
+- **Comparar PDFs e tarjar CPF, CNPJ, e-mail e telefone** ficaram mais rápidos.
+- **Corrigido:** em documentos assinados, um texto editado, uma caixa de texto ou um carimbo podiam não aparecer na tela (a fonte era gravada vazia).
+
 ## 0.4.2
 
 - **Ferramenta Marca-texto** na barra de edição: arraste o dedo sobre o texto e ele já fica destacado. Um toque numa palavra destaca só a palavra. Não precisa mais segurar o dedo antes nem tocar em "Destacar".
