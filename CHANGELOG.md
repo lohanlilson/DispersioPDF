@@ -2,6 +2,15 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.7.0
+
+- **Medir distâncias e áreas** (Ferramentas › Medir): defina a escala da planta (ex.: 1:100) ou calibre desenhando sobre uma medida conhecida. As medidas ficam no PDF com o valor escrito (ex.: 10,58 m; 93,34 m²).
+- **Localizar e substituir** (Ferramentas › Editar): troca um texto em todo o documento mantendo fonte, negrito, tamanho e cor de cada trecho; o resto da linha acompanha a nova largura.
+- **Criar links de sites e e-mails:** endereços escritos no texto viram links clicáveis.
+- **Capturar área como imagem:** arraste sobre uma parte da página; ela vai para a área de transferência (Ctrl+V) e pode ser salva em PNG.
+- **Mover e trocar imagens:** selecione uma imagem para mover, redimensionar, substituir por outra, salvar ou excluir.
+- **Exportar e importar comentários (FDF):** troque só as anotações com outras pessoas; abre no Acrobat, Foxit e PDF-XChange.
+
 ## 1.6.0
 
 - **Versões anteriores:** cada vez que você salva por cima de um arquivo, a versão anterior fica guardada por até 30 dias (as 10 últimas). Para voltar: Arquivo › Versões anteriores › Restaurar. Dá para desfazer.

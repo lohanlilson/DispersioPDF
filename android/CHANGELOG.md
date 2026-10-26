@@ -1,5 +1,13 @@
 # Novidades do Lumen PDF para Android
 
+## 0.6.0
+
+- **Medir distâncias e áreas:** barra de edição › Medir. Defina a escala da planta (ex.: 1:100) ou calibre sobre uma medida conhecida.
+- **Localizar e substituir** (menu ⋮): troca um texto em todo o documento mantendo fonte, negrito, tamanho e cor.
+- **Lista de comentários** (menu ⋮ › Comentários): todos os comentários com busca; um toque leva até cada um.
+- **Criar links de sites e e-mails**, **capturar área como imagem** (salvar na galeria ou compartilhar) e **mover, redimensionar, trocar ou excluir imagens** (barra de edição › Imagens).
+- **Exportar e importar comentários (FDF)**, compatível com o Lumen PDF do computador, Acrobat e Foxit.
+
 ## 0.5.0
 
 - **Formas:** retângulo, círculo e seta, com cor e espessura (barra de edição › Formas).

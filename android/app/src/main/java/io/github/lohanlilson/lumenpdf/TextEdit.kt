@@ -76,6 +76,7 @@ object TextEdit {
         val x: Float, val y: Float, val cx: Float, val cy: Float, val advUser: Float,
         val tfs: Float, val adjust: Float,          // número a usar no TJ para manter o avanço do caractere removido
         val size: Float, val color: Int, val angle: Double, val th: Float, val fakeBold: Boolean, val sx: Float,
+        val bytes: ByteArray = ByteArray(0),
     ) {
         var styleKey = ""
     }
@@ -115,17 +116,33 @@ object TextEdit {
             try { super.showTransparencyGroup(form) } finally { depth-- }
         }
 
+        /** bytes de cada código da string em andamento (para redesenhar o caractere exatamente igual) */
+        private val pendingBytes = ArrayDeque<ByteArray>()
+
         override fun showText(string: ByteArray) {
             if (depth == 0) {
                 str++
                 idx = 0
+            }
+            pendingBytes.clear()
+            graphicsState.textState.font?.let { f ->
+                runCatching {
+                    val inp = java.io.ByteArrayInputStream(string)
+                    var pos = 0
+                    while (inp.available() > 0) {
+                        f.readCode(inp)
+                        val end = string.size - inp.available()
+                        pendingBytes.addLast(string.copyOfRange(pos, end))
+                        pos = end
+                    }
+                }
             }
             super.showText(string)
         }
 
         override fun showGlyph(trm: Matrix, font: PDFont, code: Int, unicode: String?, displacement: Vector) {
             super.showGlyph(trm, font, code, unicode, displacement)
-            if (depth != 0) return
+            if (depth != 0) { pendingBytes.removeFirstOrNull(); return }
             val gs = graphicsState
             val ts = gs.textState
             val tfs = ts.fontSize
@@ -141,7 +158,7 @@ object TextEdit {
                 trm.translateX, trm.translateY, a * u + c * v + trm.translateX, b * u + d * v + trm.translateY,
                 displacement.x * trm.scalingFactorX, tfs, if (tfs != 0f) -adv * 1000f / tfs else 0f,
                 trm.scalingFactorY, color, atan2(b.toDouble(), a.toDouble()), ts.horizontalScaling / 100f,
-                mode == RenderingMode.FILL_STROKE, trm.scalingFactorX)
+                mode == RenderingMode.FILL_STROKE, trm.scalingFactorX, pendingBytes.removeFirstOrNull() ?: ByteArray(0))
         }
 
         fun run(doc: PDDocument): List<Glyph> {
@@ -347,6 +364,93 @@ object TextEdit {
         val path = fallbackFile(style)
         val f = am.open(path).use { PDType0Font.load(doc, it, true) }
         return f to path.substringAfter('/').removeSuffix(".ttf")
+    }
+
+    /**
+     * Localizar e substituir numa página, mantendo o estilo de cada trecho. Em cada linha com ocorrências,
+     * o texto da primeira ocorrência até o fim da linha é redesenhado: os caracteres originais com os mesmos
+     * códigos e fontes (aparência idêntica), deslocados pela diferença de largura; o texto novo com a fonte
+     * do trecho (ou a equivalente de mesmas medidas). Devolve (objetos alterados, número de substituições).
+     */
+    fun replaceInPage(doc: PDDocument, pageIndex: Int, rx: Regex, repl: String): Pair<List<COSDictionary>, Int> {
+        val page = doc.getPage(pageIndex)
+        val all = Probe(pageIndex).run(doc).filter { abs(it.angle) < 0.01 }
+        if (all.isEmpty()) return emptyList<COSDictionary>() to 0
+        // linhas: mesma linha de base
+        val lines = ArrayList<MutableList<Glyph>>()
+        for (g in all.sortedWith(compareByDescending<Glyph> { it.y }.thenBy { it.x })) {
+            val ln = lines.lastOrNull()
+            if (ln != null && abs(ln[0].y - g.y) < maxOf(ln[0].size, g.size) * 0.3f) ln += g else lines += mutableListOf(g)
+        }
+        val removeAll = ArrayList<Glyph>()
+        class Draw(val glyph: Glyph?, val text: String?, val style: Glyph, val x: Float)
+        val draws = ArrayList<Draw>()
+        var count = 0
+        for (ln0 in lines) {
+            val ln = ln0.sortedBy { it.x }
+            val sb = StringBuilder(); val map = ArrayList<Int>()
+            for ((k, g) in ln.withIndex()) {
+                if (k > 0) {
+                    val p = ln[k - 1]
+                    val gap = g.x - (p.x + p.advUser)
+                    if (gap > g.size * 0.2f && p.unicode.isNotBlank() && g.unicode.isNotBlank()) { sb.append(' '); map += -1 }
+                }
+                for (ch in g.unicode.ifEmpty { "\u0000" }) { sb.append(ch); map += k }
+            }
+            val ms = rx.findAll(sb).toList()
+            if (ms.isEmpty()) continue
+            val startG = (ms[0].range.first..ms[0].range.last).map { map[it] }.firstOrNull { it >= 0 } ?: continue
+            var delta = 0f
+            var gi = startG
+            for (m in ms) {
+                val mg = (m.range.first..m.range.last).map { map[it] }.filter { it >= 0 }.distinct()
+                if (mg.isEmpty()) continue
+                while (gi < mg.first()) { draws += Draw(ln[gi], null, ln[gi], ln[gi].x + delta); gi++ }
+                val first = ln[mg.first()]; val last = ln[mg.last()]
+                val oldW = last.x + last.advUser - first.x
+                var newW = 0f
+                if (repl.isNotEmpty()) {
+                    val (font, _) = fontFor(doc, first, styleOf(first), repl)
+                    newW = runCatching { font.getStringWidth(repl) / 1000f * first.size * first.th }.getOrDefault(oldW)
+                    draws += Draw(null, repl, first, first.x + delta)
+                }
+                delta += newW - oldW
+                gi = mg.last() + 1
+                count++
+            }
+            while (gi < ln.size) { draws += Draw(ln[gi], null, ln[gi], ln[gi].x + delta); gi++ }
+            removeAll += ln.subList(startG, ln.size)
+        }
+        if (count == 0) return emptyList<COSDictionary>() to 0
+        val changed = ArrayList(removeGlyphs(doc, page, removeAll))
+        com.tom_roush.pdfbox.pdmodel.PDPageContentStream(doc, page,
+            com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+            for (dw in draws) {
+                val st = dw.style
+                val rgb = st.color
+                cs.beginText()
+                cs.setNonStrokingColor(PDColor(floatArrayOf(((rgb shr 16) and 0xFF) / 255f, ((rgb shr 8) and 0xFF) / 255f, (rgb and 0xFF) / 255f),
+                    PDDeviceRGB.INSTANCE))
+                if (abs(st.th - 1f) > 0.01f) cs.setHorizontalScaling(st.th * 100f)
+                if (dw.glyph != null) {
+                    cs.setFont(dw.glyph.font, dw.glyph.size)
+                    cs.setTextMatrix(Matrix.getTranslateInstance(dw.x, dw.glyph.y))
+                    val hex = dw.glyph.bytes.joinToString("") { "%02X".format(it) }
+                    @Suppress("DEPRECATION") cs.appendRawCommands("<$hex> Tj\n")
+                } else {
+                    val (font, _) = fontFor(doc, st, styleOf(st), dw.text!!)
+                    cs.setFont(font, st.size)
+                    cs.setTextMatrix(Matrix.getTranslateInstance(dw.x, st.y))
+                    cs.showText(dw.text)
+                }
+                cs.endText()
+            }
+        }
+        changed += page.cosObject
+        (page.cosObject.getDictionaryObject(COSName.CONTENTS) as? COSArray)?.let { it.isNeedToBeUpdated = true }
+        page.cosObject.getDictionaryObject(COSName.RESOURCES)?.let { (it as? COSDictionary)?.let { r -> changed += r; r.isNeedToBeUpdated = true
+            (r.getDictionaryObject(COSName.FONT) as? COSDictionary)?.isNeedToBeUpdated = true } }
+        return changed to count
     }
 
     /** Resultado: objetos alterados (gravação incremental) e a fonte usada. */

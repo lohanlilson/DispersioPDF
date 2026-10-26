@@ -175,6 +175,11 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var dlg by remember { mutableStateOf("") }
     var splitReq by remember { mutableStateOf<Pair<String, String>?>(null) }
     var reading by remember { mutableStateOf(false) }
+    var showComments by remember { mutableStateOf(false) }
+    var replaceDlg by remember { mutableStateOf(false) }
+    val fdfOut = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.fdf")) { u -> if (u != null) vm.exportComments(d, u) }
+    val fdfIn = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.importComments(d, u) }
+    val pickReplacement = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { u -> if (u != null) vm.replaceImage(d, u) }
     var blankList by remember { mutableStateOf<List<Int>?>(null) }
     val pdfaTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { u ->
         if (u != null) vm.saveAsPdfA(d, u)
@@ -293,6 +298,13 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     DropdownMenuItem(text = { Text("Detectar campos de formulário") }, onClick = { menu = false; guarded { vm.detectFields(d) } })
                                     DropdownMenuItem(text = { Text("Comparar com outro PDF…") }, onClick = { menu = false; pickCompare.launch(arrayOf("application/pdf")) })
                                     DropdownMenuItem(text = { Text("Modo leitura") }, onClick = { menu = false; reading = true })
+                                    DropdownMenuItem(text = { Text("Localizar e substituir…") }, onClick = { menu = false; replaceDlg = true })
+                                    DropdownMenuItem(text = { Text("Comentários…") }, onClick = { menu = false; showComments = true })
+                                    DropdownMenuItem(text = { Text("Criar links de sites e e-mails") }, onClick = { menu = false; vm.autolink(d) })
+                                    DropdownMenuItem(text = { Text("Exportar comentários (FDF)…") }, onClick = {
+                                        menu = false; fdfOut.launch(d.name.removeSuffix(".pdf").removeSuffix(".PDF") + "_comentarios.fdf")
+                                    })
+                                    DropdownMenuItem(text = { Text("Importar comentários (FDF)…") }, onClick = { menu = false; fdfIn.launch(arrayOf("*/*")) })
                                     DropdownMenuItem(text = { Text("Dividir…") }, onClick = { menu = false; dlg = "dividir" })
                                     DropdownMenuItem(text = { Text("Recortar margens…") }, onClick = { menu = false; dlg = "recortar" })
                                     DropdownMenuItem(text = { Text("Remover páginas em branco") }, onClick = {
@@ -396,6 +408,11 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                 d.placing = Placement(Tool.SIGN, pg, fx - w / 2, fy - h / 2, fx + w / 2, fy + h / 2, aspect)
                             }
                         }
+                        d.editing && d.tool == Tool.IMAGE -> vm.pickImage(d, pg, fx, fy)
+                        d.editing && d.tool == Tool.MEASURE && d.measureKind == "area" -> {
+                            val cur = d.areaPts
+                            d.areaPts = if (cur == null || cur.first != pg) pg to listOf(Offset(fx, fy)) else pg to (cur.second + Offset(fx, fy))
+                        }
                         d.editing && d.tool == Tool.HIGHLIGHT -> {
                             val pc = vm.engine.pageChars(d.pdf, pg)
                             val k = pc.charAt(fx, fy)
@@ -463,7 +480,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             ) {
                 LazyColumn(
                     state = list,
-                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.SHAPE && d.tool != Tool.REDACT && d.tool != Tool.CROP && !(d.editing && d.tool == Tool.HIGHLIGHT) && d.placing == null,
+                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.SHAPE && d.tool != Tool.REDACT && d.tool != Tool.CROP && d.tool != Tool.SNAP && !(d.tool == Tool.MEASURE && d.measureKind != "area") && !(d.editing && d.tool == Tool.HIGHLIGHT) && d.placing == null,
                     modifier = Modifier.width(with(density) { contentW.toDp() }).fillMaxHeight()
                         .graphicsLayer {
                             scaleX = gesture
@@ -492,6 +509,50 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                             Icon(if (r.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (r.playing) "Pausar" else "Continuar")
                         }
                         IconButton({ r.release(); reader = null }) { Icon(Icons.Filled.Stop, "Parar leitura") }
+                    }
+                }
+            }
+            d.areaPts?.let { (_, pts) ->
+                Box(Modifier.align(Alignment.BottomCenter)) {
+                    androidx.compose.material3.Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
+                        Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${pts.size} ponto(s)", modifier = Modifier.padding(horizontal = 8.dp))
+                            TextButton({ d.areaPts = d.areaPts?.let { (p, l) -> if (l.size > 1) p to l.dropLast(1) else null } }) { Text("Desfazer ponto") }
+                            TextButton({ vm.addMeasureArea(d) }, enabled = pts.size >= 3) { Text("Concluir área") }
+                        }
+                    }
+                }
+            }
+            d.snapFile?.let { f ->
+                Box(Modifier.align(Alignment.BottomCenter)) {
+                    androidx.compose.material3.Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
+                        Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Área capturada", modifier = Modifier.padding(horizontal = 8.dp))
+                            TextButton({ vm.saveToGallery(f); d.snapFile = null }) { Text("Salvar na galeria") }
+                            TextButton({
+                                val u = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+                                ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+                                    .setType("image/png").putExtra(android.content.Intent.EXTRA_STREAM, u)
+                                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION), "Compartilhar imagem"))
+                                d.snapFile = null
+                            }) { Text("Compartilhar") }
+                            TextButton({ d.snapFile = null }) { Text("Fechar") }
+                        }
+                    }
+                }
+            }
+            d.placing?.takeIf { it.kind == Tool.IMAGE }?.let { pl ->
+                Box(Modifier.align(Alignment.BottomCenter)) {
+                    androidx.compose.material3.Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
+                        Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton({ d.placing = null; vm.moveImage(d, pl) }) { Text("Aplicar") }
+                            TextButton({ pickReplacement.launch("image/*") }) { Text("Trocar") }
+                            TextButton({ vm.deleteImage(d) }) { Text("Excluir") }
+                            TextButton({ d.placing = null; d.selImage = null }) { Text("Cancelar") }
+                        }
                     }
                 }
             }
@@ -662,6 +723,30 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             dismissButton = { TextButton({ blankList = null }) { Text("Cancelar") } })
     }
     if (reading) ReadingMode(vm, d) { reading = false }
+    if (showComments) CommentsSheet(d, onDismiss = { showComments = false }) { a ->
+        showComments = false
+        d.editing = true; d.tool = Tool.NONE; d.selAnnot = a
+        scope.launch { list.animateScrollToItem(a.page) }
+    }
+    if (replaceDlg) ReplaceDialog(onDismiss = { replaceDlg = false }) { f, r, c, w ->
+        replaceDlg = false
+        guarded { vm.replaceAll(d, f, r, c, w) }
+    }
+    d.calLen?.let { len ->
+        TextInputDialog("Calibrar escala", "Medida real dessa linha (ex.: 3,5 m)", "", multiline = false,
+            onDismiss = { d.calLen = null }) { t, _ ->
+            d.calLen = null
+            val m = Regex("""\s*([\d.,]+)\s*(km|m|cm|mm)?\s*""").matchEntire(t.lowercase())
+            val v = m?.groupValues?.get(1)?.let { if (',' in it) it.replace(".", "").replace(',', '.') else it }?.toDoubleOrNull()
+            if (m == null || v == null || v <= 0) vm.toast = "Não entendi a medida. Use, por exemplo: 3,5 m"
+            else {
+                val unit = m.groupValues[2].ifEmpty { "m" }
+                vm.setScale(d, MeasureScale(v / len, unit, "calibrada (${t.trim()})"))
+                d.measureKind = "dist"
+                vm.toast = "Escala calibrada. Agora é só medir."
+            }
+        }
+    }
     confirmSigned?.let { act ->
         AlertDialog(onDismissRequest = { confirmSigned = null }, title = { Text("Documento assinado") },
             text = { Text("Esta alteração regrava o documento inteiro e invalida as assinaturas digitais. Continuar?") },
@@ -801,6 +886,40 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                             onDragEnd = {
                                 val last = d.redactions.lastOrNull()
                                 if (last != null && (last.second.r - last.second.l) * pageW < 8) d.redactions.removeAt(d.redactions.lastIndex)
+                            },
+                        )
+                    } else if (d.editing && d.tool == Tool.MEASURE && d.measureKind != "area") {
+                        // medir distância (ou calibrar): arrastar de um ponto ao outro
+                        detectDragGestures(
+                            onDragStart = { o -> val p = Offset(o.x / pageW, o.y / pageW); d.measureDraft = Triple(i, p, p) },
+                            onDrag = { ch, _ ->
+                                ch.consume()
+                                d.measureDraft?.let { (pg, a, _) -> d.measureDraft = Triple(pg, a, Offset(ch.position.x / pageW, ch.position.y / pageW)) }
+                            },
+                            onDragEnd = {
+                                val m = d.measureDraft
+                                if (m == null || (m.third - m.second).getDistance() * pageW < 12f) d.measureDraft = null
+                                else if (d.measureKind == "cal") scope.launch {
+                                    val p = vm.measurePts(d, m.first, listOf(m.second, m.third))
+                                    d.calLen = distPts(p[0], p[1], p[2], p[3])
+                                    d.measureDraft = null
+                                } else vm.addMeasureLine(d, m.first, m.second, m.third)
+                            },
+                            onDragCancel = { d.measureDraft = null },
+                        )
+                    } else if (d.editing && d.tool == Tool.SNAP) {
+                        var start = Offset.Zero
+                        detectDragGestures(
+                            onDragStart = { o -> start = Offset(o.x / pageW, o.y / pageW); d.snapDraft = i to FracRect(start.x, start.y, start.x, start.y) },
+                            onDrag = { ch, _ ->
+                                ch.consume()
+                                val p = Offset(ch.position.x / pageW, ch.position.y / pageW)
+                                d.snapDraft = i to FracRect(minOf(start.x, p.x), minOf(start.y, p.y), maxOf(start.x, p.x), maxOf(start.y, p.y))
+                            },
+                            onDragEnd = {
+                                val sd = d.snapDraft
+                                d.snapDraft = null
+                                if (sd != null && (sd.second.r - sd.second.l) * pageW > 20 && (sd.second.b - sd.second.t) * pageW > 20) vm.snapshot(d, sd.first, sd.second)
                             },
                         )
                     } else if (d.tool == Tool.CROP) {
@@ -949,6 +1068,29 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                     drawRect(dim, Offset(0f, r.b * w), Size(w, h - r.b * w))
                     drawRect(dim, Offset(0f, r.t * w), Size(r.l * w, (r.b - r.t) * w))
                     drawRect(dim, Offset(r.r * w, r.t * w), Size(w - r.r * w, (r.b - r.t) * w))
+                    drawRect(Color(0xFF6D3CF0), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w), style = Stroke(3f))
+                }
+            }
+            val md = d.measureDraft?.takeIf { it.first == i }
+            val ap = d.areaPts?.takeIf { it.first == i }
+            val sn = d.snapDraft?.takeIf { it.first == i }
+            if (md != null || ap != null || sn != null) Canvas(Modifier.fillMaxSize()) {
+                val w = size.width
+                val blue = Color(0xFF1473E6)
+                md?.let { (_, a, b) ->
+                    drawLine(blue, a * w, b * w, 3f, StrokeCap.Round)
+                    drawCircle(blue, 6f, a * w); drawCircle(blue, 6f, b * w)
+                }
+                ap?.second?.let { pts ->
+                    if (pts.size >= 2) {
+                        val path = Path().apply { moveTo(pts[0].x * w, pts[0].y * w); pts.drop(1).forEach { lineTo(it.x * w, it.y * w) }; close() }
+                        drawPath(path, blue.copy(alpha = 0.18f))
+                        drawPath(path, blue, style = Stroke(3f))
+                    }
+                    pts.forEach { drawCircle(blue, 7f, it * w) }
+                }
+                sn?.second?.let { r ->
+                    drawRect(Color(0x226D3CF0), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w))
                     drawRect(Color(0xFF6D3CF0), Offset(r.l * w, r.t * w), Size((r.r - r.l) * w, (r.b - r.t) * w), style = Stroke(3f))
                 }
             }

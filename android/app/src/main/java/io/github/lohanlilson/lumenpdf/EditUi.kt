@@ -86,6 +86,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.Screenshot
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
@@ -124,11 +129,19 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 Tool.EDITTEXT -> "Toque numa linha de texto para alterá-la"
                 Tool.REDACT -> "Arraste sobre o que deve ser apagado (tarja preta definitiva)"
                 Tool.CROP -> "Arraste para marcar a área que deve ficar (o resto da página é cortado)"
+                Tool.MEASURE -> when (d.measureKind) {
+                    "area" -> "Toque nos cantos da área e depois em Concluir · escala ${d.scale.label}"
+                    "cal" -> "Arraste sobre uma medida conhecida da planta para calibrar"
+                    else -> "Arraste para medir a distância · escala ${d.scale.label}"
+                }
+                Tool.SNAP -> "Arraste sobre a área para capturar como imagem"
+                Tool.IMAGE -> "Toque numa imagem para mover, redimensionar, trocar ou excluir"
             }
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
             if (d.tool == Tool.INK) InkOptions(vm, d)
             if (d.tool == Tool.SHAPE) ShapeOptions(d)
+            if (d.tool == Tool.MEASURE) MeasureOptions(vm, d)
             if (d.tool == Tool.REDACT) RedactOptions(vm, d)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -144,6 +157,9 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 ToolButton(Icons.Filled.EditNote, "Editar texto", d.tool == Tool.EDITTEXT) { pick(Tool.EDITTEXT) }
                 ToolButton(Icons.Filled.Gesture, "Desenhar", d.tool == Tool.INK) { pick(Tool.INK) }
                 ToolButton(Icons.Filled.CropSquare, "Formas", d.tool == Tool.SHAPE) { pick(Tool.SHAPE) }
+                ToolButton(Icons.Filled.Straighten, "Medir", d.tool == Tool.MEASURE) { vm.loadScale(d); pick(Tool.MEASURE) }
+                ToolButton(Icons.Filled.Image, "Imagens", d.tool == Tool.IMAGE) { pick(Tool.IMAGE) }
+                ToolButton(Icons.Filled.Screenshot, "Capturar", d.tool == Tool.SNAP) { pick(Tool.SNAP) }
                 ToolButton(Icons.Filled.StickyNote2, "Nota", d.tool == Tool.NOTE) { pick(Tool.NOTE) }
                 ToolButton(Icons.Filled.TextFields, "Texto", d.tool == Tool.TEXT) { pick(Tool.TEXT) }
                 ToolButton(Icons.Filled.Check, "Marcar ✓", d.tool == Tool.CHECK) { pick(Tool.CHECK) }
@@ -156,6 +172,57 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun MeasureOptions(vm: AppVm, d: ViewerDoc) {
+    var scaleDlg by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        listOf("dist" to "Distância", "area" to "Área").forEach { (k, l) ->
+            TextButton({ d.measureKind = k; d.areaPts = null; d.measureDraft = null },
+                colors = if (d.measureKind == k) ButtonDefaults.textButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                else ButtonDefaults.textButtonColors()) { Text(l) }
+        }
+        Spacer(Modifier.weight(1f))
+        TextButton({ scaleDlg = true }) { Text("Escala: ${d.scale.label}") }
+    }
+    if (scaleDlg) ScaleDialog(d.scale, onDismiss = { scaleDlg = false }, onCalibrate = { scaleDlg = false; d.measureKind = "cal" }) {
+        scaleDlg = false; vm.setScale(d, it)
+    }
+}
+
+@Composable
+fun ScaleDialog(cur: MeasureScale, onDismiss: () -> Unit, onCalibrate: () -> Unit, onOk: (MeasureScale) -> Unit) {
+    var mode by remember { mutableStateOf("plan") }
+    var n by remember { mutableStateOf("100") }
+    var unit by remember { mutableStateOf("m") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Escala das medidas") },
+        text = {
+            Column {
+                Text("Atual: ${cur.label}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(mode == "plan", { mode = "plan" }); Text("Planta 1 :")
+                    OutlinedTextField(n, { n = it.filter(Char::isDigit) }, singleLine = true, modifier = Modifier.width(110.dp).padding(start = 6.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(mode == "paper", { mode = "paper" }); Text("Tamanho real do papel") }
+                Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(mode == "cal", { mode = "cal" }); Text("Calibrar com uma medida conhecida") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Unidade:")
+                    listOf("m", "cm", "mm").forEach { u -> TextButton({ unit = u }) { Text(if (unit == u) "[$u]" else u) } }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton({
+                when (mode) {
+                    "cal" -> onCalibrate()
+                    "paper" -> onOk(MeasureScale.PAPER.let { if (unit == "cm") it else MeasureScale(0.0254 / 72 * mapOf("m" to 1.0, "cm" to 100.0, "mm" to 1000.0)[unit]!!, unit, "tamanho real do papel") })
+                    else -> onOk(MeasureScale.plan(n.toIntOrNull()?.coerceAtLeast(1) ?: 100, unit))
+                }
+            }) { Text("OK") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("Cancelar") } })
 }
 
 @Composable
@@ -363,6 +430,7 @@ private fun saveSignature(ctx: Context, strokes: List<List<Offset>>, area: IntSi
 @Composable
 fun PlacementBar(d: ViewerDoc, onConfirm: (Placement) -> Unit) {
     val p = d.placing ?: return
+    if (p.kind == Tool.IMAGE) return
     Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
         Row(Modifier.padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {

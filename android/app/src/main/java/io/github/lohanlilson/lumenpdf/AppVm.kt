@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Tool { NONE, HIGHLIGHT, INK, SHAPE, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT, CROP }
+enum class Tool { NONE, HIGHLIGHT, INK, SHAPE, MEASURE, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT, CROP, SNAP, IMAGE }
 
 /** Comparação aberta: as duas versões e a lista de alterações. */
 class CompareState(val a: OpenPdf, val b: OpenPdf, val nameA: String, val nameB: String, val changes: List<Change>,
@@ -66,7 +66,19 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var shapeKind by mutableStateOf("Square")
     var shapeDraft by mutableStateOf<Triple<Int, Offset, Offset>?>(null)
     /** área desenhada com a ferramenta Recortar (página, retângulo em frações) */
-    var cropDraft by mutableStateOf<Pair<Int, FracRect>?>(null)   // (página, pontos em frações da largura)
+    var cropDraft by mutableStateOf<Pair<Int, FracRect>?>(null)
+    /** captura de área (página, retângulo) e o arquivo gerado */
+    var snapDraft by mutableStateOf<Pair<Int, FracRect>?>(null)
+    var snapFile by mutableStateOf<java.io.File?>(null)
+    /** medidas: "dist" | "area" | "cal"; linha em andamento; pontos da área */
+    var measureKind by mutableStateOf("dist")
+    var measureDraft by mutableStateOf<Triple<Int, Offset, Offset>?>(null)
+    var areaPts by mutableStateOf<Pair<Int, List<Offset>>?>(null)
+    var scale by mutableStateOf(MeasureScale.PAPER)
+    /** comprimento (pontos do PDF) da linha desenhada para calibrar a escala */
+    var calLen by mutableStateOf<Double?>(null)
+    /** imagem selecionada (ferramenta Imagens) */
+    var selImage by mutableStateOf<PageImage?>(null)   // (página, pontos em frações da largura)
     var busy by mutableStateOf(false)
     var signatures by mutableStateOf<List<SigInfo>>(emptyList())
     var placing by mutableStateOf<Placement?>(null)
@@ -596,6 +608,182 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         } finally {
             progress = null
         }
+    }
+
+    // ------------------------------------------------------------ links, substituir, comentários, medidas, imagens
+    private val urlRx = Regex("""(?:https?://|www\.)[^\s<>()"']+[^\s<>()"'.,;:!?)]""", RegexOption.IGNORE_CASE)
+    private val mailRx = Regex("""[\w.+-]+@[\w-]+(?:\.[\w-]+)+""")
+
+    fun autolink(d: ViewerDoc) = viewModelScope.launch {
+        try {
+            val items = HashMap<Int, MutableList<Pair<String, List<android.graphics.RectF>>>>()
+            for (p in 0 until d.pageCount) {
+                progress = "Procurando endereços… página ${p + 1} de ${d.pageCount}"
+                val pc = engine.pageChars(d.pdf, p)
+                for (m in urlRx.findAll(pc.text) + mailRx.findAll(pc.text)) {
+                    val u = m.value
+                    val uri = when { '@' in u && !u.contains("://") -> "mailto:$u"; u.startsWith("http", true) -> u; else -> "https://$u" }
+                    items.getOrPut(p) { ArrayList() } += uri to pc.selection(m.range.first, m.range.last).pdfRects
+                }
+            }
+            progress = null
+            val n = items.values.sumOf { l -> l.sumOf { it.second.size } }
+            if (n == 0) { toast = "Nenhum endereço de site ou e-mail encontrado."; return@launch }
+            edit(d, "criar os links") { doc -> items.flatMap { (p, l) -> MoreEdit.links(doc, p, l) } }.join()
+            toast = "Links criados para ${items.values.sumOf { it.size }} endereço(s). Dá para desfazer."
+        } finally {
+            progress = null
+        }
+    }
+
+    fun replaceAll(d: ViewerDoc, find: String, repl: String, matchCase: Boolean, wholeWord: Boolean) = viewModelScope.launch {
+        if (find.isEmpty()) return@launch
+        var pat = Regex.escape(find)
+        if (wholeWord) pat = "(?<![\\p{L}\\p{N}_])$pat(?![\\p{L}\\p{N}_])"
+        val rx = if (matchCase) Regex(pat) else Regex(pat, RegexOption.IGNORE_CASE)
+        val norm = { x: String -> x.replace(Regex("\\s+"), "") }
+        val pages = (0 until d.pageCount).filter { p ->
+            val t = engine.pageChars(d.pdf, p).text
+            if (matchCase) norm(t).contains(norm(find)) else norm(t).contains(norm(find), ignoreCase = true)
+        }
+        if (pages.isEmpty()) { toast = "“$find” não foi encontrado."; return@launch }
+        var count = 0
+        progress = "Substituindo…"
+        try {
+            edit(d, "substituir o texto") { doc ->
+                pages.flatMap { p -> TextEdit.replaceInPage(doc, p, rx, repl).let { (ch, n) -> count += n; ch } }
+            }.join()
+        } finally {
+            progress = null
+        }
+        toast = if (count == 0) "“$find” não foi encontrado no texto editável." else "$count substituição(ões). Dá para desfazer."
+    }
+
+    fun exportComments(d: ViewerDoc, target: Uri) = viewModelScope.launch {
+        try {
+            val app = getApplication<Application>()
+            val src = workFile(d, "fdf-origem.pdf")
+            val n = withContext(Dispatchers.IO) {
+                PDDocument.load(src, d.password ?: "").use { doc ->
+                    app.contentResolver.openOutputStream(target, "wt")!!.use { MoreEdit.exportFdf(doc, d.name, it) }
+                }
+            }
+            toast = if (n == 0) "O documento não tem comentários (o arquivo ficou vazio)." else "$n comentário(s) exportado(s)."
+        } catch (e: Exception) {
+            error = "Não foi possível exportar.\n${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    fun importComments(d: ViewerDoc, src: Uri) = viewModelScope.launch {
+        try {
+            val bytes = withContext(Dispatchers.IO) { getApplication<Application>().contentResolver.openInputStream(src)!!.use { it.readBytes() } }
+            var n = 0
+            edit(d, "importar os comentários") { doc -> MoreEdit.importFdf(doc, java.io.ByteArrayInputStream(bytes)).let { (ch, k) -> n = k; ch } }.join()
+            toast = if (n == 0) "Nenhum comentário encontrado nesse arquivo." else "$n comentário(s) importado(s). Dá para desfazer."
+        } catch (e: Exception) {
+            error = "Não foi possível importar.\n${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /** Recorta a área da página como imagem (alta resolução). */
+    fun snapshot(d: ViewerDoc, page: Int, r: FracRect) = viewModelScope.launch {
+        try {
+            val full = engine.render(d.pdf, page, 2400)
+            val w = full.width
+            val x = (r.l * w).toInt().coerceIn(0, w - 1); val y = (r.t * w).toInt().coerceIn(0, full.height - 1)
+            val cw = ((r.r - r.l) * w).toInt().coerceIn(1, w - x); val ch = ((r.b - r.t) * w).toInt().coerceIn(1, full.height - y)
+            val bmp = android.graphics.Bitmap.createBitmap(full, x, y, cw, ch)
+            val f = withContext(Dispatchers.IO) {
+                File(File(getApplication<Application>().cacheDir, "capturas").apply { mkdirs() },
+                    "${d.name.removeSuffix(".pdf").removeSuffix(".PDF")}_pag${page + 1}.png").also { out ->
+                    out.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                }
+            }
+            d.snapFile = f
+        } catch (e: Exception) {
+            error = "Não foi possível capturar.\n${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    fun saveToGallery(f: File) = viewModelScope.launch(Dispatchers.IO) {
+        val app = getApplication<Application>()
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, f.name)
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+            if (android.os.Build.VERSION.SDK_INT >= 29) put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Lumen PDF")
+        }
+        val uri = app.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        if (uri != null) app.contentResolver.openOutputStream(uri)?.use { o -> f.inputStream().use { it.copyTo(o) } }
+        withContext(Dispatchers.Main) { toast = "Imagem salva na galeria (Imagens › Lumen PDF)" }
+    }
+
+    fun loadScale(d: ViewerDoc) {
+        d.scale = MeasureScale.parse(getApplication<Application>().getSharedPreferences("escalas", 0).getString(d.uri, null)) ?: MeasureScale.PAPER
+    }
+
+    fun setScale(d: ViewerDoc, s: MeasureScale) {
+        d.scale = s
+        getApplication<Application>().getSharedPreferences("escalas", 0).edit().putString(d.uri, s.store()).apply()
+    }
+
+    /** Linha de medida (ou calibração) entre dois pontos em frações. Devolve o comprimento em pontos do PDF. */
+    suspend fun measurePts(d: ViewerDoc, page: Int, pts: List<Offset>): FloatArray = engine.pdfPoints(d.pdf, page, pts.map { it.x to it.y })
+
+    fun addMeasureLine(d: ViewerDoc, page: Int, a: Offset, b: Offset) = viewModelScope.launch {
+        val p = measurePts(d, page, listOf(a, b))
+        val len = distPts(p[0], p[1], p[2], p[3]) * d.scale.factor
+        val text = MoreEdit.fmtMeasure(len, d.scale.unit)
+        edit(d, "medir") { MoreEdit.measureLine(it, page, p[0], p[1], p[2], p[3], text, 0xFF1473E6) }.join()
+        d.measureDraft = null
+        toast = "Distância: $text (escala ${d.scale.label})"
+    }
+
+    fun addMeasureArea(d: ViewerDoc) = viewModelScope.launch {
+        val (page, pts) = d.areaPts ?: return@launch
+        if (pts.size < 3) return@launch
+        val p = measurePts(d, page, pts)
+        val pp = (pts.indices).map { p[it * 2] to p[it * 2 + 1] }
+        val area = MoreEdit.polygonArea(pp) * d.scale.factor * d.scale.factor
+        val text = MoreEdit.fmtMeasure(area, d.scale.unit, area = true)
+        edit(d, "medir a área") { MoreEdit.measureArea(it, page, pp, text, 0xFF1473E6) }.join()
+        d.areaPts = null
+        toast = "Área: $text (escala ${d.scale.label})"
+    }
+
+    /** Imagem sob o dedo (ferramenta Imagens): seleciona e abre a caixa de mover/redimensionar. */
+    fun pickImage(d: ViewerDoc, page: Int, fx: Float, fy: Float) = viewModelScope.launch {
+        val imgs = runCatching { withReadDoc(d) { PageImages.list(it, page) } }.getOrDefault(emptyList())
+        if (imgs.isEmpty()) { toast = "Nenhuma imagem nesta página."; return@launch }
+        val fr = engine.fracOfAll(d.pdf, imgs.map { page to it.rect })
+        val k = fr.indices.lastOrNull { fx in fr[it].l..fr[it].r && fy in fr[it].t..fr[it].b }
+        if (k == null) { toast = "Toque em cima de uma imagem."; return@launch }
+        val r = fr[k]
+        d.selImage = imgs[k]
+        d.placing = Placement(Tool.IMAGE, page, r.l, r.t, r.r, r.b, (r.r - r.l) / (r.b - r.t).coerceAtLeast(0.001f))
+    }
+
+    fun moveImage(d: ViewerDoc, p: Placement) = viewModelScope.launch {
+        val img = d.selImage ?: return@launch
+        val pts = engine.pdfPoints(d.pdf, p.page, listOf(p.l to p.b, p.r to p.t))
+        edit(d, "mover a imagem") { PageImages.move(it, img, minOf(pts[0], pts[2]), minOf(pts[1], pts[3]), maxOf(pts[0], pts[2]), maxOf(pts[1], pts[3])) }.join()
+        d.selImage = null
+    }
+
+    fun deleteImage(d: ViewerDoc) = viewModelScope.launch {
+        val img = d.selImage ?: return@launch
+        d.placing = null
+        edit(d, "excluir a imagem") { PageImages.delete(it, img) }.join()
+        d.selImage = null
+    }
+
+    fun replaceImage(d: ViewerDoc, u: Uri) = viewModelScope.launch {
+        val img = d.selImage ?: return@launch
+        val bmp = withContext(Dispatchers.IO) {
+            getApplication<Application>().contentResolver.openInputStream(u)!!.use { android.graphics.BitmapFactory.decodeStream(it) }
+        } ?: run { error = "Não foi possível ler a imagem."; return@launch }
+        d.placing = null
+        edit(d, "trocar a imagem") { PageImages.replace(it, img, bmp) }.join()
+        d.selImage = null
     }
 
     /** Copia um arquivo escolhido (content://) para o cache e devolve o caminho. */
