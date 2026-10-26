@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Tool { NONE, HIGHLIGHT, INK, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT }
+enum class Tool { NONE, HIGHLIGHT, INK, SHAPE, NOTE, TEXT, CHECK, CROSS, SIGN, CERT, EDITTEXT, REDACT }
 
 /** Comparação aberta: as duas versões e a lista de alterações. */
 class CompareState(val a: OpenPdf, val b: OpenPdf, val nameA: String, val nameB: String, val changes: List<Change>,
@@ -61,7 +61,10 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var fields by mutableStateOf<List<Pair<FormField, FracRect>>>(emptyList())
     var inkColor by mutableStateOf(0xFFD7373F)
     var inkWidth by mutableFloatStateOf(2f)
-    val strokes = mutableStateListOf<Pair<Int, List<Offset>>>()   // (página, pontos em frações da largura)
+    val strokes = mutableStateListOf<Pair<Int, List<Offset>>>()
+    /** forma escolhida: Square | Circle | Arrow; e a que está sendo desenhada (página, início, fim em frações) */
+    var shapeKind by mutableStateOf("Square")
+    var shapeDraft by mutableStateOf<Triple<Int, Offset, Offset>?>(null)   // (página, pontos em frações da largura)
     var busy by mutableStateOf(false)
     var signatures by mutableStateOf<List<SigInfo>>(emptyList())
     var placing by mutableStateOf<Placement?>(null)
@@ -217,6 +220,16 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         d.pdf = newPdf
         engine.close(old)
         loadFields(d, parsed)
+    }
+
+    /** Grava a forma desenhada (pontos em frações da largura da página). */
+    fun addShape(d: ViewerDoc, page: Int, a: Offset, b: Offset) = viewModelScope.launch {
+        val pts = engine.pdfPoints(d.pdf, page, listOf(a.x to a.y, b.x to b.y))
+        val kind = d.shapeKind
+        val color = d.inkColor
+        val width = d.inkWidth
+        edit(d, "desenhar a forma") { Editor.shape(it, page, kind, pts[0], pts[1], pts[2], pts[3], color, width) }.join()
+        d.shapeDraft = null
     }
 
     /** Destaque/sublinhado/tachado do trecho selecionado. Aparece na hora; o arquivo é gravado em seguida. */
@@ -423,6 +436,69 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         out
     }
 
+    /** Divide o documento e grava as partes na pasta escolhida (árvore do Android). */
+    fun split(d: ViewerDoc, mode: String, value: String, tree: Uri) = viewModelScope.launch {
+        val app = getApplication<Application>()
+        try {
+            progress = "Dividindo…"
+            val files = withContext(Dispatchers.IO) {
+                val src = d.work ?: File(app.cacheDir, "dividir-origem.pdf").also { f ->
+                    app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { i -> f.outputStream().use { i.copyTo(it) } }
+                }
+                val groups = Editor.splitGroups(src, d.password, mode, value)
+                if (groups.size < 2) return@withContext emptyList()
+                val tmp = File(app.cacheDir, "dividir").apply { deleteRecursively() }
+                val parts = Editor.split(src, d.password, groups, tmp, d.name.removeSuffix(".pdf").removeSuffix(".PDF"))
+                val r = app.contentResolver
+                val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,
+                    android.provider.DocumentsContract.getTreeDocumentId(tree))
+                parts.map { f ->
+                    val u = android.provider.DocumentsContract.createDocument(r, parent, "application/pdf", f.name)
+                        ?: error("Não foi possível criar ${f.name} na pasta")
+                    r.openOutputStream(u)!!.use { o -> f.inputStream().use { it.copyTo(o) } }
+                    f.length()
+                }
+            }
+            toast = if (files.isEmpty()) "Nada a dividir: o resultado seria um arquivo só."
+                else "${files.size} arquivos salvos na pasta escolhida (maior: %.1f MB)".format(files.max() / 1048576.0)
+        } catch (e: Exception) {
+            error = "Não foi possível dividir.\n${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            progress = null
+        }
+    }
+
+    /** Volta o documento para uma versão anterior guardada (vira uma edição: dá para desfazer; salve para manter). */
+    fun restoreVersion(d: ViewerDoc, backup: File) = viewModelScope.launch {
+        editLock.lock()
+        d.busy = true
+        try {
+            val app = getApplication<Application>()
+            val src = d.work ?: withContext(Dispatchers.IO) {
+                val dir = editDir(d).apply { deleteRecursively(); mkdirs() }
+                File(dir, "v0.pdf").also { f -> app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { i -> f.outputStream().use { i.copyTo(it) } } }
+            }
+            currentSizes(d)?.let { d.sizesOf[src.path] = it }
+            d.version++
+            val dst = File(src.parentFile, "v${d.version}.pdf")
+            withContext(Dispatchers.IO) { backup.copyTo(dst, overwrite = true) }
+            d.undo.addLast(src)
+            d.redo.clear()
+            d.work = dst
+            d.dirty = true
+            d.lastBitmaps.evictAll()
+            reopen(d, dst)
+            toast = "Versão anterior restaurada. Toque em Salvar para mantê-la (ou Desfazer)."
+        } catch (e: Exception) {
+            error = "Não foi possível restaurar.\n${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            d.busy = false
+            d.canUndo = d.undo.isNotEmpty()
+            d.canRedo = d.redo.isNotEmpty()
+            editLock.unlock()
+        }
+    }
+
     /** Copia um arquivo escolhido (content://) para o cache e devolve o caminho. */
     suspend fun cacheCopy(u: Uri, name: String = "inserir.pdf"): File = withContext(Dispatchers.IO) {
         val f = File(getApplication<Application>().cacheDir, name)
@@ -482,6 +558,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         val ok = runCatching {
             withContext(Dispatchers.IO) {
                 val u = Uri.parse(d.uri)
+                runCatching { Versions.backup(app, d.uri) }   // versão anterior guardada (menu › Versões anteriores)
                 if (u.scheme == "file") f.copyTo(File(u.path!!), overwrite = true)
                 else app.contentResolver.openOutputStream(u, "wt")!!.use { o -> f.inputStream().use { it.copyTo(o) } }
             }

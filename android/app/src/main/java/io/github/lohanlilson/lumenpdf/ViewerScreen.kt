@@ -172,7 +172,13 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var editLine by remember { mutableStateOf<TextLine?>(null) }
     var editRun by remember { mutableStateOf<TextRun?>(null) }
     var editPt by remember { mutableStateOf(android.graphics.PointF()) }
-    var dlg by remember { mutableStateOf("") }           // comprimir | senha | marca | numeros | prefs
+    var dlg by remember { mutableStateOf("") }
+    var splitReq by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        val r = splitReq
+        splitReq = null
+        if (tree != null && r != null) vm.split(d, r.first, r.second, tree)
+    }           // comprimir | senha | marca | numeros | prefs
     var confirmSigned by remember { mutableStateOf<(() -> Unit)?>(null) }
     val pickCompare = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.compareWith(d, u) }
     var convertKind by remember { mutableStateOf("") }
@@ -281,6 +287,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     })
                                     DropdownMenuItem(text = { Text("Detectar campos de formulário") }, onClick = { menu = false; guarded { vm.detectFields(d) } })
                                     DropdownMenuItem(text = { Text("Comparar com outro PDF…") }, onClick = { menu = false; pickCompare.launch(arrayOf("application/pdf")) })
+                                    DropdownMenuItem(text = { Text("Dividir…") }, onClick = { menu = false; dlg = "dividir" })
                                     DropdownMenuItem(text = { Text("Comprimir…") }, onClick = { menu = false; dlg = "comprimir" })
                                     DropdownMenuItem(text = { Text("Proteger com senha…") }, onClick = { menu = false; dlg = "senha" })
                                     DropdownMenuItem(text = { Text("Marca d'água…") }, onClick = { menu = false; dlg = "marca" })
@@ -288,6 +295,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     DropdownMenuItem(text = { Text("Preferências…") }, onClick = { menu = false; dlg = "prefs" })
                                     DropdownMenuItem(text = { Text("Ir para a página…") }, onClick = { menu = false; gotoDialog = true })
                                     DropdownMenuItem(text = { Text("Salvar uma cópia…") }, onClick = { menu = false; saveAs.launch(d.name) })
+                                    DropdownMenuItem(text = { Text("Versões anteriores…") }, onClick = { menu = false; dlg = "versoes" })
                                     DropdownMenuItem(text = { Text("Seu nome nos comentários…") }, onClick = { menu = false; nameDialog = true })
                                     DropdownMenuItem(text = { Text("Redesenhar rubrica…") }, onClick = { menu = false; signPad = true })
                                     DropdownMenuItem(text = { Text("Copiar texto da página") },
@@ -433,7 +441,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             ) {
                 LazyColumn(
                     state = list,
-                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.REDACT && !(d.editing && d.tool == Tool.HIGHLIGHT) && d.placing == null,
+                    userScrollEnabled = d.tool != Tool.INK && d.tool != Tool.SHAPE && d.tool != Tool.REDACT && !(d.editing && d.tool == Tool.HIGHLIGHT) && d.placing == null,
                     modifier = Modifier.width(with(density) { contentW.toDp() }).fillMaxHeight()
                         .graphicsLayer {
                             scaleX = gesture
@@ -564,6 +572,12 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             guarded { vm.pages(d, "numerar as páginas") { doc, _ -> Editor.pageNumbers(doc, f) } }
         }
         "prefs" -> SettingsScreen(vm) { dlg = "" }
+        "versoes" -> VersionsDialog(d, onDismiss = { dlg = "" }) { f -> dlg = ""; vm.restoreVersion(d, f) }
+        "dividir" -> SplitDialog(d.pageCount, onDismiss = { dlg = "" }) { m, v ->
+            dlg = ""
+            splitReq = m to v
+            pickFolder.launch(null)
+        }
         "meusdados" -> MyDataDialog { dlg = if (Autofill.hasAny(ctx)) "autofill" else "" }
         "autofill" -> AutofillDialog(remember(d.fields) { Autofill.plan(d.fields.map { it.first }, Autofill.load(ctx)) },
             onEditData = { dlg = "meusdados" }, onDismiss = { dlg = "" }) { fills ->
@@ -728,6 +742,21 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
                                 if (last != null && (last.second.r - last.second.l) * pageW < 8) d.redactions.removeAt(d.redactions.lastIndex)
                             },
                         )
+                    } else if (d.editing && d.tool == Tool.SHAPE) {
+                        // formas: arrastar do início ao fim; ao soltar, grava
+                        detectDragGestures(
+                            onDragStart = { o -> val p = Offset(o.x / pageW, o.y / pageW); d.shapeDraft = Triple(i, p, p) },
+                            onDrag = { ch, _ ->
+                                ch.consume()
+                                d.shapeDraft?.let { (pg, a, _) -> d.shapeDraft = Triple(pg, a, Offset(ch.position.x / pageW, ch.position.y / pageW)) }
+                            },
+                            onDragEnd = {
+                                val sd = d.shapeDraft
+                                if (sd != null && (sd.third - sd.second).getDistance() * pageW > 12f) vm.addShape(d, sd.first, sd.second, sd.third)
+                                else d.shapeDraft = null
+                            },
+                            onDragCancel = { d.shapeDraft = null },
+                        )
                     } else if (d.tool == Tool.INK) {
                         // desenho à mão livre
                         var cur = mutableListOf<Offset>()
@@ -839,6 +868,25 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
             val sel = d.selection?.takeIf { it.page == i }
             val strokes = d.strokes.filter { it.first == i }
             val marks = d.pendingMarks.filter { it.first == i }
+            val shp = d.shapeDraft?.takeIf { it.first == i }
+            if (shp != null) Canvas(Modifier.fillMaxSize()) {
+                val w = size.width
+                val a = shp.second * w; val b = shp.third * w
+                val tl = Offset(minOf(a.x, b.x), minOf(a.y, b.y))
+                val sz2 = Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y))
+                val st = Stroke(d.inkWidth * w / sz.w, cap = StrokeCap.Round)
+                when (d.shapeKind) {
+                    "Circle" -> drawOval(Color(d.inkColor), tl, sz2, style = st)
+                    "Arrow" -> {
+                        drawLine(Color(d.inkColor), a, b, st.width, StrokeCap.Round)
+                        val ang = kotlin.math.atan2(b.y - a.y, b.x - a.x)
+                        val len = 14f * w / sz.w + st.width * 2
+                        for (s2 in listOf(-0.5f, 0.5f)) drawLine(Color(d.inkColor), b,
+                            Offset(b.x - len * kotlin.math.cos(ang + s2), b.y - len * kotlin.math.sin(ang + s2)), st.width, StrokeCap.Round)
+                    }
+                    else -> drawRect(Color(d.inkColor), tl, sz2, style = st)
+                }
+            }
             if (fields.isNotEmpty() || sel != null || strokes.isNotEmpty() || marks.isNotEmpty()) {
                 Canvas(Modifier.fillMaxSize()) {
                     val w = size.width

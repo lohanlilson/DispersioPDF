@@ -1255,3 +1255,134 @@ def add_attachment(doc, path):
 def save_attachment(doc, name, out_path):
     with open(out_path, "wb") as f:
         f.write(doc.embfile_get(name))
+
+
+# ------------------------------------------------------------ páginas em branco, endireitar, imagens
+def _gray(page, dpi):
+    pm = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY, alpha=False, annots=True)
+    return pm.width, pm.height, pm.samples
+
+
+def _np():
+    try:
+        import numpy
+        return numpy
+    except Exception:
+        return None
+
+
+def is_blank(page, ink_ratio=0.0012):
+    """Página sem conteúdo visível (texto, comentários ou manchas além de ruído de digitalização)."""
+    if page.get_text("text").strip():
+        return False
+    if any(True for _ in page.annots() or []) or any(True for _ in page.widgets() or []):
+        return False
+    w, h, s = _gray(page, 40)
+    mx, my = int(w * 0.06), int(h * 0.06)   # ignora as bordas (sombras do escâner)
+    np = _np()
+    if np is not None:
+        a = np.frombuffer(s, dtype=np.uint8).reshape(h, w)[my:h - my, mx:w - mx]
+        bg = np.percentile(a, 90)
+        dark = (a < bg - 60).mean()
+    else:
+        vals = [s[y * w + x] for y in range(my, h - my) for x in range(mx, w - mx)]
+        vals.sort()
+        bg = vals[int(len(vals) * 0.9)]
+        dark = sum(1 for v in vals if v < bg - 60) / max(1, len(vals))
+    return dark < ink_ratio
+
+
+def blank_pages(doc):
+    return [i for i in range(doc.page_count) if is_blank(doc[i])]
+
+
+def is_scan(page):
+    """Página que é basicamente uma imagem (digitalização)."""
+    area = abs(page.rect)
+    covered = 0
+    for img in page.get_images(full=True):
+        for r in page.get_image_rects(img[0]):
+            covered += abs(r & page.rect)
+    return area > 0 and covered / area > 0.6
+
+
+def skew_angle(page, max_deg=6.0):
+    """Inclinação do texto da página em graus (positivo = linhas descendo para a direita na tela)."""
+    np = _np()
+    if np is None:
+        return 0.0
+    w, h, s = _gray(page, 100)
+    a = np.frombuffer(s, dtype=np.uint8).reshape(h, w)
+    bg = np.percentile(a, 90)
+    ys, xs = np.nonzero(a < bg - 80)
+    if len(xs) < 200:
+        return 0.0
+    if len(xs) > 60000:
+        idx = np.random.default_rng(0).choice(len(xs), 60000, replace=False)
+        xs, ys = xs[idx], ys[idx]
+    xs = xs.astype(np.float64) - w / 2
+    ys = ys.astype(np.float64) - h / 2
+
+    def score(deg):
+        t = np.radians(deg)
+        proj = ys * np.cos(t) - xs * np.sin(t)
+        hist = np.bincount((proj - proj.min()).astype(np.int64))
+        return float((hist.astype(np.float64) ** 2).sum())
+
+    best = max(np.arange(-max_deg, max_deg + 0.001, 0.25), key=score)
+    best = max(np.arange(best - 0.25, best + 0.251, 0.05), key=score)
+    return float(round(best, 2))
+
+
+def deskew(doc, pages=None, min_deg=0.3):
+    """Endireita páginas digitalizadas tortas. Devolve (documento novo, {página: ângulo corrigido})."""
+    fixed = {}
+    for i in (pages if pages is not None else range(doc.page_count)):
+        pg = doc[i]
+        if not is_scan(pg):
+            continue
+        ang = skew_angle(pg)
+        if abs(ang) >= min_deg:
+            fixed[i] = ang
+    if not fixed:
+        return None, {}
+    out = pymupdf.open()
+    for i in range(doc.page_count):
+        if i in fixed:
+            src = doc[i]
+            np_ = out.new_page(width=src.rect.width, height=src.rect.height)
+            np_.show_pdf_page(np_.rect, doc, i, rotate=fixed[i], keep_proportion=True)
+        else:
+            out.insert_pdf(doc, from_page=i, to_page=i)
+    out.set_toc(doc.get_toc())
+    return out, fixed
+
+
+def extract_images(doc, out_dir, base_name):
+    """Salva as imagens embutidas no PDF na resolução original. Devolve a lista de arquivos."""
+    os.makedirs(out_dir, exist_ok=True)
+    seen, files = set(), []
+    for pno in range(doc.page_count):
+        for k, img in enumerate(doc.get_page_images(pno, full=True), 1):
+            xref = img[0]
+            if xref in seen:
+                continue
+            seen.add(xref)
+            try:
+                info = doc.extract_image(xref)
+            except Exception:
+                continue
+            if not info or info.get("width", 0) < 16 or info.get("height", 0) < 16:
+                continue
+            ext = info.get("ext", "png")
+            data = info["image"]
+            if ext not in ("png", "jpg", "jpeg", "jp2", "jpx", "tif", "tiff", "bmp", "gif"):
+                pm = pymupdf.Pixmap(doc, xref)
+                if pm.n - pm.alpha >= 4:
+                    pm = pymupdf.Pixmap(pymupdf.csRGB, pm)
+                data, ext = pm.tobytes("png"), "png"
+            fn = os.path.join(out_dir, f"{base_name}_pag{pno + 1:03d}_{k}.{ext}")
+            with open(fn, "wb") as f:
+                f.write(data)
+            files.append(fn)
+    return files

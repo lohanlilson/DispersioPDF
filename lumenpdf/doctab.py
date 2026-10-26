@@ -400,6 +400,11 @@ class DocTab(QWidget):
                 return False
         data = self.doc.tobytes(garbage=3, deflate=True)
         self.original_bytes = data
+        try:
+            from . import backups
+            backups.backup(path)   # versão anterior guardada (Arquivo › Versões anteriores)
+        except Exception:
+            pass
         tmp = path + ".tmp"
         with open(tmp, "wb") as f:
             f.write(data)

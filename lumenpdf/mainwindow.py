@@ -5,8 +5,8 @@ import tempfile
 from datetime import datetime
 
 import pymupdf
-from PySide6.QtCore import Qt, QSize, QSettings, QThread, Signal, QTimer, QStandardPaths
-from PySide6.QtGui import QAction, QKeySequence, QPainter, QImage, QColor, QIcon
+from PySide6.QtCore import Qt, QSize, QSettings, QThread, Signal, QTimer, QStandardPaths, QUrl
+from PySide6.QtGui import QAction, QKeySequence, QPainter, QImage, QColor, QIcon, QDesktopServices
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabBar, QStackedWidget,
                                QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox, QInputDialog,
                                QProgressDialog, QGridLayout, QListWidget, QListWidgetItem, QButtonGroup,
@@ -186,6 +186,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         act(m, "Salvar", self.save, "Ctrl+S", "save")
         act(m, "Salvar como…", self.save_as, "Ctrl+Shift+S", "saveas")
+        act(m, "Versões anteriores…", self.show_versions)
         act(m, "Exportar para", lambda: None).setEnabled(False)
         for k in ("export_word", "export_excel", "export_image", "export_text"):
             act(m, "    " + ALL_TOOLS[k][1], lambda _=False, kk=k: self.run_tool(kk), None, ALL_TOOLS[k][0])
@@ -460,6 +461,27 @@ class MainWindow(QMainWindow):
                 self.pending_tool = None
 
     # ------------------------------------------------------------ ações gerais
+    def show_versions(self):
+        from . import backups
+        t = self.cur()
+        if not t or not t.path:
+            QMessageBox.information(self, APP, "As versões anteriores aparecem depois que o arquivo é salvo por cima.")
+            return
+        vs = backups.versions(t.path)
+        if not vs:
+            QMessageBox.information(self, APP, "Ainda não há versões anteriores deste arquivo.\n\n"
+                                    "Cada vez que você salva por cima, a versão anterior fica guardada aqui por até 30 dias.")
+            return
+        d = dialogs.VersionsDialog(self, os.path.basename(t.path), vs)
+        if d.exec() and d.chosen:
+            fp, action = d.chosen
+            if action == "restaurar":
+                with open(fp, "rb") as f:
+                    t.replace_with(f.read())     # dá para desfazer; salve para confirmar
+                self.statusBar().showMessage("Versão anterior restaurada. Salve para manter (dá para desfazer com Ctrl+Z).", 8000)
+            else:
+                self.open_path(fp)
+
     def save(self):
         t = self.cur()
         if t:
@@ -1341,6 +1363,84 @@ class MainWindow(QMainWindow):
             n = ops.apply_redactions(tab.doc)
             tab.changed(structure=True)
             self.statusBar().showMessage(f"Ocultações aplicadas em {n} página(s).", 6000)
+
+    def tool_remove_blank(self, tab, **kw):
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            pages = ops.blank_pages(tab.doc)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not pages:
+            QMessageBox.information(self, APP, "Nenhuma página em branco encontrada.")
+            return
+        if len(pages) == tab.doc.page_count:
+            QMessageBox.information(self, APP, "Todas as páginas parecem em branco; nada foi removido.")
+            return
+        lst = ", ".join(str(p + 1) for p in pages)
+        if QMessageBox.question(self, APP, f"Páginas em branco encontradas: {lst}.\n\nRemover? (dá para desfazer)") == QMessageBox.Yes:
+            tab.checkpoint()
+            tab.doc.delete_pages(pages)
+            tab.changed(structure=True)
+            self.statusBar().showMessage(f"{len(pages)} página(s) em branco removida(s).", 6000)
+
+    def tool_deskew(self, tab, **kw):
+        if tab.has_signatures and QMessageBox.question(self, APP, "Endireitar regrava as páginas e invalida as assinaturas digitais. Continuar?") != QMessageBox.Yes:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            new, fixed = ops.deskew(tab.doc)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not fixed:
+            QMessageBox.information(self, APP, "Nenhuma página digitalizada torta foi encontrada.")
+            return
+        tab.replace_with(new.tobytes(garbage=3, deflate=True))
+        det = ", ".join(f"{p + 1} ({a:+.1f}°)" for p, a in fixed.items())
+        self.statusBar().showMessage(f"Páginas endireitadas: {det}. Dá para desfazer.", 10000)
+
+    def tool_extract_images(self, tab, **kw):
+        start = os.path.dirname(tab.path) if tab.path else self.settings.value("last_dir", os.path.expanduser("~"))
+        d = QFileDialog.getExistingDirectory(self, "Pasta para salvar as imagens", start)
+        if not d:
+            return
+        base = os.path.splitext(os.path.basename(tab.path or "Documento.pdf"))[0]
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            files = ops.extract_images(tab.doc, d, base)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not files:
+            QMessageBox.information(self, APP, "Este documento não tem imagens.")
+            return
+        if QMessageBox.question(self, APP, f"{len(files)} imagem(ns) salvas em:\n{d}\n\nAbrir a pasta?") == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(d))
+
+    def tool_pdfa(self, tab, **kw):
+        from . import pdfa
+        if tab.has_signatures and QMessageBox.question(
+                self, APP, "A versão PDF/A é um arquivo novo, sem as assinaturas digitais deste documento. Continuar?") != QMessageBox.Yes:
+            return
+        base = os.path.splitext(tab.path or os.path.join(os.path.expanduser("~"), "Documento.pdf"))[0] + "_PDFA.pdf"
+        fn, _ = QFileDialog.getSaveFileName(self, "Salvar como PDF/A", base, "PDF (*.pdf)")
+        if not fn:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            data, problems = pdfa.convert(tab.doc.tobytes(), title=os.path.splitext(os.path.basename(fn))[0])
+        except ValueError as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, APP, str(e))
+            return
+        finally:
+            if QApplication.overrideCursor():
+                QApplication.restoreOverrideCursor()
+        with open(fn, "wb") as f:
+            f.write(data)
+        msg = f"Salvo como PDF/A-2b:\n{fn}"
+        if problems:
+            msg += "\n\nAtenção:\n• " + "\n• ".join(problems)
+        if QMessageBox.question(self, APP, msg + "\n\nAbrir o arquivo?") == QMessageBox.Yes:
+            self.open_path(fn)
 
     def tool_sanitize(self, tab, **kw):
         if QMessageBox.question(self, APP, "Remover metadados, anexos, JavaScript, miniaturas e texto oculto?") == QMessageBox.Yes:

@@ -860,3 +860,40 @@ class PreferencesDialog(FormDialog):
         super().__init__(parent, "Preferências", [("Nome do autor (comentários):", self.author),
                                                    ("Idioma do OCR:", self.ocr), ("Zoom inicial:", self.zoom),
                                                    ("Tessdata:", self.tess)], ok_text="Salvar")
+
+
+class VersionsDialog(QDialog):
+    """Versões anteriores de um arquivo (cópias feitas ao salvar por cima)."""
+
+    def __init__(self, parent, name, versions):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
+        self.setWindowTitle(f"Versões anteriores — {name}")
+        self.resize(520, 380)
+        self.chosen = None
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Cópias guardadas automaticamente cada vez que o arquivo foi salvo por cima (até 30 dias):"))
+        self.list = QListWidget()
+        for fp, when, size in versions:
+            it = QListWidgetItem(f"{when:%d/%m/%Y %H:%M:%S}   ·   {size / 1048576:.2f} MB")
+            it.setData(Qt.UserRole, fp)
+            self.list.addItem(it)
+        self.list.setCurrentRow(0)
+        lay.addWidget(self.list)
+        row = QHBoxLayout()
+        b_open = QPushButton("Abrir em nova aba")
+        b_rest = QPushButton("Restaurar esta versão")
+        b_rest.setDefault(True)
+        b_close = QPushButton("Fechar")
+        row.addWidget(b_open); row.addStretch(); row.addWidget(b_rest); row.addWidget(b_close)
+        lay.addLayout(row)
+        b_open.clicked.connect(lambda: self._pick("abrir"))
+        b_rest.clicked.connect(lambda: self._pick("restaurar"))
+        self.list.itemDoubleClicked.connect(lambda *_: self._pick("restaurar"))
+        b_close.clicked.connect(self.reject)
+
+    def _pick(self, action):
+        it = self.list.currentItem()
+        if it:
+            self.chosen = (it.data(Qt.UserRole), action)
+            self.accept()

@@ -33,6 +33,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CropSquare
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.ArrowOutward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Draw
@@ -111,6 +114,7 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 Tool.NONE -> "Toque e segure no texto para selecionar · toque num comentário para editar"
                 Tool.HIGHLIGHT -> "Arraste o dedo sobre o texto para destacar · toque numa palavra para destacá-la"
                 Tool.INK -> "Desenhe com o dedo. Toque em Concluir para gravar."
+                Tool.SHAPE -> "Arraste para desenhar ${when (d.shapeKind) { "Circle" -> "o círculo"; "Arrow" -> "a seta (do início até a ponta)"; else -> "o retângulo" }}"
                 Tool.NOTE -> "Toque onde quer colocar a nota"
                 Tool.TEXT -> "Toque onde quer escrever"
                 Tool.CHECK -> "Toque para marcar ✓"
@@ -123,6 +127,7 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
             if (d.tool == Tool.INK) InkOptions(vm, d)
+            if (d.tool == Tool.SHAPE) ShapeOptions(d)
             if (d.tool == Tool.REDACT) RedactOptions(vm, d)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -137,6 +142,7 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 ToolButton(Icons.Filled.Highlight, "Marca-texto", d.tool == Tool.HIGHLIGHT) { pick(Tool.HIGHLIGHT) }
                 ToolButton(Icons.Filled.EditNote, "Editar texto", d.tool == Tool.EDITTEXT) { pick(Tool.EDITTEXT) }
                 ToolButton(Icons.Filled.Gesture, "Desenhar", d.tool == Tool.INK) { pick(Tool.INK) }
+                ToolButton(Icons.Filled.CropSquare, "Formas", d.tool == Tool.SHAPE) { pick(Tool.SHAPE) }
                 ToolButton(Icons.Filled.StickyNote2, "Nota", d.tool == Tool.NOTE) { pick(Tool.NOTE) }
                 ToolButton(Icons.Filled.TextFields, "Texto", d.tool == Tool.TEXT) { pick(Tool.TEXT) }
                 ToolButton(Icons.Filled.Check, "Marcar ✓", d.tool == Tool.CHECK) { pick(Tool.CHECK) }
@@ -148,6 +154,23 @@ fun EditBar(vm: AppVm, d: ViewerDoc, onSign: () -> Unit) {
                 ToolButton(Icons.AutoMirrored.Filled.Redo, "Refazer", false, d.canRedo && !d.busy) { vm.redo(d) }
             }
         }
+    }
+}
+
+@Composable
+private fun ShapeOptions(d: ViewerDoc) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        listOf(Triple("Square", Icons.Filled.CropSquare, "Retângulo"), Triple("Circle", Icons.Filled.RadioButtonUnchecked, "Círculo"),
+            Triple("Arrow", Icons.Filled.ArrowOutward, "Seta")).forEach { (k, icon, label) ->
+            IconButton({ d.shapeKind = k }, colors = if (d.shapeKind == k) IconButtonDefaults.filledIconButtonColors()
+                else IconButtonDefaults.iconButtonColors()) { Icon(icon, label) }
+        }
+        INK_COLORS.forEach { c ->
+            Box(Modifier.padding(3.dp).size(24.dp).clip(CircleShape).background(Color(c))
+                .border(if (d.inkColor == c) 3.dp else 0.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                .clickable { d.inkColor = c })
+        }
+        Slider(d.inkWidth, { d.inkWidth = it }, valueRange = 0.8f..6f, modifier = Modifier.weight(1f).padding(horizontal = 6.dp))
     }
 }
 

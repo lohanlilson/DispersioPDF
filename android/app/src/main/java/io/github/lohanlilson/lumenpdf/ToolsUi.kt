@@ -118,3 +118,35 @@ fun PageNumbersDialog(onDismiss: () -> Unit, onOk: (String) -> Unit) {
         confirmButton = { TextButton({ onOk(formats[f]) }) { Text("Numerar") } },
         dismissButton = { TextButton(onDismiss) { Text("Cancelar") } })
 }
+
+/** mode: every | ranges | bookmarks | size */
+@Composable
+fun SplitDialog(pages: Int, onDismiss: () -> Unit, onOk: (mode: String, value: String) -> Unit) {
+    var mode by remember { mutableStateOf("size") }
+    var every by remember { mutableStateOf("1") }
+    var ranges by remember { mutableStateOf("") }
+    var mb by remember { mutableStateOf("5") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Dividir PDF") },
+        text = {
+            Column {
+                Text("$pages páginas. As partes são salvas numa pasta que você escolhe.", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Choice("Por tamanho máximo (ex.: limite do PJe)", mode == "size") { mode = "size" }
+                if (mode == "size") OutlinedTextField(mb, { mb = it }, label = { Text("MB por arquivo") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth().padding(start = 12.dp))
+                Choice("A cada N páginas", mode == "every") { mode = "every" }
+                if (mode == "every") OutlinedTextField(every, { every = it }, label = { Text("Páginas por arquivo") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth().padding(start = 12.dp))
+                Choice("Por intervalos", mode == "ranges") { mode = "ranges" }
+                if (mode == "ranges") OutlinedTextField(ranges, { ranges = it }, label = { Text("Ex.: 1-3; 4-10; 11-") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp))
+                Choice("Pelos marcadores (capítulos)", mode == "bookmarks") { mode = "bookmarks" }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onOk(mode, when (mode) { "every" -> every; "ranges" -> ranges; "size" -> mb; else -> "" }) },
+                enabled = when (mode) { "ranges" -> ranges.isNotBlank(); "every" -> (every.toIntOrNull() ?: 0) > 0
+                    "size" -> (mb.replace(',', '.').toDoubleOrNull() ?: 0.0) > 0; else -> true }) { Text("Escolher pasta…") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("Cancelar") } })
+}

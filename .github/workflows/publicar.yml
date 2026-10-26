@@ -82,6 +82,8 @@ jobs:
           python tests/novidades_test.py
           python tests/desfazer_test.py
           python tests/ferramentas_test.py
+          python tests/versoes_test.py
+          python tests/novas_ferramentas_test.py
 
       - name: Gerar executável, instalador e patch
         if: steps.versao.outputs.publicar == 'sim'

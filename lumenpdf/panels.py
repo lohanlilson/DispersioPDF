@@ -60,12 +60,14 @@ CATALOG = [
         ("delete_pages", "trash", "Excluir páginas"), ("insert_blank", "insertpage", "Inserir página em branco"),
         ("insert_file", "createpdf", "Inserir de arquivo"), ("extract", "extract", "Extrair páginas"),
         ("split", "split", "Dividir documento"), ("merge", "merge", "Combinar arquivos"),
+        ("remove_blank", "trash", "Remover páginas em branco"), ("deskew", "rotate_cw", "Endireitar páginas escaneadas"),
     ]),
     ("Converter e exportar", [
         ("export_word", "word", "Exportar para Word"), ("export_excel", "excel", "Exportar para Excel"),
         ("export_image", "imagefile", "Exportar como imagem"), ("export_text", "textfile", "Exportar como texto"),
         ("create_pdf", "createpdf", "Criar PDF (imagens / Office)"), ("compress", "compress", "Comprimir PDF"),
-        ("ocr", "ocr", "Reconhecer texto (OCR)"),
+        ("ocr", "ocr", "Reconhecer texto (OCR)"), ("pdfa", "createpdf", "Salvar como PDF/A (arquivamento)"),
+        ("extract_images", "imagefile", "Extrair imagens"),
     ]),
     ("Proteger", [
         ("protect", "lock", "Proteger com senha"), ("unprotect", "unlock", "Remover senha"),

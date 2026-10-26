@@ -160,6 +160,36 @@ object Editor {
         return addAnnot(page, a)
     }
 
+    /**
+     * Forma: "Square" (retângulo), "Circle" (círculo/elipse) ou "Arrow" (seta).
+     * x0,y0 → x1,y1 em coordenadas do PDF (na seta, do início para a ponta).
+     */
+    fun shape(doc: PDDocument, pageIndex: Int, kind: String, x0: Float, y0: Float, x1: Float, y1: Float,
+              color: Long, width: Float): List<COSDictionary> {
+        val page = doc.getPage(pageIndex)
+        val pad = width * 2 + 2
+        val l = minOf(x0, x1); val r = maxOf(x0, x1); val b = minOf(y0, y1); val t = maxOf(y0, y1)
+        val border = PDBorderStyleDictionary().apply { this.width = width }
+        val a: PDAnnotationMarkup = if (kind == "Arrow") {
+            com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLine().apply {
+                line = floatArrayOf(x0, y0, x1, y1)
+                endPointEndingStyle = com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLine.LE_OPEN_ARROW
+                rectangle = PDRectangle(l - pad * 3, b - pad * 3, r - l + pad * 6, t - b + pad * 6)
+                borderStyle = border
+            }
+        } else {
+            com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationSquareCircle(
+                if (kind == "Circle") com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationSquareCircle.SUB_TYPE_CIRCLE
+                else com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationSquareCircle.SUB_TYPE_SQUARE).apply {
+                rectangle = PDRectangle(l - width / 2, b - width / 2, r - l + width, t - b + width)
+                borderStyle = border
+            }
+        }
+        stamp(a, color)
+        a.constructAppearances(doc)
+        return addAnnot(page, a)
+    }
+
     fun note(doc: PDDocument, pageIndex: Int, x: Float, y: Float, text: String, color: Long): List<COSDictionary> {
         val page = doc.getPage(pageIndex)
         val a = PDAnnotationText()
@@ -375,6 +405,68 @@ object Editor {
         }
     }
 
+    /** Grupos de páginas para dividir: mode = every (a cada N) | ranges ("1-3; 4-10") | bookmarks | size (MB). */
+    fun splitGroups(src: File, password: String?, mode: String, value: String): List<List<Int>> =
+        PDDocument.load(src, password ?: "").use { doc ->
+            val n = doc.numberOfPages
+            when (mode) {
+                "every" -> { val k = value.trim().toIntOrNull()?.coerceAtLeast(1) ?: 1; (0 until n step k).map { (it until minOf(it + k, n)).toList() } }
+                "ranges" -> value.split(';').map { parseRanges(it, n) }.filter { it.isNotEmpty() }
+                "bookmarks" -> {
+                    val starts = sortedSetOf(0)
+                    var item = doc.documentCatalog.documentOutline?.firstChild
+                    while (item != null) {
+                        runCatching { item!!.findDestinationPage(doc)?.let { pg -> doc.pages.indexOf(pg).takeIf { it >= 0 }?.let { starts += it } } }
+                        item = item.nextSibling
+                    }
+                    val st = starts.toList() + n
+                    st.zipWithNext().filter { (a, b) -> b > a }.map { (a, b) -> (a until b).toList() }
+                }
+                else -> {   // size: tamanho de cada página sozinha (estimativa por cima) e agrupa até o limite
+                    val limit = ((value.replace(',', '.').trim().toDoubleOrNull() ?: 5.0) * 1024 * 1024).toLong()
+                    val groups = ArrayList<List<Int>>()
+                    var cur = ArrayList<Int>(); var acc = 0L
+                    for (i in 0 until n) {
+                        val sz = PDDocument().use { one ->
+                            one.importPage(doc.getPage(i))
+                            val o = java.io.ByteArrayOutputStream(); one.save(o); o.size().toLong()
+                        }
+                        if (cur.isNotEmpty() && acc + sz > limit) { groups += cur; cur = ArrayList(); acc = 0 }
+                        cur += i; acc += sz
+                    }
+                    if (cur.isNotEmpty()) groups += cur
+                    groups
+                }
+            }
+        }
+
+    /** "1-3, 5, 8-" → páginas (base 0); partes inválidas são ignoradas. */
+    fun parseRanges(text: String, n: Int): List<Int> {
+        val out = ArrayList<Int>()
+        for (part in text.split(',')) {
+            val p = part.trim()
+            if (p.isEmpty()) continue
+            runCatching {
+                if ('-' in p) {
+                    val (a, b) = p.split('-', limit = 2).map { it.trim() }
+                    val x = a.toIntOrNull() ?: 1; val y = b.toIntOrNull() ?: n
+                    if (x <= y) out += (x - 1 until y) else out += (x - 1 downTo y - 1)
+                } else out += p.toInt() - 1
+            }
+        }
+        return out.filter { it in 0 until n }
+    }
+
+    /** Salva cada grupo de páginas num arquivo. */
+    fun split(src: File, password: String?, groups: List<List<Int>>, dir: File, base: String): List<File> {
+        dir.mkdirs()
+        return groups.mapIndexed { k, pages ->
+            val f = File(dir, "%s_parte%02d.pdf".format(base, k + 1))
+            extract(src, password, pages, f)
+            f
+        }
+    }
+
     fun merge(files: List<File>, dst: File) {
         PDDocument().use { out ->
             val opened = files.map { PDDocument.load(it) }
@@ -457,6 +549,9 @@ object Editor {
             a.inkList?.let { list -> a.inkList = list.map { s -> FloatArray(s.size) { k -> s[k] + if (k % 2 == 0) dx else dy } }.toTypedArray() }
         }
         (a as? PDAnnotationTextMarkup)?.quadPoints?.let { q -> a.quadPoints = FloatArray(q.size) { k -> q[k] + if (k % 2 == 0) dx else dy } }
+        (a as? com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLine)?.line?.let { q ->
+            a.line = FloatArray(q.size) { k -> q[k] + if (k % 2 == 0) dx else dy }
+        }
         a.setModifiedDate(Calendar.getInstance())
         a.cosObject.removeItem(COSName.AP)
         a.constructAppearances(doc)
