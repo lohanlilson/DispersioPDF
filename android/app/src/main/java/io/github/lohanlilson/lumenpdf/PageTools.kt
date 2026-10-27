@@ -458,8 +458,28 @@ object Orientation {
         }
     }
 
-    /** {página: rotação nova (graus)} para as páginas que estão de lado ou de cabeça para baixo. */
-    suspend fun fixes(engine: PdfEngine, pdf: OpenPdf, pages: Iterable<Int>, onPage: (Int) -> Unit = {}): Map<Int, Int> {
+    /** Rotação (absoluta) que deixa o texto digital de pé, pela direção das letras no PDF (0, 90, 180, 270); null sem texto. */
+    fun textRotation(doc: PDDocument, page: Int): Int? {
+        val votes = IntArray(4)
+        var total = 0
+        val st = object : com.tom_roush.pdfbox.text.PDFTextStripper() {
+            override fun processTextPosition(t: com.tom_roush.pdfbox.text.TextPosition) {
+                if (t.unicode.isNullOrBlank()) return
+                val k = ((Math.round(t.dir / 90f) % 4) + 4) % 4
+                votes[k]++; total++
+            }
+        }
+        st.startPage = page + 1; st.endPage = page + 1
+        runCatching { st.getText(doc) }
+        if (total < 40) return null
+        val best = votes.indices.maxBy { votes[it] }
+        return if (votes[best] >= total * 0.7) best * 90 else null
+    }
+
+    /** {página: rotação nova (graus)} para as páginas que estão de lado ou de cabeça para baixo.
+     *  textRot: rotação certa pela camada de texto (PDFBox), quando houver. */
+    suspend fun fixes(engine: PdfEngine, pdf: OpenPdf, pages: Iterable<Int>, onPage: (Int) -> Unit = {},
+                      textRot: suspend (Int) -> Int? = { null }): Map<Int, Int> {
         val out = LinkedHashMap<Int, Int>()
         for (p in pages) {
             kotlinx.coroutines.yield()
@@ -467,8 +487,15 @@ object Orientation {
             val pc = engine.pageChars(pdf, p)
             val cur = engine.pageRotation(pdf, p)
             val textChars = pc.text.count { !it.isWhitespace() && it != '\u0000' }
-            val turn = if (textChars > 15) textTurn(pc) else runCatching { scanTurn(engine, pdf, p) }.getOrNull()
-            if (turn != null && turn != 0) out[p] = (cur + turn) % 360
+            if (textChars > 15) {
+                val r = runCatching { textRot(p) }.getOrNull()
+                if (r != null) { if (r != cur) out[p] = r; continue }
+                val turn = textTurn(pc)
+                if (turn != null && turn != 0) out[p] = (cur + turn) % 360
+            } else {
+                val turn = runCatching { scanTurn(engine, pdf, p) }.getOrNull()
+                if (turn != null && turn != 0) out[p] = (cur + turn) % 360
+            }
         }
         return out
     }

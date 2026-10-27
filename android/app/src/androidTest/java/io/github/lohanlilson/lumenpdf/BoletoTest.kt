@@ -129,7 +129,9 @@ class BoletoTest {
             assertTrue(waitFor(20_000) { d.orientFixes.isEmpty() && !d.busy && d.dirty })
             val rot = runBlocking { (0 until 5).map { vm.engine.pageRotation(d.pdf, it) } }
             assertEquals(listOf(0, 0, 180, 180, 0), rot)
-            val again = runBlocking { Orientation.fixes(vm.engine, d.pdf, 0 until 5) }
+            val again = com.tom_roush.pdfbox.pdmodel.PDDocument.load(d.work!!).use { pd ->
+                runBlocking { Orientation.fixes(vm.engine, d.pdf, 0 until 5, textRot = { Orientation.textRotation(pd, it) }) }
+            }
             assertEquals(emptyMap<Int, Int>(), again)
             InstrumentationRegistry.getInstrumentation().runOnMainSync { vm.undo(d) }
             assertTrue(waitFor(20_000) { !d.busy && runBlocking { vm.engine.pageRotation(d.pdf, 2) } == 0 })

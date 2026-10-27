@@ -558,9 +558,9 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     /** Endireita as páginas: de lado ou de cabeça para baixo (gira) e digitalizadas tortas (corrige a inclinação). */
     fun deskew(d: ViewerDoc) = viewModelScope.launch {
         try {
-            val turns = Orientation.fixes(engine, d.pdf, 0 until d.pageCount) { p ->
+            val turns = Orientation.fixes(engine, d.pdf, 0 until d.pageCount, { p ->
                 progress = "Verificando a posição das páginas… ${p + 1} de ${d.pageCount}"
-            }
+            }, textRot = { p -> withReadDoc(d) { Orientation.textRotation(it, p) } })
             if (turns.isNotEmpty()) {
                 d.orientFixes = emptyMap()
                 pages(d, "girar as páginas") { doc, _ -> turns.forEach { (p, r) -> doc.getPage(p).rotation = r } }.join()
@@ -916,7 +916,9 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             d.payments = runCatching { Pagamentos.scan(engine, pdf, d.pageCount) }.getOrDefault(emptyList())
         }
         if (prefs.detectOrientation && doc === d && d.pdf === pdf) {
-            val f = runCatching { Orientation.fixes(engine, pdf, 0 until minOf(d.pageCount, 40)) }.getOrDefault(emptyMap())
+            val f = runCatching {
+                Orientation.fixes(engine, pdf, 0 until minOf(d.pageCount, 40), textRot = { p -> withReadDoc(d) { Orientation.textRotation(it, p) } })
+            }.getOrDefault(emptyMap())
             if (doc === d && d.pdf === pdf) d.orientFixes = f
         }
     }
