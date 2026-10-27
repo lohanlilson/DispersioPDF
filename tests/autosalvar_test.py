@@ -5,11 +5,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pymupdf
 from PySide6.QtWidgets import QApplication, QMessageBox
 app = QApplication.instance() or QApplication([])
-app.setApplicationName("LumenPDF-teste")
-from lumenpdf import backups
-from lumenpdf.config import cfg
-from lumenpdf.doctab import DocTab
-from lumenpdf.mainwindow import MainWindow
+app.setApplicationName("DispersioPDF-teste")
+from dispersio import backups
+from dispersio.config import cfg
+from dispersio.doctab import DocTab
+from dispersio.mainwindow import MainWindow
 
 DocTab.AUTOSAVE_MS = 200
 perguntas = []

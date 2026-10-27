@@ -6,9 +6,9 @@ import pymupdf
 from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtWidgets import QApplication, QMessageBox, QFileDialog
 app = QApplication.instance() or QApplication([])
-from lumenpdf import ops, pdfa, resource
-from lumenpdf.mainwindow import MainWindow
-from lumenpdf.doctab import DocTab
+from dispersio import ops, pdfa, resource
+from dispersio.mainwindow import MainWindow
+from dispersio.doctab import DocTab
 
 QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes if "Abrir" not in str(a[2] if len(a) > 2 else "") else QMessageBox.No)
 QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)

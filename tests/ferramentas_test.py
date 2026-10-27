@@ -8,10 +8,10 @@ from PySide6 import QtWidgets
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QFileDialog, QInputDialog, QColorDialog, QMenu
 from PySide6.QtGui import QColor
 app = QApplication.instance() or QApplication([])
-from lumenpdf import mainwindow as mw_mod
-from lumenpdf.mainwindow import MainWindow
-from lumenpdf.doctab import DocTab
-from lumenpdf import ops
+from dispersio import mainwindow as mw_mod
+from dispersio.mainwindow import MainWindow
+from dispersio.doctab import DocTab
+from dispersio import ops
 
 tmp = tempfile.mkdtemp()
 png = os.path.join(tmp, "img.png")
@@ -55,7 +55,7 @@ class AutoMenu(QMenu):
     def exec(self, *a, **k):
         acts = [x for x in self.actions() if not x.isSeparator()]
         return acts[0] if acts else None
-import lumenpdf.viewer as _vw
+import dispersio.viewer as _vw
 _vw.QMenu = AutoMenu
 
 def make():

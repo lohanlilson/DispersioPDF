@@ -69,7 +69,7 @@ def main():
         os.makedirs(os.path.join(RES, f"mipmap-{d}"), exist_ok=True)
         legacy.resize((px, px), Image.LANCZOS).save(os.path.join(RES, f"mipmap-{d}", "ic_launcher.png"))
     # logo para a tela inicial do app
-    legacy.resize((256, 256), Image.LANCZOS).save(os.path.join(RES, "drawable-nodpi", "lumen_logo.png"))
+    legacy.resize((256, 256), Image.LANCZOS).save(os.path.join(RES, "drawable-nodpi", "dispersio_logo.png"))
     # ícone de arquivo PDF (lista de recentes)
     mi.doc_icon(1024).resize((192, 192), Image.LANCZOS).save(os.path.join(RES, "drawable-nodpi", "pdf_doc.png"))
     os.makedirs(os.path.join(RES, "mipmap-anydpi-v26"), exist_ok=True)

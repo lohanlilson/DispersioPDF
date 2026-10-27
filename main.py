@@ -8,16 +8,16 @@ from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
-from lumenpdf import APP_NAME, APP_ID, __version__, resource
+from dispersio import APP_NAME, APP_ID, __version__, resource
 
 SERVER = f"{APP_ID}-{os.environ.get('USERNAME') or os.environ.get('USER') or 'user'}"
 
 
 def parse_args(argv):
     """Interpreta a linha de comando.
-    LumenPDF.exe arquivo.pdf …            abre
-    LumenPDF.exe /p arquivo.pdf …         imprime na impressora padrão, sem janela (Outlook, botão direito)
-    LumenPDF.exe /pt arquivo.pdf "Impressora" [driver] [porta]   imprime numa impressora específica
+    DispersioPDF.exe arquivo.pdf …            abre
+    DispersioPDF.exe /p arquivo.pdf …         imprime na impressora padrão, sem janela (Outlook, botão direito)
+    DispersioPDF.exe /pt arquivo.pdf "Impressora" [driver] [porta]   imprime numa impressora específica
     """
     cmd, files, printer = "open", [], ""
     args = list(argv[1:])
@@ -99,14 +99,14 @@ def app_icon():
         for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
             icon.addPixmap(big.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     if icon.isNull():
-        icon = QIcon(resource("assets", "lumenpdf.ico"))
+        icon = QIcon(resource("assets", "dispersio.ico"))
     return icon
 
 
 def _orient_scan():
     """Processo auxiliar (sem janela): posição das páginas por OCR. Função própria para não criar nomes locais em main()."""
     import json as _json
-    from lumenpdf import ops
+    from dispersio import ops
     i = sys.argv.index("--orient-scan")
     src, out = sys.argv[i + 1], sys.argv[i + 2]
     pwd = sys.stdin.readline().rstrip("\n") or None
@@ -121,10 +121,10 @@ def main():
     if "--orient-scan" in sys.argv:  # processo auxiliar: posição das páginas por OCR (sem janela)
         return _orient_scan()
     if "--run-update" in sys.argv:  # auxiliar da atualização automática (sem janela, sem trava de instância)
-        from lumenpdf.updater import run_update_helper
+        from dispersio.updater import run_update_helper
         return run_update_helper(sys.argv)
     if "--selftest" in sys.argv:  # usado pelo build para conferir o executável gerado
-        from lumenpdf import selftest
+        from dispersio import selftest
         i = sys.argv.index("--selftest")
         return selftest.run(sys.argv[i + 1] if len(sys.argv) > i + 1 else None)
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
@@ -132,10 +132,10 @@ def main():
         import ctypes
         # ícone próprio na barra de tarefas e mutex usado pelo instalador para detectar o programa aberto
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"{APP_ID}.App")
-        main._mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "LumenPDF_Running")
+        main._mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "DispersioPDF_Running")
         if "--set-default" in sys.argv:  # chamado pelo instalador
             from PySide6.QtCore import QSettings
-            from lumenpdf import system
+            from dispersio import system
             QSettings(APP_ID, APP_ID).setValue("default_asked", "true")  # o programa não pergunta de novo
             system.open_default_apps_settings()
             return 0
@@ -158,6 +158,8 @@ def main():
     server.listen(SERVER)
     early = []
     ready = {"win": False}
+    from dispersio import migracao
+    migracao.run()  # nome antigo (Lumen PDF): traz configurações e dados
 
     def dispatch(msg):
         if ready["win"]:
@@ -206,9 +208,9 @@ def main():
                 read()
     server.newConnection.connect(incoming)
 
-    from lumenpdf.mainwindow import MainWindow
+    from dispersio.mainwindow import MainWindow
     win = MainWindow()
-    from lumenpdf import errors
+    from dispersio import errors
     errors.install(win)
     state = {"shown": False}
     ready["win"] = True
@@ -230,7 +232,7 @@ def main():
 
     state["shown"] = True
     _show(win, app)
-    from lumenpdf.config import cfg
+    from dispersio.config import cfg
     if not paths and cfg.get("startup") == "last_session":
         session = cfg.qs.value("session", []) or []
         for p in ([session] if isinstance(session, str) else session):
@@ -244,7 +246,7 @@ def main():
 
 
 def _show(win, app):
-    from lumenpdf.config import cfg
+    from dispersio.config import cfg
     win.setWindowIcon(app.windowIcon())
     mode = cfg.get("window_mode")
     if mode == "last" and cfg.qs.value("geometry") is not None:
@@ -255,14 +257,14 @@ def _show(win, app):
         win.show()
     else:
         win.showMaximized()
-    from lumenpdf import theme as _theme
+    from dispersio import theme as _theme
     _theme.style_titlebar(win)
     try:  # tema "Seguir o Windows"
         app.styleHints().colorSchemeChanged.connect(win._on_system_theme)
     except Exception:
         pass
     import threading
-    from lumenpdf import ops
+    from dispersio import ops
     threading.Thread(target=ops.system_fonts, daemon=True).start()  # prepara a edição de texto com fontes originais
 
 

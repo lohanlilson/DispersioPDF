@@ -6,7 +6,7 @@ import pymupdf
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage
 app = QApplication([])
-from lumenpdf.viewer import PdfView
+from dispersio.viewer import PdfView
 d = pymupdf.open()
 pg = d.new_page()
 for k in range(40):

@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "LumenPDF"
+rootProject.name = "DispersioPDF"
 include(":app")

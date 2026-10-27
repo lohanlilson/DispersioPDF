@@ -1,5 +1,9 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.11.0
+
+- **Mudança de nome concluída**: o app e o arquivo de atualização agora se chamam Dispersio PDF. O ícone na tela inicial, os atalhos fixados e o "abrir PDFs sempre com o Dispersio" continuam funcionando.
+
 ## 0.10.0
 
 - **Novo nome: Dispersio PDF** (o fenômeno do ícone: o prisma abrindo a luz nas cores). Nada muda nas suas configurações.

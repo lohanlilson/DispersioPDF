@@ -5,9 +5,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pymupdf
 from PySide6.QtWidgets import QApplication, QMessageBox, QFileDialog, QInputDialog
 app = QApplication.instance() or QApplication([])
-from lumenpdf import ops, dialogs
-from lumenpdf.mainwindow import MainWindow
-from lumenpdf.doctab import DocTab
+from dispersio import ops, dialogs
+from dispersio.mainwindow import MainWindow
+from dispersio.doctab import DocTab
 
 tmp = tempfile.mkdtemp()
 QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.No)

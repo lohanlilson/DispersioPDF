@@ -4,7 +4,7 @@ import os, sys, tempfile, time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pymupdf
-from lumenpdf import traducao as T
+from dispersio import traducao as T
 
 if not T._installed("en", "pt"):
     T.download(("en", "pt"))
@@ -68,11 +68,11 @@ assert next(t for b, t in res[1] if b.shown.startswith("1. Arkow")) is None
 # --- interface
 from PySide6.QtWidgets import QApplication, QFileDialog
 app = QApplication.instance() or QApplication([])
-app.setApplicationName("LumenPDF-teste")
-from lumenpdf.config import cfg
-from lumenpdf.doctab import DocTab
-from lumenpdf.mainwindow import MainWindow
-from lumenpdf import artigos_ui
+app.setApplicationName("DispersioPDF-teste")
+from dispersio.config import cfg
+from dispersio.doctab import DocTab
+from dispersio.mainwindow import MainWindow
+from dispersio import artigos_ui
 DocTab.AUTOSAVE_MS = 10 ** 8
 cfg.set("translate_to", "pt"); cfg.set("offer_translation", True)
 tmp = tempfile.mkdtemp()

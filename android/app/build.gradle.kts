@@ -9,10 +9,11 @@ plugins {
 val ver = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
 
 android {
-    namespace = "io.github.lohanlilson.lumenpdf"
+    namespace = "io.github.lohanlilson.dispersio"
     compileSdk = 36
 
     defaultConfig {
+        // identificador do app instalado: fica com o nome antigo para que as atualizações continuem chegando (trocar = outro app)
         applicationId = "io.github.lohanlilson.lumenpdf"
         minSdk = 26
         targetSdk = 36

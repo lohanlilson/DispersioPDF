@@ -5,10 +5,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pymupdf
 from PySide6.QtWidgets import QApplication, QMessageBox, QFileDialog
 app = QApplication.instance() or QApplication([])
-app.setApplicationName("LumenPDF-teste")
-from lumenpdf import artigos, traducao
-from lumenpdf.config import cfg
-from lumenpdf.doctab import DocTab
+app.setApplicationName("DispersioPDF-teste")
+from dispersio import artigos, traducao
+from dispersio.config import cfg
+from dispersio.doctab import DocTab
 
 DocTab.AUTOSAVE_MS = 10 ** 8
 tmp = tempfile.mkdtemp()
@@ -63,8 +63,8 @@ print(out)
 assert "cães" in out[0] and "Smith et al. 2020" in out[0] and out[1] == "12.5 ± 3.1"
 
 # --- interface: pesquisar, baixar e abrir; faixa "Traduzir"; leitura traduzida; PDF traduzido
-from lumenpdf.mainwindow import MainWindow
-from lumenpdf import artigos_ui
+from dispersio.mainwindow import MainWindow
+from dispersio import artigos_ui
 src = os.path.join(tmp, "artigo.pdf")
 d = pymupdf.open(); p = d.new_page()
 p.insert_text((60, 70), "Animal cruelty and veterinary forensics", fontsize=16, fontname="hebo")

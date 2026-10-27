@@ -10,11 +10,11 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 import main
-from lumenpdf import system, updater
+from dispersio import system, updater
 
 system.is_default_pdf = lambda: True          # não abre diálogos no CI
 updater.Updater.auto_check = lambda self: None  # não acessa a rede
-from lumenpdf.mainwindow import MainWindow
+from dispersio.mainwindow import MainWindow
 
 for attr in ("check_default_app", "bring_to_front", "open_path", "updater"):
     assert hasattr(MainWindow, attr) or attr == "updater", f"MainWindow sem {attr}"

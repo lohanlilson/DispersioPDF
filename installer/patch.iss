@@ -23,9 +23,9 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 DisableReadyPage=no
 UninstallDisplayIcon={app}\{#AppExe}
-SetupIconFile=..\assets\lumenpdf.ico
+SetupIconFile=..\assets\dispersio.ico
 OutputDir=..\Saida
-OutputBaseFilename=LumenPDF-Atualizacao-{#FromVersion}-para-{#AppVersion}
+OutputBaseFilename=DispersioPDF-Atualizacao-{#FromVersion}-para-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -36,7 +36,7 @@ CloseApplications=yes
 CloseApplicationsFilter=*.exe
 RestartApplications=yes
 ChangesAssociations=yes
-AppMutex=LumenPDF_Running
+AppMutex={#AppMutexes}
 UpdateUninstallLogAppName=no
 
 [Languages]
@@ -47,8 +47,8 @@ WelcomeLabel1=Atualizar o [name]
 WelcomeLabel2=Este assistente vai atualizar o Dispersio PDF da versão {#FromVersion} para a versão {#AppVersion}.%n%nApenas os arquivos alterados serão substituídos. Feche o Dispersio PDF antes de continuar.
 
 [Files]
-Source: "..\build\patch\files\*"; DestDir: "{app}"; Excludes: "LumenShell.dll"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-Source: "..\build\patch\files\LumenShell.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete skipifsourcedoesntexist
+Source: "..\build\patch\files\*"; DestDir: "{app}"; Excludes: "DispersioShell.dll"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\build\patch\files\DispersioShell.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete skipifsourcedoesntexist
 
 Source: "..\assets\pdfdoc.ico"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -61,14 +61,17 @@ Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
 Type: files; Name: "{userprograms}\{#OldAppName}.lnk"
 Type: files; Name: "{userdesktop}\{#OldAppName}.lnk"
 Type: filesandordirs; Name: "{autoprograms}\{#OldAppName}"
+; programa e extensão com o nome antigo
+Type: files; Name: "{app}\{#OldAppExe}"
+Type: files; Name: "{app}\{#OldShellDll}"
 
 [Icons]
 ; recria os atalhos com o identificador do app (ícone correto na barra de tarefas)
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "LumenPDF.App"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "LumenPDF.App"; Check: DesktopIconExists
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "DispersioPDF.App"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "DispersioPDF.App"; Check: DesktopIconExists
 
 [Registry]
-Root: HKA; Subkey: "Software\LumenPDF"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"
+Root: HKA; Subkey: "Software\DispersioPDF"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"
 #define AssocCond "Check: AssocInstalled"
 #include "assoc.iss"
 #include "shellext.iss"
@@ -78,14 +81,22 @@ Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait
 Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [Code]
+function OldProgIdExists(): Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'Software\Classes\{#OldProgId}') or RegKeyExists(HKCU, 'Software\Classes\{#OldProgId}');
+end;
+function OldAppExeKeyExists(): Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'Software\Classes\Applications\{#OldAppExe}') or RegKeyExists(HKCU, 'Software\Classes\Applications\{#OldAppExe}');
+end;
 function ShellExtPresent(): Boolean;
 begin
-  { a LumenShell.dll só existe quando o build tinha o compilador C++ }
-  Result := FileExists(ExpandConstant('{app}\LumenShell.dll'));
+  { a DispersioShell.dll só existe quando o build tinha o compilador C++ }
+  Result := FileExists(ExpandConstant('{app}\DispersioShell.dll'));
 end;
 function AssocInstalled(): Boolean;
 begin
-  Result := RegKeyExists(HKLM, 'Software\Classes\{#ProgId}') or RegKeyExists(HKCU, 'Software\Classes\{#ProgId}');
+  Result := RegKeyExists(HKLM, 'Software\Classes\{#ProgId}') or RegKeyExists(HKCU, 'Software\Classes\{#ProgId}') or OldProgIdExists();
 end;
 
 var
@@ -121,7 +132,7 @@ begin
   if V = '' then
   begin
     MsgBox('O Dispersio PDF não está instalado neste computador.' #13#10 +
-           'Use o instalador completo (LumenPDF-Setup).', mbError, MB_OK);
+           'Use o instalador completo (DispersioPDF-Setup).', mbError, MB_OK);
     Result := False;
   end
   else if (V <> '{#FromVersion}') and (V <> '{#AppVersion}') then

@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.12.0
+
+- **Mudança de nome concluída:** o programa, o instalador, as atualizações e a extensão do Explorador agora se chamam Dispersio PDF (DispersioPDF.exe). Preferências, cópias de segurança, pacotes de tradução e o leitor padrão escolhido no Windows são trazidos automaticamente; "Imprimir com Dispersio PDF" e as miniaturas continuam funcionando.
+
 ## 1.11.0
 
 - **Novo nome: Dispersio PDF.** Dispersão é o fenômeno do ícone: o prisma que abre a luz branca nas cores. Suas preferências, assinaturas e arquivos recentes continuam iguais; os atalhos antigos são trocados pelos novos.

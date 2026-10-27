@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pymupdf
 import zxingcpp
 from PIL import Image
-from lumenpdf import pagamentos as P
+from dispersio import pagamentos as P
 
 HOJE = date(2026, 10, 27)
 
@@ -102,10 +102,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import tempfile, time
 from PySide6.QtWidgets import QApplication, QMessageBox
 app = QApplication.instance() or QApplication([])
-app.setApplicationName("LumenPDF-teste")
-from lumenpdf.config import cfg
-from lumenpdf import dialogs
-from lumenpdf.mainwindow import MainWindow
+app.setApplicationName("DispersioPDF-teste")
+from dispersio.config import cfg
+from dispersio import dialogs
+from dispersio.mainwindow import MainWindow
 cfg.set("detect_payments", True)
 fn = os.path.join(tempfile.mkdtemp(), "boletos.pdf"); doc.save(fn)
 w = MainWindow(); w.show(); w.open_path(fn)

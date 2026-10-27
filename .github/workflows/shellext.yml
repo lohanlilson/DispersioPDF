@@ -1,4 +1,4 @@
-# Compila e testa a LumenShell.dll (miniaturas e painel de visualização do Explorador) no Windows.
+# Compila e testa a DispersioShell.dll (miniaturas e painel de visualização do Explorador) no Windows.
 name: Extensão do Explorador
 
 on:
@@ -30,7 +30,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force saida_shell | Out-Null
-          & build\shellext\test_shellext.exe (Resolve-Path build\shellext\LumenShell.dll) (Resolve-Path teste_shell.pdf) (Resolve-Path saida_shell)
+          & build\shellext\test_shellext.exe (Resolve-Path build\shellext\DispersioShell.dll) (Resolve-Path teste_shell.pdf) (Resolve-Path saida_shell)
           $code = $LASTEXITCODE
           python -c "from PIL import Image; import glob; [Image.open(f).save(f[:-4]+'.png') for f in glob.glob('saida_shell/*.bmp')]"
           if ($code -ne 0) { exit $code }
@@ -40,4 +40,4 @@ jobs:
           name: shellext
           path: |
             saida_shell/*.png
-            build/shellext/LumenShell.dll
+            build/shellext/DispersioShell.dll

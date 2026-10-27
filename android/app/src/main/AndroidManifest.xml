@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
-        android:name=".LumenApp"
+        android:name=".DispersioApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
@@ -16,7 +16,7 @@
         android:supportsRtl="true"
         android:largeHeap="true"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:theme="@style/Theme.Lumen">
+        android:theme="@style/Theme.Dispersio">
 
         <activity
             android:name=".MainActivity"
@@ -24,6 +24,14 @@
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density|uiMode">
+        </activity>
+
+        <!-- Ponto de entrada com o nome antigo do app: o ícone na tela inicial, os atalhos fixados e o
+             "abrir PDFs sempre com" que o usuário já escolheu apontam para este nome e continuam funcionando. -->
+        <activity-alias
+            android:name="io.github.lohanlilson.lumenpdf.MainActivity"
+            android:targetActivity=".MainActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -44,7 +52,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
-        </activity>
+        </activity-alias>
 
         <provider
             android:name="androidx.core.content.FileProvider"

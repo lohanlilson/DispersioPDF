@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtTest import QTest
 app = QApplication([])
-from lumenpdf.viewer import PdfView
+from dispersio.viewer import PdfView
 d = pymupdf.open()
 for _ in range(30): d.new_page()
 v = PdfView(); v.resize(800, 600); v.show()

@@ -11,8 +11,8 @@ from cryptography.x509.oid import NameOID
 from PySide6.QtWidgets import QApplication, QMessageBox
 app = QApplication.instance() or QApplication([])
 QMessageBox.information = staticmethod(lambda *a, **k: None)
-from lumenpdf import ops, signing
-from lumenpdf.compare import CompareWindow, report_html
+from dispersio import ops, signing
+from dispersio.compare import CompareWindow, report_html
 
 tmp = tempfile.mkdtemp()
 

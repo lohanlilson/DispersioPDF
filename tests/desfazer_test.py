@@ -5,8 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pymupdf
 from PySide6.QtWidgets import QApplication, QInputDialog
 app = QApplication.instance() or QApplication([])
-from lumenpdf.mainwindow import MainWindow
-from lumenpdf.doctab import DocTab
+from dispersio.mainwindow import MainWindow
+from dispersio.doctab import DocTab
 
 d = pymupdf.open()
 for i in range(3):

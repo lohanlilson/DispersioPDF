@@ -3,7 +3,7 @@ import io, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pymupdf
 from PIL import Image
-from lumenpdf import ops
+from dispersio import ops
 
 TXT = ["CONTRATO DE CESSÃO DE CRÉDITOS", "Pelo presente instrumento particular, de um lado a cedente,",
        "empresa com sede nesta capital, e de outro lado a cessionária, têm entre si", "justo e contratado o seguinte:",
@@ -53,10 +53,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import tempfile, time
 from PySide6.QtWidgets import QApplication, QMessageBox
 app = QApplication.instance() or QApplication([])
-app.setApplicationName("LumenPDF-teste")
-from lumenpdf.config import cfg
-from lumenpdf.doctab import DocTab
-from lumenpdf.mainwindow import MainWindow
+app.setApplicationName("DispersioPDF-teste")
+from dispersio.config import cfg
+from dispersio.doctab import DocTab
+from dispersio.mainwindow import MainWindow
 cfg.set("detect_orientation", True)
 DocTab.AUTOSAVE_MS = 10 ** 8
 d = pymupdf.open(); text_page(d); scanned(d, 180); p = text_page(d); p.set_rotation(90)

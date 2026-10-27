@@ -1,7 +1,7 @@
-"""Identidade visual do Dispersio PDF (lumen = luz).
+"""Identidade visual do Dispersio PDF (dispersão da luz no prisma).
 
 Marca: o Prisma — a luz branca atravessa um prisma e se abre em violeta e dourado.
-Gera: logo.png (1024), lumenpdf.png (256), lumenpdf.ico (programa) e pdfdoc.ico (arquivos .pdf).
+Gera: logo.png (1024), dispersio.png (256), dispersio.ico (programa) e pdfdoc.ico (arquivos .pdf).
 """
 import math
 
@@ -251,8 +251,8 @@ def save_ico(img, path):
 if __name__ == "__main__":
     a = app_icon().resize((1024, 1024), Image.LANCZOS)
     a.save("logo.png")
-    a.resize((256, 256), Image.LANCZOS).save("lumenpdf.png")
-    save_ico(a, "lumenpdf.ico")
+    a.resize((256, 256), Image.LANCZOS).save("dispersio.png")
+    save_ico(a, "dispersio.ico")
     doc = doc_icon().resize((1024, 1024), Image.LANCZOS)
     save_ico(doc, "pdfdoc.ico")
     doc.resize((256, 256), Image.LANCZOS).save("pdfdoc.png")

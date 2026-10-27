@@ -8,9 +8,9 @@
         android:shortcutShortLabel="@string/sc_scan"
         android:shortcutLongLabel="@string/sc_scan_long">
         <intent
-            android:action="io.github.lohanlilson.lumenpdf.ESCANEAR"
+            android:action="io.github.lohanlilson.dispersio.ESCANEAR"
             android:targetPackage="io.github.lohanlilson.lumenpdf"
-            android:targetClass="io.github.lohanlilson.lumenpdf.MainActivity" />
+            android:targetClass="io.github.lohanlilson.dispersio.MainActivity" />
     </shortcut>
     <shortcut
         android:shortcutId="abrir"
@@ -19,8 +19,8 @@
         android:shortcutShortLabel="@string/sc_open"
         android:shortcutLongLabel="@string/sc_open_long">
         <intent
-            android:action="io.github.lohanlilson.lumenpdf.ABRIR"
+            android:action="io.github.lohanlilson.dispersio.ABRIR"
             android:targetPackage="io.github.lohanlilson.lumenpdf"
-            android:targetClass="io.github.lohanlilson.lumenpdf.MainActivity" />
+            android:targetClass="io.github.lohanlilson.dispersio.MainActivity" />
     </shortcut>
 </shortcuts>

@@ -9,7 +9,7 @@ adb logcat -c || true
 sleep 8
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS || true
 adb shell am instrument -w -r io.github.lohanlilson.lumenpdf.test/androidx.test.runner.AndroidJUnitRunner | tee instr.txt
-adb logcat -d | grep -E "LumenTest|LumenPdf" | grep -v "printToLog\|Node #\||" | tail -80
+adb logcat -d | grep -E "DispersioTest|DispersioPdf" | grep -v "printToLog\|Node #\||" | tail -80
 adb logcat -d | grep "DESEMPENHO" || true
 mkdir -p capturas
 adb pull /sdcard/Android/data/io.github.lohanlilson.lumenpdf/files/capturas/. capturas/ || true
@@ -17,7 +17,7 @@ adb pull /sdcard/Android/data/io.github.lohanlilson.lumenpdf/files/capturas/. ca
 adb uninstall io.github.lohanlilson.lumenpdf >/dev/null 2>&1 || true
 adb install -r "$APK/release/app-release.apk"
 adb logcat -c || true
-adb shell am start -W -n io.github.lohanlilson.lumenpdf/.MainActivity
+adb shell am start -W -n io.github.lohanlilson.lumenpdf/io.github.lohanlilson.dispersio.MainActivity
 sleep 6
 adb exec-out screencap -p > capturas/05_publicacao.png || true
 RELEASE_OK=1
@@ -31,6 +31,6 @@ if [ "$RELEASE_OK" != 1 ]; then
 fi
 if grep -qE "FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|shortMsg" instr.txt || ! grep -q "^OK (" instr.txt; then
   echo "---- logcat ----"
-  adb logcat -d | grep -E "AndroidRuntime|lumenpdf|TestRunner|FATAL|LumenTest|pdfium" | tail -200
+  adb logcat -d | grep -E "AndroidRuntime|lumenpdf|TestRunner|FATAL|DispersioTest|pdfium" | tail -200
   exit 1
 fi

@@ -5,9 +5,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pymupdf
 from PySide6.QtWidgets import QApplication
 app = QApplication.instance() or QApplication([])
-app.setApplicationName("LumenPDF-teste")
-from lumenpdf import backups, dialogs
-from lumenpdf.mainwindow import MainWindow
+app.setApplicationName("DispersioPDF-teste")
+from dispersio import backups, dialogs
+from dispersio.mainwindow import MainWindow
 
 tmp = tempfile.mkdtemp()
 fn = os.path.join(tmp, "contrato.pdf")

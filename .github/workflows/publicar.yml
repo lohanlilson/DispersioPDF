@@ -1,4 +1,4 @@
-# Quando __version__ (lumenpdf/__init__.py) muda na branch main, gera no Windows o executável, o instalador,
+# Quando __version__ (dispersio/__init__.py) muda na branch main, gera no Windows o executável, o instalador,
 # o patch da versão anterior e o versao.json, e publica tudo como Release "vX.Y.Z".
 # O Dispersio PDF instalado detecta a nova versão sozinho.
 name: Publicar versão
@@ -6,7 +6,7 @@ name: Publicar versão
 on:
   push:
     branches: [main]
-    paths: ["lumenpdf/__init__.py", ".github/workflows/publicar.yml"]
+    paths: ["dispersio/__init__.py", ".github/workflows/publicar.yml"]
   workflow_dispatch:
 
 permissions:
@@ -47,7 +47,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          V=$(python -c "import re;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"',open('lumenpdf/__init__.py',encoding='utf-8').read()).group(1))")
+          V=$(python -c "import re;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"',open('dispersio/__init__.py',encoding='utf-8').read()).group(1))")
           echo "VERSAO=$V" >> $GITHUB_ENV
           if gh release view "v$V" >/dev/null 2>&1; then
             echo "A versão $V já foi publicada — nada a fazer."; echo "publicar=nao" >> $GITHUB_OUTPUT
@@ -86,7 +86,7 @@ jobs:
         if: steps.versao.outputs.publicar == 'sim'
         shell: bash
         env:
-          LUMEN_REQUIRE_SHELLEXT: "1"
+          DISPERSIO_REQUIRE_SHELLEXT: "1"
         run: |
           if [ -n "$ANTERIOR" ]; then python build.py --publicar --patch-from "$ANTERIOR"; else python build.py --publicar; fi
           ls -la Saida
@@ -95,8 +95,8 @@ jobs:
         if: steps.versao.outputs.publicar == 'sim'
         shell: pwsh
         run: |
-          $env:LUMEN_NET_TEST = "1"
-          $p = Start-Process -FilePath "dist\LumenPDF\LumenPDF.exe" -ArgumentList "--selftest","selftest.txt" -PassThru; $p.WaitForExit()
+          $env:DISPERSIO_NET_TEST = "1"
+          $p = Start-Process -FilePath "dist\DispersioPDF\DispersioPDF.exe" -ArgumentList "--selftest","selftest.txt" -PassThru; $p.WaitForExit()
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { Write-Error "Autoteste do executável falhou"; exit 1 }
 
@@ -107,7 +107,7 @@ jobs:
         run: |
           python tests/make_shellext_pdf.py teste_shell.pdf
           New-Item -ItemType Directory -Force saida_shell | Out-Null
-          & build\shellext\test_shellext.exe (Resolve-Path dist\LumenPDF\LumenShell.dll) (Resolve-Path teste_shell.pdf) (Resolve-Path saida_shell)
+          & build\shellext\test_shellext.exe (Resolve-Path dist\DispersioPDF\DispersioShell.dll) (Resolve-Path teste_shell.pdf) (Resolve-Path saida_shell)
           if ($LASTEXITCODE -ne 0) { throw "A extensão do Explorador falhou no teste" }
 
       - name: Teste da impressão rápida (/p, vários arquivos ao mesmo tempo)
@@ -116,15 +116,15 @@ jobs:
         shell: pwsh
         run: |
           $out = Join-Path $PWD "impressos"; New-Item -ItemType Directory -Force $out | Out-Null
-          $env:LUMEN_PRINT_TO_PDF = $out
+          $env:DISPERSIO_PRINT_TO_PDF = $out
           $src = Join-Path $PWD "teste_impressao.pdf"
           python -c "import pymupdf; d=pymupdf.open(); [d.new_page().insert_text((72,72),'Pagina %d' % (i+1)) for i in range(3)]; d.save(r'$src')"
-          $procs = 1..3 | ForEach-Object { Copy-Item $src "arq$_.pdf"; Start-Process "dist\LumenPDF\LumenPDF.exe" -ArgumentList "/p", (Join-Path $PWD "arq$_.pdf") -PassThru }
+          $procs = 1..3 | ForEach-Object { Copy-Item $src "arq$_.pdf"; Start-Process "dist\DispersioPDF\DispersioPDF.exe" -ArgumentList "/p", (Join-Path $PWD "arq$_.pdf") -PassThru }
           $procs | ForEach-Object { $_.WaitForExit(120000) | Out-Null }
           Start-Sleep 8
           Get-ChildItem $out
           if ((Get-ChildItem $out -Filter *.pdf).Count -ne 3) { throw "A impressão rápida não gerou os 3 arquivos" }
-          Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process DispersioPDF -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: Teste de atualização (instala a versão anterior e aplica o patch)
         if: steps.versao.outputs.publicar == 'sim' && env.ANTERIOR != ''
@@ -134,28 +134,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
-          gh release download "v$env:ANTERIOR" -p "LumenPDF-Setup-$env:ANTERIOR.exe" -D anterior
-          $p = Start-Process "anterior\LumenPDF-Setup-$env:ANTERIOR.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS="assocpdf"' -PassThru; $p.WaitForExit()
+          # versões até a 1.11 se chamavam LumenPDF-Setup-x.y.z.exe
+          gh release download "v$env:ANTERIOR" -p "*-Setup-$env:ANTERIOR.exe" -D anterior
+          $setup = (Get-ChildItem anterior -Filter "*-Setup-$env:ANTERIOR.exe" | Select-Object -First 1).FullName
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS="assocpdf"' -PassThru; $p.WaitForExit()
           if ($p.ExitCode -ne 0) { throw "Falha ao instalar a versão anterior ($($p.ExitCode))" }
-          Start-Sleep 5; Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 2
-          $patch = Join-Path $PWD "Saida\LumenPDF-Atualizacao-$env:ANTERIOR-para-$env:VERSAO.exe"
+          Start-Sleep 5; Get-Process DispersioPDF, LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 2
+          $patch = Join-Path $PWD "Saida\DispersioPDF-Atualizacao-$env:ANTERIOR-para-$env:VERSAO.exe"
           $key = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{792033AC-5BB3-4C63-8E0C-D8EFE3BA162C}_is1"
           # mesmo caminho da atualização automática: o próprio programa (versão nova) dispara o patch em segundo plano
-          $helper = Join-Path $PWD "dist\LumenPDF\LumenPDF.exe"
+          $helper = Join-Path $PWD "dist\DispersioPDF\DispersioPDF.exe"
           Start-Process $helper -ArgumentList "--run-update", "`"$patch`"", "0" | Out-Null
           $v = ""
           for ($i = 0; $i -lt 90; $i++) {
             Start-Sleep 2
             $v = (Get-ItemProperty $key).DisplayVersion
-            if ($v -eq $env:VERSAO -and -not (Get-Process -Name "LumenPDF-Atualizacao*" -ErrorAction SilentlyContinue)) { break }
+            if ($v -eq $env:VERSAO -and -not (Get-Process -Name "DispersioPDF-Atualizacao*", "LumenPDF-Atualizacao*" -ErrorAction SilentlyContinue)) { break }
           }
-          Start-Sleep 5; Get-Process LumenPDF -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 5; Get-Process DispersioPDF -ErrorAction SilentlyContinue | Stop-Process -Force
           Write-Host "Versão instalada após o patch: $v"
           if ($v -ne $env:VERSAO) { throw "Versão esperada $env:VERSAO, encontrada $v" }
           $dll = (Get-ItemProperty "Registry::HKEY_LOCAL_MACHINE\Software\Classes\CLSID\{6E1F4D3A-8C2B-4A57-9B1E-3D5C7A9F0B21}\InprocServer32").'(default)'
           Write-Host "Extensão do Explorador registrada em: $dll"
           if (-not $dll -or -not (Test-Path $dll)) { throw "Extensão do Explorador não registrada após o patch" }
-          $exe = Join-Path (Get-ItemProperty $key).InstallLocation "LumenPDF.exe"
+          $dir = (Get-ItemProperty $key).InstallLocation
+          $exe = Join-Path $dir "DispersioPDF.exe"
+          if (Test-Path (Join-Path $dir "LumenPDF.exe")) { throw "O executável com o nome antigo ficou na pasta" }
+          # o tipo de arquivo antigo (leitor padrão já escolhido pelo usuário) precisa abrir o programa novo
+          $old = Get-Item "Registry::HKEY_LOCAL_MACHINE\Software\Classes\LumenPDF.Document\shell\open\command" -ErrorAction SilentlyContinue
+          if ($old) { $cmd = $old.GetValue(""); Write-Host "Tipo antigo abre: $cmd"; if ($cmd -notlike "*DispersioPDF.exe*") { throw "Tipo de arquivo antigo não aponta para o programa novo" } }
           $p = Start-Process $exe -ArgumentList "--selftest","selftest-instalado.txt" -PassThru; $p.WaitForExit()
           Get-Content selftest-instalado.txt
           if ($p.ExitCode -ne 0) { throw "Autoteste do programa atualizado falhou" }
@@ -166,7 +173,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp "Saida/LumenPDF-Setup-$VERSAO.exe" Saida/LumenPDF-Setup.exe
+          cp "Saida/DispersioPDF-Setup-$VERSAO.exe" Saida/DispersioPDF-Setup.exe
           gh release create "v$VERSAO" Saida/*.exe Saida/versao.json Saida/manifest.json \
             --title "Dispersio PDF $VERSAO" --notes-file Saida/NOTAS.md --latest
 
@@ -176,8 +183,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view "v$VERSAO" --json assets -q '.assets[].name' | grep -qx LumenPDF-Setup.exe; then
-            gh release download "v$VERSAO" -p "LumenPDF-Setup-$VERSAO.exe" -D tmp
-            cp "tmp/LumenPDF-Setup-$VERSAO.exe" tmp/LumenPDF-Setup.exe
-            gh release upload "v$VERSAO" tmp/LumenPDF-Setup.exe --clobber
+          if ! gh release view "v$VERSAO" --json assets -q '.assets[].name' | grep -qx DispersioPDF-Setup.exe; then
+            gh release download "v$VERSAO" -p "DispersioPDF-Setup-$VERSAO.exe" -D tmp
+            cp "tmp/DispersioPDF-Setup-$VERSAO.exe" tmp/DispersioPDF-Setup.exe
+            gh release upload "v$VERSAO" tmp/DispersioPDF-Setup.exe --clobber
           fi

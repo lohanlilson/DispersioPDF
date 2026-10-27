@@ -9,7 +9,7 @@ marcadores / comentários / anexos à direita e controles de página e zoom flut
 1. Instale o Python (marcando "Add python.exe to PATH").
 2. Dê dois cliques em `build.bat`. Ele cria o ambiente, instala as dependências, gera o executável e o
    instalador (instala o Inno Setup automaticamente via winget, se faltar).
-3. O resultado fica em `Saida\LumenPDF-Setup-<versão>.exe`.
+3. O resultado fica em `Saida\DispersioPDF-Setup-<versão>.exe`.
 
 O instalador: permite escolher a pasta (padrão: Arquivos de Programas), instalar para todos ou só para o usuário,
 criar atalho na Área de Trabalho, registra o programa para abrir .pdf e, ao final, abre a tela do Windows para
@@ -18,18 +18,18 @@ programas" com desinstalador.
 
 ## Atualização automática (GitHub)
 
-O programa consulta a última Release de `UPDATE_REPO` (em `lumenpdf/__init__.py`) e oferece a atualização.
+O programa consulta a última Release de `UPDATE_REPO` (em `dispersio/__init__.py`) e oferece a atualização.
 Para publicar uma versão nova:
 
-1. Aumente `__version__` em `lumenpdf/__init__.py` e descreva as novidades no `CHANGELOG.md` (`## 1.0.1`).
+1. Aumente `__version__` em `dispersio/__init__.py` e descreva as novidades no `CHANGELOG.md` (`## 1.0.1`).
 2. Envie para a branch `main`. O GitHub Actions (`.github/workflows/publicar.yml`) gera no Windows o
    instalador, o patch da versão anterior e o `versao.json`, e cria a Release `v1.0.1`.
 
 ## Atualizações por patch (manual)
 
-1. Aumente `__version__` em `lumenpdf/__init__.py` (ex.: 1.0.0 → 1.0.1).
+1. Aumente `__version__` em `dispersio/__init__.py` (ex.: 1.0.0 → 1.0.1).
 2. Rode `gerar_patch.bat` e informe a versão anterior (ex.: 1.0.0).
-3. Será criado `Saida\LumenPDF-Atualizacao-1.0.0-para-1.0.1.exe`, que contém **só os arquivos alterados**,
+3. Será criado `Saida\DispersioPDF-Atualizacao-1.0.0-para-1.0.1.exe`, que contém **só os arquivos alterados**,
    encontra a pasta onde o programa está instalado, fecha o programa se estiver aberto e substitui os arquivos.
 
 Cada build fica guardado em `releases\<versão>` — **não apague essa pasta**, ela é a base para os próximos patches.
@@ -77,15 +77,15 @@ seleção, lista).
 
 ```
 main.py                 ponto de entrada
-lumenpdf/mainwindow.py  janela, abas, menus e todas as ferramentas
-lumenpdf/doctab.py      documento aberto: desfazer/refazer, salvar, operações de página
-lumenpdf/viewer.py      renderização, seleção, busca e ferramentas de comentário
-lumenpdf/panels.py      painéis laterais, barra rápida, organizador
-lumenpdf/dialogs.py     diálogos
-lumenpdf/ops.py         operações de PDF sem interface (testáveis)
-lumenpdf/signing.py     assinatura digital e validação (pyHanko)
-lumenpdf/theme.py       temas claro/escuro
-lumenpdf/icons.py       ícones vetoriais
+dispersio/mainwindow.py  janela, abas, menus e todas as ferramentas
+dispersio/doctab.py      documento aberto: desfazer/refazer, salvar, operações de página
+dispersio/viewer.py      renderização, seleção, busca e ferramentas de comentário
+dispersio/panels.py      painéis laterais, barra rápida, organizador
+dispersio/dialogs.py     diálogos
+dispersio/ops.py         operações de PDF sem interface (testáveis)
+dispersio/signing.py     assinatura digital e validação (pyHanko)
+dispersio/theme.py       temas claro/escuro
+dispersio/icons.py       ícones vetoriais
 ```
 
 ## Atalhos principais

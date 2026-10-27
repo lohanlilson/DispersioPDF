@@ -1,4 +1,4 @@
-// Testa a LumenShell.dll como o Explorador faz: carrega a DLL, cria a miniatura e o painel de visualização
+// Testa a DispersioShell.dll como o Explorador faz: carrega a DLL, cria a miniatura e o painel de visualização
 // numa thread STA e salva as imagens (BMP) para conferência. Uso: test_shellext <dll> <pdf> <pasta_saida>
 #define NOMINMAX
 #include <windows.h>
@@ -13,8 +13,8 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
 
-static const CLSID CLSID_LumenThumb = {0x6e1f4d3a, 0x8c2b, 0x4a57, {0x9b, 0x1e, 0x3d, 0x5c, 0x7a, 0x9f, 0x0b, 0x21}};
-static const CLSID CLSID_LumenPreview = {0x7f2a5e4b, 0x9d3c, 0x4b68, {0xac, 0x2f, 0x4e, 0x6d, 0x8b, 0x0a, 0x1c, 0x32}};
+static const CLSID CLSID_DispersioThumb = {0x6e1f4d3a, 0x8c2b, 0x4a57, {0x9b, 0x1e, 0x3d, 0x5c, 0x7a, 0x9f, 0x0b, 0x21}};
+static const CLSID CLSID_DispersioPreview = {0x7f2a5e4b, 0x9d3c, 0x4b68, {0xac, 0x2f, 0x4e, 0x6d, 0x8b, 0x0a, 0x1c, 0x32}};
 typedef HRESULT(STDAPICALLTYPE* GetClassObjectFn)(REFCLSID, REFIID, void**);
 
 static int SaveBmp(HBITMAP hb, const std::wstring& path, int* inked) {
@@ -56,7 +56,7 @@ int wmain(int argc, wchar_t** argv) {
     // ---- miniatura
     {
         IClassFactory* cf = nullptr;
-        HRESULT hr = getco(CLSID_LumenThumb, IID_PPV_ARGS(&cf));
+        HRESULT hr = getco(CLSID_DispersioThumb, IID_PPV_ARGS(&cf));
         IInitializeWithStream* init = nullptr;
         if (SUCCEEDED(hr)) hr = cf->CreateInstance(nullptr, IID_PPV_ARGS(&init));
         IStream* st = nullptr;
@@ -92,7 +92,7 @@ int wmain(int argc, wchar_t** argv) {
         RECT rc;
         GetClientRect(host, &rc);
         IClassFactory* cf = nullptr;
-        HRESULT hr = getco(CLSID_LumenPreview, IID_PPV_ARGS(&cf));
+        HRESULT hr = getco(CLSID_DispersioPreview, IID_PPV_ARGS(&cf));
         IInitializeWithStream* init = nullptr;
         if (SUCCEEDED(hr)) hr = cf->CreateInstance(nullptr, IID_PPV_ARGS(&init));
         IStream* st = nullptr;
