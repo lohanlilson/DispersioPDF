@@ -124,7 +124,7 @@ artigos.search = fake_search
 artigos.by_ids = lambda ids, key="", filters=(): [A(900 + n) for n, _ in enumerate(ids)]
 artigos.citing = lambda wid, page=1, key="", filters=(), sort="citations": ([A(800)], 1)
 artigos.by_key = lambda key, api_key="": A(7, title="Pelo DOI") if False else artigos.Article("Pelo DOI", id="W77")
-cfg.set("articles_english", False)
+cfg.set("articles_english", False); cfg.set("articles_filters", "pdf")
 d2 = artigos_ui.ArticlesDialog(w); d2.resize(900, 700); d2.show()
 d2.en.setChecked(False)
 d2.q.setText("crueldade animal"); d2.search()
