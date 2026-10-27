@@ -129,3 +129,16 @@ jobs:
             --notes "Link fixo do APK mais recente: https://github.com/${{ github.repository }}/releases/download/android/DispersioPDF.apk" --latest=false
           gh release upload android DispersioPDF.apk --clobber
           gh release delete-asset android LumenPDF.apk -y 2>/dev/null || true  # nome antigo
+
+      - name: Só a versão atual como estável (apps antigos pegam a primeira da lista)
+        if: steps.versao.outputs.publicar == 'sim'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # o GitHub não lista as Releases em ordem de versão; até a 0.11.0 o app usava a primeira "android-v" não marcada
+          # como pré-lançamento. Marcar as anteriores faz todos os apps instalados acharem a versão nova.
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name | startswith(\"android-v\")) | select(.tag_name != \"android-v$VERSAO\") | select(.prerelease | not) | .id" |
+          while read -r id; do
+            gh api -X PATCH "repos/${{ github.repository }}/releases/$id" -F prerelease=true --jq '.tag_name + " → pré-lançamento"'
+          done

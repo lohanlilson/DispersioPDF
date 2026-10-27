@@ -45,28 +45,30 @@ object Updater {
     suspend fun check(): UpdateInfo? = withContext(Dispatchers.IO) {
         var arr: JSONArray? = null
         for (repo in REPOS) {
-            val c = get("https://api.github.com/repos/$repo/releases?per_page=30")
+            val c = get("https://api.github.com/repos/$repo/releases?per_page=100")
             if (c.responseCode == 404) { c.disconnect(); continue }
             arr = c.inputStream.use { JSONArray(it.bufferedReader().readText()) }
             break
         }
         if (arr == null) return@withContext null
+        // o GitHub não devolve as Releases em ordem de versão: procura a maior entre todas
+        var best: UpdateInfo? = null
         for (i in 0 until arr.length()) {
             val r = arr.getJSONObject(i)
             val tag = r.optString("tag_name")
             if (!tag.startsWith("android-v") || r.optBoolean("draft") || r.optBoolean("prerelease")) continue
             val ver = tag.removePrefix("android-v")
-            if (!newer(ver, BuildConfig.VERSION_NAME)) return@withContext null
+            if (!newer(ver, BuildConfig.VERSION_NAME) || (best != null && !newer(ver, best.version))) continue
             val assets = r.getJSONArray("assets")
             for (k in 0 until assets.length()) {
                 val a = assets.getJSONObject(k)
                 if (a.optString("name").endsWith(".apk")) {
-                    return@withContext UpdateInfo(ver, r.optString("body"), a.getString("browser_download_url"), a.optLong("size"))
+                    best = UpdateInfo(ver, r.optString("body"), a.getString("browser_download_url"), a.optLong("size"))
+                    break
                 }
             }
-            return@withContext null
         }
-        null
+        best
     }
 
     suspend fun download(context: Context, info: UpdateInfo, progress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
