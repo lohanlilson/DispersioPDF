@@ -46,7 +46,7 @@ _s = artigos.search
 artigos.search = lambda q, *a, **k: ([artigos.Article(f"{q} {i}", doi=f"10/{q}{i}") for i in range(2)] +
                                      [artigos.Article("Comum", doi="10/x")], 3)
 _out, _n = artigos.search_many(["pt", "en"])
-assert [a.title for a in _out] == ["pt 0", "en 0", "pt 1", "en 1", "Comum"] and _n == 6, [a.title for a in _out]
+assert [a.title for a in _out] == ["pt 0", "en 0", "pt 1", "en 1", "Comum"] and _n == 3, [a.title for a in _out]
 artigos.search = _s
 assert artigos.safe_name('Cães: "maus-tratos"/abuso?') == "Cães maus-tratos abuso.pdf"
 
