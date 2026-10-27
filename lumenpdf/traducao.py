@@ -177,6 +177,25 @@ class _Engine:
         return ["".join(r.hypotheses[0]).replace("▁", " ").strip() for r in res]
 
 
+def release():
+    """Libera os tradutores antes de o Python encerrar (no Windows, destruí-los no fim do processo pode travar)."""
+    import sys
+    dt = sys.modules.get("lumenpdf.doctab")
+    if dt is not None:
+        dt.stop_background()          # primeiro termina as traduções em andamento
+    with _lock:
+        for e in _engines.values():
+            try:
+                e.tr.unload_model()
+            except Exception:
+                pass
+        _engines.clear()
+
+
+import atexit as _atexit
+_atexit.register(release)
+
+
 def _engine(pair):
     with _lock:
         if pair not in _engines:

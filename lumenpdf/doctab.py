@@ -42,7 +42,7 @@ def stop_background():
     for th in list(_RUNNING):
         th.requestInterruption()
     for th in list(_RUNNING):
-        th.wait(5000)
+        th.wait(15000)
 
 
 import atexit as _atexit

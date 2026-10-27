@@ -23,7 +23,15 @@ class _Job(QThread):
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
-        self.cancel = False
+        self._cancel = False
+
+    @property
+    def cancel(self):
+        return self._cancel or self.isInterruptionRequested()
+
+    @cancel.setter
+    def cancel(self, v):
+        self._cancel = v
 
     def run(self):
         try:
@@ -42,8 +50,9 @@ def _looks_english(q):
 
 
 def _keep(owner, job):
+    from .doctab import _track     # parado com segurança se o programa fechar no meio
     owner._jobs = [j for j in getattr(owner, "_jobs", []) if j.isRunning()] + [job]
-    return job
+    return _track(job)
 
 
 # ------------------------------------------------------------------ pacotes de idioma

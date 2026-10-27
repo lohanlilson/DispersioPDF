@@ -74,21 +74,12 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python tests/smoke_test.py
-          python tests/features_test.py
-          python tests/autoscroll_test.py
-          python tests/sharpness_test.py
-          python tests/split_test.py
-          python tests/novidades_test.py
-          python tests/desfazer_test.py
-          python tests/ferramentas_test.py
-          python tests/versoes_test.py
-          python tests/novas_ferramentas_test.py
-          python tests/medir_test.py
-          python tests/autosalvar_test.py
-          python tests/pagamentos_test.py
-          python tests/orientacao_test.py
-          python tests/artigos_test.py
+          for t in smoke_test features_test autoscroll_test sharpness_test split_test novidades_test desfazer_test ferramentas_test versoes_test novas_ferramentas_test medir_test autosalvar_test pagamentos_test orientacao_test artigos_test; do
+            echo "::group::$t"
+            python -X faulthandler tests/$t.py; c=$?
+            echo "::endgroup::"
+            if [ $c -ne 0 ]; then echo "::error::$t terminou com código $c"; exit 1; fi
+          done
 
       - name: Gerar executável, instalador e patch
         if: steps.versao.outputs.publicar == 'sim'
