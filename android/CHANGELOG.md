@@ -1,5 +1,9 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.12.0
+
+- **Novo carimbo de assinatura**, igual ao do computador: cartão índigo com o prisma colorido, nome em destaque, data e motivo/local, com o CPF mascarado.
+
 ## 0.11.1
 
 - **Atualização automática corrigida**: o app às vezes não encontrava a versão mais nova e dizia que já estava atualizado.

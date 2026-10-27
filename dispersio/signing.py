@@ -124,24 +124,20 @@ def _fit(font, text, max_w, max_h, start, max_lines, lh=1.18):
     return 4, _wrap(font, text, 4, max_w)[:max_lines]
 
 
-def _prism_vector(page, cx, cy, side, opacity=0.24):
-    """Símbolo do Dispersio (feixe + prisma + leque de luz) em vetor — nítido em qualquer zoom e na impressão."""
+# Carimbo "cartão escuro": as cores do ícone do programa (fundo índigo, prisma claro e raios lilás, azul e âmbar)
+STAMP_BG = (0.13, 0.08, 0.33)
+STAMP_LABEL = (0.74, 0.64, 0.96)
+STAMP_NAME = (1.0, 1.0, 1.0)
+STAMP_TEXT = (0.85, 0.83, 0.95)
+_PRISM_FILL = (0.91, 0.88, 0.99)
+_RAYS = ((0.74, 0.64, 0.96), (0.45, 0.62, 0.97), (0.97, 0.76, 0.42))
+_RAY_Y = (((488, 492), (360, 430)), ((500, 506), (490, 550)), ((512, 520), (620, 690)))
+_TRI = ((490, 330), (640, 630), (340, 630))
+
+
+def _rounded_triangle(corners, r):
+    """Pontos de um triângulo com cantos arredondados (coordenadas do desenho, 0–1024)."""
     import math
-    import pymupdf
-    u = side / 1024
-    ox, oy = cx - 512 * u, cy - 512 * u
-    P = lambda x, y: pymupdf.Point(ox + x * u, oy + y * u)  # noqa: E731
-    violet, light, mid, gold = (0.43, 0.24, 0.94), (0.67, 0.55, 1.0), (0.43, 0.24, 0.94), (1.0, 0.69, 0.27)
-    page.draw_line(P(60, 660), P(430, 560), color=violet, width=30 * u, lineCap=1, stroke_opacity=opacity)
-    apex = P(600, 520)
-    for (ex, ey), c in zip([(980, 380), (980, 520), (980, 660)], [light, mid, gold]):
-        e = P(ex, ey)
-        ang = math.atan2(e.y - apex.y, e.x - apex.x) + math.pi / 2
-        dx, dy = math.cos(ang) * 40 * u, math.sin(ang) * 40 * u
-        page.draw_polyline([apex, pymupdf.Point(e.x - dx, e.y - dy), pymupdf.Point(e.x + dx, e.y + dy)],
-                           color=None, fill=c, closePath=True, fill_opacity=opacity)
-    # prisma com cantos arredondados (polígono único, sem sobreposição de traço e preenchimento)
-    corners, r = [(500, 250), (730, 690), (270, 690)], 34
     pts = []
     for k, (x, y) in enumerate(corners):
         a, b = corners[k - 1], corners[(k + 1) % 3]
@@ -158,46 +154,106 @@ def _prism_vector(page, cx, cy, side, opacity=0.24):
         while a1 - a2 > math.pi: a2 += 2 * math.pi  # noqa: E701
         for t in range(9):
             ang = a1 + (a2 - a1) * t / 8
-            pts.append(P(c[0] + r * math.cos(ang), c[1] + r * math.sin(ang)))
-    page.draw_polyline(pts, color=None, fill=(0.36, 0.18, 0.82), closePath=True, fill_opacity=opacity)
+            pts.append((c[0] + r * math.cos(ang), c[1] + r * math.sin(ang)))
+    return pts
+
+
+def _prism_vector(page, cx, cy, side):
+    """Símbolo do Dispersio (feixe branco, prisma e três raios) em vetor — nítido em qualquer zoom e na impressão."""
+    import pymupdf
+    u = side / 1024
+    ox, oy = cx - 512 * u, cy - 512 * u
+    P = lambda x, y: pymupdf.Point(ox + x * u, oy + y * u)  # noqa: E731
+    page.draw_line(P(40, 640), P(400, 550), color=(1, 1, 1), width=26 * u, lineCap=1)
+    for ((y0, y1), (e0, e1)), c in zip(_RAY_Y, _RAYS):
+        page.draw_polyline([P(590, y0), P(990, e0), P(990, e1), P(590, y1)], color=None, fill=c, closePath=True)
+    page.draw_polyline([P(x, y) for x, y in _rounded_triangle(_TRI, 30)], color=None, fill=_PRISM_FILL, closePath=True)
+
+
+def mask_doc_id(doc_id):
+    """CPF mascarado (LGPD), como nos documentos do governo; CNPJ é público e sai completo."""
+    d = "".join(ch for ch in (doc_id or "") if ch.isdigit())
+    if len(d) == 11:
+        return f"CPF ***.{d[3:6]}.{d[6:9]}-**"
+    if len(d) == 14:
+        return f"CNPJ {d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+    return ""
+
+
+def stamp_lines(signer_name, reason, location, when):
+    """Textos do carimbo: rótulo, nome e detalhes (mesma regra no app Android)."""
+    parts = signer_name.rsplit(":", 1)
+    name, doc_id = (parts[0].strip(), parts[1].strip()) if len(parts) == 2 and parts[1].strip().isdigit() \
+        else (signer_name.strip(), "")
+    tz = when.strftime("%z")
+    details = [mask_doc_id(doc_id), f"{when:%d/%m/%Y %H:%M:%S} {tz[:3]}:{tz[3:]}",
+               " · ".join(x for x in (reason.strip(), location.strip()) if x)]
+    return name, [x for x in details if x]
+
+
+def stamp_layout(W, H, name, details, width_of):
+    """Posição e tamanho de cada linha. width_of(texto, negrito, tamanho) mede o texto.
+    Devolve (lado do prisma, [(texto, tipo, tamanho, x, linha de base)]) com y medido do topo."""
+    pad = max(2.0, min(W, H) * 0.11)
+    U = min(H, W * 0.42)  # unidade de tamanho (caixas altas e estreitas não ganham letras gigantes)
+    side = min(U * 0.9, W * 0.3)
+    max_w = W - pad - side * 0.98
+    size = U * 0.16
+    while size > U * 0.11 and width_of(name, True, size) > max_w:
+        size -= 0.25
+    names = [name]
+    if width_of(name, True, size) > max_w:  # nome muito comprido: quebra em duas linhas
+        words, first = name.split(), ""
+        for k in range(1, len(words) + 1):
+            if width_of(" ".join(words[:k]), True, size) <= max_w:
+                first = " ".join(words[:k])
+        first = first or words[0]
+        names = [first, name[len(first):].strip()]
+    for t in names:
+        while size > 3 and width_of(t, True, size) > max_w:
+            size -= 0.2
+    label = min(U * 0.089, size * 0.62)
+    text = min(U * 0.092, size * 0.66)
+    for t in details:
+        while text > 3 and width_of(t, False, text) > max_w:
+            text -= 0.2
+    while label > 3 and width_of("ASSINADO DIGITALMENTE", True, label) > max_w:
+        label -= 0.2
+    out = [["ASSINADO DIGITALMENTE", "label", label]] + [[t, "name", size] for t in names] + \
+        [[t, "text", text] for t in details]
+    gap = {"label": 1.55, "name": 1.32, "text": 1.42}
+    total = sum(sz * gap[k] for _, k, sz in out)
+    k = min(1.0, (H - 2 * pad) / total) if total else 1
+    y = (H - total * k) / 2
+    lines = []
+    for t, kind, sz in out:
+        sz *= k
+        lines.append((t, kind, sz, pad, y + sz * 0.95))
+        y += sz * gap[kind]
+    return side, lines
 
 
 def stamp_pdf(signer_name, box_w, box_h, reason="", location="", when=None):
-    """Aparência da assinatura em vetor (como Acrobat/Foxit): símbolo do programa esmaecido ao fundo, nome do
-    signatário em destaque à esquerda e detalhes à direita. Texto real com fonte embutida (nítido e pesquisável)."""
+    """Aparência da assinatura em vetor: cartão índigo com o prisma do programa à direita, rótulo, nome e detalhes.
+    Texto real com fonte embutida (nítido e pesquisável)."""
     import pymupdf
     when = when or datetime.now().astimezone()
     W, H = max(box_w, 20), max(box_h, 10)
     doc = pymupdf.open()
     page = doc.new_page(width=W, height=H)
-    _prism_vector(page, W / 2, H / 2, min(W, H) * 1.15)
-    name = signer_name.split(":")[0].strip() if ":" in signer_name and signer_name.split(":")[-1].strip().isdigit() \
-        else signer_name
-    tz = when.strftime("%z")
-    details = (f"Assinado de forma digital por {signer_name}\n"
-               f"Data: {when:%d/%m/%Y %H:%M:%S} {tz[:3]}'{tz[3:]}'")
-    if reason:
-        details += f"\nMotivo: {reason}"
-    if location:
-        details += f"\nLocal: {location}"
+    page.draw_rect(pymupdf.Rect(0, 0, W, H), color=None, fill=STAMP_BG, radius=(min(W, H) * 0.08 / W, min(W, H) * 0.08 / H))
     fb, fr = _font_file(True), _font_file(False)
     fbold = pymupdf.Font(fontfile=fb) if fb else pymupdf.Font("hebo")
     freg = pymupdf.Font(fontfile=fr) if fr else pymupdf.Font("helv")
-    page.insert_font(fontname="LB", fontfile=fb) if fb else page.insert_font(fontname="LB", fontbuffer=fbold.buffer)
-    page.insert_font(fontname="LR", fontfile=fr) if fr else page.insert_font(fontname="LR", fontbuffer=freg.buffer)
-    pad = min(3.0, H * 0.06)
-    split = W * 0.46
-    ink = (0.08, 0.08, 0.10)
-    for font, fname, text, x, w, start, maxl in (
-            (fbold, "LB", name, pad, split - 2 * pad, H * 0.30, 3),
-            (freg, "LR", details, split + pad, W - split - 2 * pad, H * 0.16, 8)):
-        size, lines = _fit(font, text, w, H - 2 * pad, start, maxl)
-        lh = size * 1.18
-        asc = font.ascender * size
-        y = (H - lh * len(lines)) / 2 + asc
-        for l in lines:
-            page.insert_text((x, y), l, fontname=fname, fontsize=size, color=ink)
-            y += lh
+    page.insert_font(fontname="LB", fontbuffer=fbold.buffer)
+    page.insert_font(fontname="LR", fontbuffer=freg.buffer)
+    name, details = stamp_lines(signer_name, reason, location, when)
+    side, lines = stamp_layout(W, H, name, details,
+                               lambda t, bold, sz: (fbold if bold else freg).text_length(t, sz))
+    _prism_vector(page, W - side * 0.5 - min(W, H) * 0.03, H / 2, side)
+    colors = {"label": STAMP_LABEL, "name": STAMP_NAME, "text": STAMP_TEXT}
+    for t, kind, sz, x, y in lines:
+        page.insert_text((x, y), t, fontname="LR" if kind == "text" else "LB", fontsize=sz, color=colors[kind])
     doc.subset_fonts()
     return doc.tobytes(garbage=3, deflate=True)
 

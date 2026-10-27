@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.13.0
+
+- **Novo carimbo de assinatura** com a cara do Dispersio: cartão índigo com o prisma colorido, "Assinado digitalmente", nome em destaque, data e motivo/local. O CPF aparece mascarado (***.456.789-**), como nos documentos do governo; o CNPJ sai completo. Continua em vetor, nítido e com texto pesquisável.
+
 ## 1.12.0
 
 - **Mudança de nome concluída:** o programa, o instalador, as atualizações e a extensão do Explorador agora se chamam Dispersio PDF (DispersioPDF.exe). Preferências, cópias de segurança, pacotes de tradução e o leitor padrão escolhido no Windows são trazidos automaticamente; "Imprimir com Dispersio PDF" e as miniaturas continuam funcionando.

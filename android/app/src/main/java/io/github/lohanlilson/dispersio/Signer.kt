@@ -218,64 +218,131 @@ object PdfSigner {
         return 3.5f to text.split("\n").take(maxLines)
     }
 
-    /** Desenha o carimbo (como no Dispersio do computador): símbolo esmaecido, nome à esquerda, detalhes à direita. */
-    private fun drawStamp(doc: PDDocument, cs: PDPageContentStream, w: Float, h: Float, cn: String, reason: String, location: String) {
-        // símbolo do prisma, em vetor e esmaecido
-        val gs = PDExtendedGraphicsState().apply { nonStrokingAlphaConstant = 0.22f; strokingAlphaConstant = 0.22f }
-        cs.saveGraphicsState()
-        cs.setGraphicsStateParameters(gs)
-        val side = minOf(w, h) * 1.1f
-        val u = side / 1024f
-        val ox = w / 2 - 512 * u
-        val oy = h / 2 - 512 * u
-        fun px(x: Float) = ox + x * u
-        fun py(y: Float) = oy + (1024 - y) * u
-        cs.setStrokingColor(0.43f, 0.24f, 0.94f)
-        cs.setLineWidth(30 * u)
-        cs.setLineCapStyle(1)
-        cs.moveTo(px(60f), py(660f)); cs.lineTo(px(430f), py(560f)); cs.stroke()
-        val apex = px(600f) to py(520f)
-        listOf(Triple(380f, floatArrayOf(0.67f, 0.55f, 1f), 0), Triple(520f, floatArrayOf(0.43f, 0.24f, 0.94f), 1),
-            Triple(660f, floatArrayOf(1f, 0.69f, 0.27f), 2)).forEach { (ey, c, _) ->
-            val ex = px(980f); val eyy = py(ey)
-            val ang = Math.atan2((eyy - apex.second).toDouble(), (ex - apex.first).toDouble()) + Math.PI / 2
-            val dx = (Math.cos(ang) * 40 * u).toFloat(); val dy = (Math.sin(ang) * 40 * u).toFloat()
-            cs.setNonStrokingColor(c[0], c[1], c[2])
-            cs.moveTo(apex.first, apex.second); cs.lineTo(ex - dx, eyy - dy); cs.lineTo(ex + dx, eyy + dy); cs.closePath(); cs.fill()
-        }
-        cs.setNonStrokingColor(0.36f, 0.18f, 0.82f)
-        cs.moveTo(px(500f), py(250f)); cs.lineTo(px(730f), py(690f)); cs.lineTo(px(270f), py(690f)); cs.closePath(); cs.fill()
-        cs.restoreGraphicsState()
+    private val STAMP_BG = floatArrayOf(0.13f, 0.08f, 0.33f)
+    private val STAMP_LABEL = floatArrayOf(0.74f, 0.64f, 0.96f)
+    private val STAMP_NAME = floatArrayOf(1f, 1f, 1f)
+    private val STAMP_TEXT = floatArrayOf(0.85f, 0.83f, 0.95f)
+    private val PRISM_FILL = floatArrayOf(0.91f, 0.88f, 0.99f)
+    private val RAYS = listOf(floatArrayOf(0.74f, 0.64f, 0.96f), floatArrayOf(0.45f, 0.62f, 0.97f), floatArrayOf(0.97f, 0.76f, 0.42f))
+    private val RAY_Y = listOf(floatArrayOf(488f, 492f, 360f, 430f), floatArrayOf(500f, 506f, 490f, 550f), floatArrayOf(512f, 520f, 620f, 690f))
 
-        val (name, _) = Certs.splitName(cn)
-        val now = Calendar.getInstance()
-        val tz = SimpleDateFormat("Z", Locale.US).format(now.time)
-        var details = "Assinado de forma digital por $cn\nData: " +
-            SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale("pt", "BR")).format(now.time) + " ${tz.take(3)}'${tz.drop(3)}'"
-        if (reason.isNotBlank()) details += "\nMotivo: $reason"
-        if (location.isNotBlank()) details += "\nLocal: $location"
-        val pad = minOf(3f, h * 0.06f)
-        val split = w * 0.46f
+    /** CPF mascarado (LGPD); CNPJ é público e sai completo. Mesma regra do computador (signing.mask_doc_id). */
+    fun maskDocId(id: String?): String {
+        val d = id.orEmpty().filter { it.isDigit() }
+        return when (d.length) {
+            11 -> "CPF ***.${d.substring(3, 6)}.${d.substring(6, 9)}-**"
+            14 -> "CNPJ ${d.substring(0, 2)}.${d.substring(2, 5)}.${d.substring(5, 8)}/${d.substring(8, 12)}-${d.substring(12)}"
+            else -> ""
+        }
+    }
+
+    private fun roundedTriangle(r: Float): List<Pair<Float, Float>> {
+        val corners = listOf(490f to 330f, 640f to 630f, 340f to 630f)
+        val pts = ArrayList<Pair<Float, Float>>()
+        for (k in 0 until 3) {
+            val (x, y) = corners[k]; val a = corners[(k + 2) % 3]; val b = corners[(k + 1) % 3]
+            val v1x = a.first - x; val v1y = a.second - y; val v2x = b.first - x; val v2y = b.second - y
+            val l1 = Math.hypot(v1x.toDouble(), v1y.toDouble()); val l2 = Math.hypot(v2x.toDouble(), v2y.toDouble())
+            val n1x = v1x / l1; val n1y = v1y / l1; val n2x = v2x / l2; val n2y = v2y / l2
+            val half = Math.acos((n1x * n2x + n1y * n2y).coerceIn(-1.0, 1.0)) / 2
+            val dist = r / Math.tan(half)
+            val p1x = x + n1x * dist; val p1y = y + n1y * dist; val p2x = x + n2x * dist; val p2y = y + n2y * dist
+            val bx = n1x + n2x; val by = n1y + n2y; val bl = Math.hypot(bx, by)
+            val cx = x + bx / bl * r / Math.sin(half); val cy = y + by / bl * r / Math.sin(half)
+            val a1 = Math.atan2(p1y - cy, p1x - cx); var a2 = Math.atan2(p2y - cy, p2x - cx)
+            while (a2 - a1 > Math.PI) a2 -= 2 * Math.PI
+            while (a1 - a2 > Math.PI) a2 += 2 * Math.PI
+            for (t in 0..8) {
+                val ang = a1 + (a2 - a1) * t / 8
+                pts += (cx + r * Math.cos(ang)).toFloat() to (cy + r * Math.sin(ang)).toFloat()
+            }
+        }
+        return pts
+    }
+
+    /** Símbolo do Dispersio em vetor (feixe branco, prisma e três raios). (cx, cy) com y para cima. */
+    private fun drawPrism(cs: PDPageContentStream, cx: Float, cy: Float, side: Float) {
+        val u = side / 1024f
+        fun px(x: Float) = cx + (x - 512f) * u
+        fun py(y: Float) = cy - (y - 512f) * u
+        cs.setStrokingColor(1f, 1f, 1f); cs.setLineWidth(26 * u); cs.setLineCapStyle(1)
+        cs.moveTo(px(40f), py(640f)); cs.lineTo(px(400f), py(550f)); cs.stroke()
+        for ((i, c) in RAYS.withIndex()) {
+            val r = RAY_Y[i]
+            cs.setNonStrokingColor(c[0], c[1], c[2])
+            cs.moveTo(px(590f), py(r[0])); cs.lineTo(px(990f), py(r[2])); cs.lineTo(px(990f), py(r[3])); cs.lineTo(px(590f), py(r[1]))
+            cs.closePath(); cs.fill()
+        }
+        cs.setNonStrokingColor(PRISM_FILL[0], PRISM_FILL[1], PRISM_FILL[2])
+        val pts = roundedTriangle(30f)
+        cs.moveTo(px(pts[0].first), py(pts[0].second))
+        for (p in pts.drop(1)) cs.lineTo(px(p.first), py(p.second))
+        cs.closePath(); cs.fill()
+    }
+
+    private fun roundedRect(cs: PDPageContentStream, w: Float, h: Float, r: Float) {
+        val k = 0.5523f * r
+        cs.moveTo(r, 0f); cs.lineTo(w - r, 0f); cs.curveTo(w - r + k, 0f, w, r - k, w, r)
+        cs.lineTo(w, h - r); cs.curveTo(w, h - r + k, w - r + k, h, w - r, h)
+        cs.lineTo(r, h); cs.curveTo(r - k, h, 0f, h - r + k, 0f, h - r)
+        cs.lineTo(0f, r); cs.curveTo(0f, r - k, r - k, 0f, r, 0f); cs.closePath()
+    }
+
+    private class StampLine(val text: String, val kind: Int, var size: Float)  // 0 rótulo, 1 nome, 2 detalhe
+
+    /** Carimbo "cartão escuro" com as cores do ícone — mesmo desenho do computador (signing.stamp_pdf). */
+    private fun drawStamp(doc: PDDocument, cs: PDPageContentStream, w: Float, h: Float, cn: String, reason: String, location: String) {
         val bold = font(doc, true)
         val reg = font(doc, false)
-        cs.setNonStrokingColor(0.08f, 0.08f, 0.10f)
-        for ((f, text, x, mw, start, maxL) in listOf(
-            Sextuple(bold, name, pad, split - 2 * pad, h * 0.30f, 3),
-            Sextuple(reg, details, split + pad, w - split - 2 * pad, h * 0.16f, 8))) {
-            val (size, lines) = fit(f, text, mw, h - 2 * pad, start, maxL)
-            val lh = size * 1.18f
-            var y = h - (h - lh * lines.size) / 2 - size * 0.92f
-            for (l in lines) {
-                cs.beginText(); cs.setFont(f, size)
-                if (f === bold) {
-                    // negrito garantido mesmo sem a fonte bold no aparelho: contorno + preenchimento
-                    cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL_STROKE)
-                    cs.setStrokingColor(0.08f, 0.08f, 0.10f)
-                    cs.setLineWidth(size * 0.045f)
-                } else cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL)
-                cs.newLineAtOffset(x, y); cs.showText(l); cs.endText()
-                y -= lh
-            }
+        fun width(t: String, b: Boolean, s: Float) = runCatching { (if (b) bold else reg).getStringWidth(t) / 1000f * s }.getOrDefault(t.length * s * 0.6f)
+        val (name, docId) = Certs.splitName(cn)
+        val now = Calendar.getInstance()
+        val details = listOf(maskDocId(docId),
+            SimpleDateFormat("dd/MM/yyyy HH:mm:ss XXX", Locale("pt", "BR")).format(now.time),
+            listOf(reason.trim(), location.trim()).filter { it.isNotEmpty() }.joinToString(" · ")).filter { it.isNotEmpty() }
+
+        val pad = maxOf(2f, minOf(w, h) * 0.11f)
+        val unit = minOf(h, w * 0.42f)
+        val side = minOf(unit * 0.9f, w * 0.3f)
+        val maxW = w - pad - side * 0.98f
+        var size = unit * 0.16f
+        while (size > unit * 0.11f && width(name, true, size) > maxW) size -= 0.25f
+        var names = listOf(name)
+        if (width(name, true, size) > maxW) {
+            val words = name.split(" ").filter { it.isNotEmpty() }
+            var first = ""
+            for (k in 1..words.size) { val t = words.take(k).joinToString(" "); if (width(t, true, size) <= maxW) first = t }
+            if (first.isEmpty()) first = words.firstOrNull() ?: name
+            names = listOf(first, name.substring(minOf(name.length, first.length)).trim())
+        }
+        for (t in names) while (size > 3f && width(t, true, size) > maxW) size -= 0.2f
+        var label = minOf(unit * 0.089f, size * 0.62f)
+        var text = minOf(unit * 0.092f, size * 0.66f)
+        for (t in details) while (text > 3f && width(t, false, text) > maxW) text -= 0.2f
+        while (label > 3f && width("ASSINADO DIGITALMENTE", true, label) > maxW) label -= 0.2f
+        val rows = listOf(StampLine("ASSINADO DIGITALMENTE", 0, label)) + names.map { StampLine(it, 1, size) } + details.map { StampLine(it, 2, text) }
+        val gap = floatArrayOf(1.55f, 1.32f, 1.42f)
+        val total = rows.sumOf { (it.size * gap[it.kind]).toDouble() }.toFloat()
+        val k = if (total > 0) minOf(1f, (h - 2 * pad) / total) else 1f
+
+        cs.setNonStrokingColor(STAMP_BG[0], STAMP_BG[1], STAMP_BG[2])
+        roundedRect(cs, w, h, minOf(w, h) * 0.08f); cs.fill()
+        drawPrism(cs, w - side * 0.5f - minOf(w, h) * 0.03f, h / 2, side)
+
+        var top = (h - total * k) / 2  // medido de cima, como no computador
+        for (r in rows) {
+            val sz = r.size * k
+            val c = when (r.kind) { 0 -> STAMP_LABEL; 1 -> STAMP_NAME; else -> STAMP_TEXT }
+            val f = if (r.kind == 2) reg else bold
+            cs.beginText(); cs.setFont(f, sz)
+            cs.setNonStrokingColor(c[0], c[1], c[2])
+            if (f === bold) {
+                // negrito garantido mesmo sem a fonte bold no aparelho: contorno + preenchimento
+                cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL_STROKE)
+                cs.setStrokingColor(c[0], c[1], c[2]); cs.setLineWidth(sz * 0.03f)
+            } else cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL)
+            cs.newLineAtOffset(pad, h - (top + sz * 0.95f)); cs.showText(r.text); cs.endText()
+            top += sz * gap[r.kind]
         }
     }
 
