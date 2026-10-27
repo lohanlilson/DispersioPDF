@@ -76,7 +76,7 @@ jobs:
         run: |
           for t in smoke_test features_test autoscroll_test sharpness_test split_test novidades_test desfazer_test ferramentas_test versoes_test novas_ferramentas_test medir_test autosalvar_test pagamentos_test orientacao_test artigos_test; do
             echo "::group::$t"
-            python -X faulthandler tests/$t.py; c=$?
+            c=0; python -X faulthandler tests/$t.py || c=$?
             echo "::endgroup::"
             if [ $c -ne 0 ]; then echo "::error::$t terminou com código $c"; exit 1; fi
           done
