@@ -370,6 +370,8 @@ class MainWindow(QMainWindow):
                 e.ignore()
                 return
         cfg.qs.setValue("session", session)
+        from .doctab import stop_background
+        stop_background()
         e.accept()
 
     # ------------------------------------------------------------ abrir / arquivos recentes
@@ -1315,6 +1317,7 @@ class MainWindow(QMainWindow):
 
         def work(w):
             doc = pymupdf.open("pdf", src)
+            ops.apply_orientation(doc, ops.orientation_fixes(doc, pages, lang, cancel=lambda: w.cancel))  # OCR lê melhor de pé
             n = ops.ocr(doc, pages, lang, dpi, progress=lambda a, b: (w.progress.emit(a, b), not w.cancel)[1],
                         skip_text_pages=not force)
             return n, doc.tobytes(garbage=3, deflate=True)
@@ -1507,20 +1510,51 @@ class MainWindow(QMainWindow):
             tab.changed(structure=True)
             self.statusBar().showMessage(f"{len(pages)} página(s) em branco removida(s).", 6000)
 
+    def tool_payments(self, tab, **kw):
+        from . import pagamentos
+        from .dialogs import PaymentsDialog
+        items = tab.pay_items
+        th = getattr(tab, "_pay_thread", None)
+        if items is None or (th is not None and th.isRunning()):
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                items = pagamentos.scan(tab.doc)
+            finally:
+                QApplication.restoreOverrideCursor()
+        if not items:
+            QMessageBox.information(self, APP, "Nenhum boleto, Pix ou chave de nota fiscal foi encontrado neste documento.")
+            return
+        PaymentsDialog(self, items, tab.goto_rect).exec()
+
     def tool_deskew(self, tab, **kw):
-        if tab.has_signatures and QMessageBox.question(self, APP, "Endireitar regrava as páginas e invalida as assinaturas digitais. Continuar?") != QMessageBox.Yes:
+        """Endireita páginas de lado, de cabeça para baixo e tortas (digitalizadas)."""
+        if tab.has_signatures and QMessageBox.question(self, APP, "Endireitar altera as páginas e invalida as assinaturas digitais. Continuar?") != QMessageBox.Yes:
             return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            new, fixed = ops.deskew(tab.doc)
-        finally:
-            QApplication.restoreOverrideCursor()
-        if not fixed:
-            QMessageBox.information(self, APP, "Nenhuma página digitalizada torta foi encontrada.")
-            return
-        tab.replace_with(new.tobytes(garbage=3, deflate=True))
-        det = ", ".join(f"{p + 1} ({a:+.1f}°)" for p, a in fixed.items())
-        self.statusBar().showMessage(f"Páginas endireitadas: {det}. Dá para desfazer.", 10000)
+        src = tab.doc.tobytes()
+        lang = cfg.get("ocr_lang") or "por"
+
+        def work(w):
+            doc = pymupdf.open("pdf", src)
+            fixes = ops.orientation_fixes(doc, language=lang, progress=lambda a, b: w.progress.emit(a, b),
+                                          cancel=lambda: w.cancel)
+            ops.apply_orientation(doc, fixes)
+            new, skew = ops.deskew(doc)
+            out = new if new is not None else doc
+            return fixes, skew, (out.tobytes(garbage=3, deflate=True) if (fixes or skew) else None)
+
+        def done(res):
+            fixes, skew, data = res
+            if not data:
+                QMessageBox.information(self, APP, "Nenhuma página de lado, de cabeça para baixo ou torta foi encontrada.")
+                return
+            tab.replace_with(data)
+            parts = []
+            if fixes:
+                parts.append("giradas: " + ", ".join(str(p + 1) for p in sorted(fixes)))
+            if skew:
+                parts.append("endireitadas: " + ", ".join(f"{p + 1} ({a:+.1f}°)" for p, a in skew.items()))
+            self.statusBar().showMessage("Páginas " + "; ".join(parts) + ". Dá para desfazer.", 10000)
+        self._run_worker("Verificando a posição das páginas…", work, done, maximum=tab.doc.page_count)
 
     def tool_extract_images(self, tab, **kw):
         start = os.path.dirname(tab.path) if tab.path else self.settings.value("last_dir", os.path.expanduser("~"))

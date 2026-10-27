@@ -176,6 +176,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var splitReq by remember { mutableStateOf<Pair<String, String>?>(null) }
     var reading by remember { mutableStateOf(false) }
     var showComments by remember { mutableStateOf(false) }
+    var payList by remember { mutableStateOf(false) }
     var replaceDlg by remember { mutableStateOf(false) }
     val fdfOut = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.fdf")) { u -> if (u != null) vm.exportComments(d, u) }
     val fdfIn = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.importComments(d, u) }
@@ -300,6 +301,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     DropdownMenuItem(text = { Text("Modo leitura") }, onClick = { menu = false; reading = true })
                                     DropdownMenuItem(text = { Text("Localizar e substituir…") }, onClick = { menu = false; replaceDlg = true })
                                     DropdownMenuItem(text = { Text("Comentários…") }, onClick = { menu = false; showComments = true })
+                                    DropdownMenuItem(text = { Text("Boletos, Pix e notas…") }, onClick = { menu = false; vm.paymentsNow(d); payList = true })
                                     DropdownMenuItem(text = { Text("Criar links de sites e e-mails") }, onClick = { menu = false; vm.autolink(d) })
                                     DropdownMenuItem(text = { Text("Exportar comentários (FDF)…") }, onClick = {
                                         menu = false; fdfOut.launch(d.name.removeSuffix(".pdf").removeSuffix(".PDF") + "_comentarios.fdf")
@@ -316,7 +318,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                             else blankList = l
                                         }
                                     })
-                                    DropdownMenuItem(text = { Text("Endireitar páginas escaneadas") }, onClick = { menu = false; vm.deskew(d) })
+                                    DropdownMenuItem(text = { Text("Endireitar páginas") }, onClick = { menu = false; vm.deskew(d) })
                                     DropdownMenuItem(text = { Text("Extrair imagens") }, onClick = { menu = false; vm.extractImages(d) })
                                     DropdownMenuItem(text = { Text("Salvar como PDF/A…") }, onClick = {
                                         menu = false
@@ -575,7 +577,11 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 AnnotBar(vm, d) { editNote = it }
             }
             if (d.busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
-            if (bars || d.signatures.any { !it.ok }) Box(Modifier.align(Alignment.TopCenter)) { SignatureBanner(d) { sigSheet = true } }
+            Column(Modifier.align(Alignment.TopCenter)) {
+                if (bars || d.signatures.any { !it.ok }) SignatureBanner(d) { sigSheet = true }
+                if (bars || d.payments?.any { !it.ok } == true) PaymentsBanner(d, onCopied = { vm.toast = it }) { payList = true }
+                if (bars) OrientBanner(d) { vm.straighten(d, d.orientFixes) }
+            }
             // indicador de página
             Surface(
                 onClick = { gotoDialog = true },
@@ -723,6 +729,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             dismissButton = { TextButton({ blankList = null }) { Text("Cancelar") } })
     }
     if (reading) ReadingMode(vm, d) { reading = false }
+    if (payList && d.payments != null) PaymentsSheet(d, onGoto = { p -> payList = false; scope.launch { list.animateScrollToItem(p) } }) { payList = false }
     if (showComments) CommentsSheet(d, onDismiss = { showComments = false }) { a ->
         showComments = false
         d.editing = true; d.tool = Tool.NONE; d.selAnnot = a

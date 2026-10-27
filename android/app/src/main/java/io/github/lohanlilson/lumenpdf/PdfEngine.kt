@@ -141,6 +141,24 @@ class PdfEngine(context: Context) {
         bmp
     }
 
+    /** Desenha sem guardar no cache (leitura de código de barras, análise). */
+    suspend fun renderFresh(pdf: OpenPdf, page: Int, widthPx: Int): Bitmap = withContext(dispatcher) {
+        pdf.doc.openPage(page).use { p ->
+            val sz = sizeOf(pdf, page, p)
+            val w = widthPx.coerceAtLeast(16)
+            val h = (w * sz.ratio).roundToInt().coerceAtLeast(16)
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { b ->
+                b.eraseColor(Color.WHITE)
+                p.renderPageBitmap(b, 0, 0, w, h, false, false, Color.WHITE, Color.WHITE)
+            }
+        }
+    }
+
+    /** Rotação atual da página em graus (0, 90, 180, 270). */
+    suspend fun pageRotation(pdf: OpenPdf, page: Int): Int = withContext(dispatcher) {
+        pdf.doc.openPage(page).use { p -> ((p.getPageRotation() % 4 + 4) % 4) * 90 }
+    }
+
     /** Converte um retângulo em coordenadas do PDF para frações da largura exibida. */
     private fun frac(p: PdfPage, sz: PageSize, r: RectF): FracRect {
         val hh = (BASE * sz.ratio).roundToInt()

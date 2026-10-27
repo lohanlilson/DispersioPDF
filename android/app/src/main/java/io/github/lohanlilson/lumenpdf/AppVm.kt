@@ -70,6 +70,11 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var backedUp = false
     /** o local não aceitou gravação: para de salvar sozinho até o próximo salvar manual */
     var autosaveFailed by mutableStateOf(false)
+    /** boletos, Pix e chaves de NF-e encontrados (null = ainda procurando) */
+    var payments by mutableStateOf<List<PayItem>?>(null)
+    var paymentsHidden by mutableStateOf(false)
+    /** páginas de lado ou de cabeça para baixo: página → rotação certa */
+    var orientFixes by mutableStateOf<Map<Int, Int>>(emptyMap())
     var canUndo by mutableStateOf(false)
     var canRedo by mutableStateOf(false)
     var fields by mutableStateOf<List<Pair<FormField, FracRect>>>(emptyList())
@@ -196,6 +201,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         refreshRecents()
         loadFields(doc!!)
         watchAutosave(doc!!)
+        analyze(doc!!)
     }
 
     // ------------------------------------------------------------ edição
@@ -549,9 +555,16 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Endireita as páginas digitalizadas tortas. */
+    /** Endireita as páginas: de lado ou de cabeça para baixo (gira) e digitalizadas tortas (corrige a inclinação). */
     fun deskew(d: ViewerDoc) = viewModelScope.launch {
         try {
+            val turns = Orientation.fixes(engine, d.pdf, 0 until d.pageCount) { p ->
+                progress = "Verificando a posição das páginas… ${p + 1} de ${d.pageCount}"
+            }
+            if (turns.isNotEmpty()) {
+                d.orientFixes = emptyMap()
+                pages(d, "girar as páginas") { doc, _ -> turns.forEach { (p, r) -> doc.getPage(p).rotation = r } }.join()
+            }
             val fixes = ArrayList<Pair<Int, Double>>()
             for (p in 0 until d.pageCount) {
                 progress = "Verificando inclinação… página ${p + 1} de ${d.pageCount}"
@@ -561,10 +574,15 @@ class AppVm(app: Application) : AndroidViewModel(app) {
                 if (kotlin.math.abs(a) >= 0.3) fixes += p to a
             }
             progress = null
-            if (fixes.isEmpty()) { toast = "Nenhuma página digitalizada torta encontrada."; return@launch }
-            edit(d, "endireitar as páginas") { doc -> fixes.flatMap { (p, a) -> PageEdit.rotateContent(doc, p, a) } }.join()
-            d.lastBitmaps.evictAll()
-            toast = "Endireitadas: " + fixes.joinToString(", ") { (p, a) -> "pág. ${p + 1} (%+.1f°)".format(a) } + ". Dá para desfazer."
+            if (fixes.isEmpty() && turns.isEmpty()) { toast = "Nenhuma página de lado, de cabeça para baixo ou torta foi encontrada."; return@launch }
+            if (fixes.isNotEmpty()) {
+                edit(d, "endireitar as páginas") { doc -> fixes.flatMap { (p, a) -> PageEdit.rotateContent(doc, p, a) } }.join()
+                d.lastBitmaps.evictAll()
+            }
+            val parts = ArrayList<String>()
+            if (turns.isNotEmpty()) parts += "giradas: " + turns.keys.sorted().joinToString(", ") { "${it + 1}" }
+            if (fixes.isNotEmpty()) parts += "endireitadas: " + fixes.joinToString(", ") { (p, a) -> "${p + 1} (%+.1f°)".format(a) }
+            toast = "Páginas " + parts.joinToString("; ") + ". Dá para desfazer."
         } catch (e: Exception) {
             error = "Não foi possível endireitar.\n${e.message ?: e.javaClass.simpleName}"
         } finally {
@@ -889,6 +907,34 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             toast = "Não foi possível salvar automaticamente neste local. Use Salvar uma cópia."
         }
         return ok
+    }
+
+    // ------------------------------------------------------------ boletos, Pix e notas; páginas de lado
+    private fun analyze(d: ViewerDoc) = viewModelScope.launch {
+        val pdf = d.pdf
+        if (prefs.detectPayments) {
+            d.payments = runCatching { Pagamentos.scan(engine, pdf, d.pageCount) }.getOrDefault(emptyList())
+        }
+        if (prefs.detectOrientation && doc === d && d.pdf === pdf) {
+            val f = runCatching { Orientation.fixes(engine, pdf, 0 until minOf(d.pageCount, 40)) }.getOrDefault(emptyMap())
+            if (doc === d && d.pdf === pdf) d.orientFixes = f
+        }
+    }
+
+    /** Lista completa (menu ⋮): procura agora se ainda não procurou. */
+    fun paymentsNow(d: ViewerDoc) = viewModelScope.launch {
+        if (d.payments == null) {
+            progress = "Procurando boletos, Pix e notas…"
+            try { d.payments = Pagamentos.scan(engine, d.pdf, d.pageCount) } finally { progress = null }
+        }
+    }
+
+    /** Gira as páginas que estão de lado ou de cabeça para baixo (dá para desfazer). */
+    fun straighten(d: ViewerDoc, fixes: Map<Int, Int>) = viewModelScope.launch {
+        if (fixes.isEmpty()) return@launch
+        d.orientFixes = emptyMap()
+        pages(d, "endireitar as páginas") { doc, _ -> fixes.forEach { (p, r) -> if (p < doc.numberOfPages) doc.getPage(p).rotation = r } }.join()
+        toast = "${fixes.size} página(s) endireitada(s). Dá para desfazer."
     }
 
     // ------------------------------------------------------------ salvamento automático

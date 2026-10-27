@@ -2,6 +2,13 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.9.0
+
+- **Boletos, Pix e notas fiscais com um clique**: ao abrir um PDF, o programa encontra a linha digitável do boleto (inclusive contas de consumo e tributos), o Pix copia e cola ou QR Code e a chave de acesso da NF-e/CT-e. Mostra banco, valor, vencimento, recebedor ou emitente, confere os dígitos verificadores e copia com um clique (Mais ferramentas › Boletos, Pix e notas fiscais).
+- **Alerta de boleto adulterado**: quando a linha digitável impressa não bate com o código de barras, aparece um aviso em vermelho antes de você pagar.
+- **Páginas de lado ou de cabeça para baixo**: o programa percebe sozinho (inclusive em digitalizações) e oferece endireitar com um clique. A ferramenta "Endireitar páginas" agora também gira as páginas, e o OCR endireita antes de reconhecer o texto.
+- Dá para desligar os dois avisos em Preferências › Geral.
+
 ## 1.8.0
 
 - **Salvamento automático**: o documento é salvo sozinho alguns segundos depois de cada alteração e ao fechar, sem perguntar. A versão de antes das alterações fica em Arquivo › Versões anteriores. Quem preferir salvar manualmente pode desligar em Preferências › Geral. Documentos novos (ainda sem arquivo) e documentos assinados continuam pedindo para salvar.

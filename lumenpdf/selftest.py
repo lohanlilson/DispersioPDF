@@ -52,6 +52,26 @@ def run(log_path=None):
         assert len(res2) == 2 and all(r["intact"] and r["valid"] for r in res2), res2
         print_("assinatura ok (duas assinaturas válidas)")
 
+        # leitura de código de barras e QR (boleto / Pix)
+        import zxingcpp
+        from . import pagamentos
+        qr = zxingcpp.create_barcode("00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D", zxingcpp.BarcodeFormat.QRCode).to_svg()
+        qd = pymupdf.open("pdf", pymupdf.open(stream=qr.encode(), filetype="svg").convert_to_pdf())
+        dq = pymupdf.open(); dq.new_page().show_pdf_page(pymupdf.Rect(50, 50, 250, 250), qd, 0)
+        found = pagamentos.scan(dq)
+        assert found and found[0].kind == "pix" and found[0].ok, found
+        print_("boleto/Pix ok")
+
+        # posição das páginas (texto de cabeça para baixo é detectado e corrigido)
+        dr = pymupdf.open()
+        pr = dr.new_page()
+        for k in range(12):
+            pr.insert_text((60, 90 + 18 * k), "Cláusula de cessão de créditos entre as partes contratantes", fontsize=12)
+        pr.set_rotation(180)
+        assert ops.orientation_fixes(dr) == {0: 0}
+        assert ops.tessdata_dir(), "dados do OCR"
+        print_("posição das páginas ok")
+
         # conversões e operações
         ops.to_docx(data, os.path.join(tmp, "x.docx"))
         ops.to_xlsx(pymupdf.open("pdf", data), os.path.join(tmp, "x.xlsx"))

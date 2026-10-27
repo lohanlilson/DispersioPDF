@@ -77,6 +77,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // exibição: PDFium (mesmo motor do Chrome)
     implementation("io.legere:pdfiumandroid:1.0.35")
+    implementation("com.google.zxing:core:3.5.3")   // código de barras do boleto e QR do Pix
     // edição, formulários e assinatura: PDFBox (com BouncyCastle)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // escanear documentos com a câmera (scanner do Google: bordas, perspectiva e filtros)

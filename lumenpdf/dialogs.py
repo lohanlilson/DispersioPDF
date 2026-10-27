@@ -959,3 +959,71 @@ class ScaleDialog(QDialog):
             return {"factor": paper_m_per_pt * per_unit, "unit": self.unit.currentText(), "label": "tamanho real do papel"}
         n = self.n.value()
         return {"factor": paper_m_per_pt * n * per_unit, "unit": self.unit.currentText(), "label": f"1:{n}"}
+
+
+class PaymentsDialog(QDialog):
+    """Boletos, Pix e chaves de NF-e encontrados: conferência dos dígitos e botões de copiar."""
+
+    def __init__(self, parent, items, on_goto):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QScrollArea, QFrame, QGridLayout, QApplication, QDialogButtonBox
+        self.setWindowTitle("Boletos, Pix e notas fiscais")
+        self.resize(640, 560)
+        root = QVBoxLayout(self)
+        ok = sum(1 for i in items if i.ok)
+        head = QLabel(f"{len(items)} item(ns) encontrado(s)" + ("" if ok == len(items) else
+                      f" — <b style='color:#d7373f'>{len(items) - ok} com problema</b>"))
+        root.addWidget(head)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        inner = QWidget()
+        col = QVBoxLayout(inner)
+        for it in items:
+            card = QFrame()
+            card.setObjectName("PayCard")
+            fg = "#2d9d78" if it.ok else "#d7373f"
+            card.setStyleSheet(f"QFrame#PayCard{{border:1px solid {fg}; border-radius:8px;}}")
+            g = QGridLayout(card)
+            t = QLabel(f"<span style='color:{fg}; font-size:15px'>{'✔' if it.ok else '⚠'}</span> "
+                       f"<b>{it.title}</b> <span style='color:gray'>· página {it.page + 1}</span>")
+            g.addWidget(t, 0, 0, 1, 2)
+            r = 1
+            if not it.ok:
+                pr = QLabel(it.problem)
+                pr.setWordWrap(True)
+                pr.setStyleSheet("color:#d7373f")
+                g.addWidget(pr, r, 0, 1, 2)
+                r += 1
+            elif it.source == "texto e código":
+                g.addWidget(QLabel("<span style='color:#2d9d78'>Texto impresso confere com o "
+                                   + ("QR Code" if it.kind == "pix" else "código de barras") + "</span>"), r, 0, 1, 2)
+                r += 1
+            for k, v in it.details:
+                a = QLabel(k + ":")
+                a.setStyleSheet("color:gray")
+                b = QLabel(v)
+                b.setWordWrap(True)
+                b.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                g.addWidget(a, r, 0, Qt.AlignTop)
+                g.addWidget(b, r, 1)
+                r += 1
+            row = QHBoxLayout()
+            if it.ok:
+                cp = QPushButton(it.copy_label)
+                cp.clicked.connect(lambda _=False, it=it, cp=cp: (QApplication.clipboard().setText(it.copy),
+                                                                  cp.setText("Copiado ✔")))
+                row.addWidget(cp)
+            go = QPushButton(f"Ir para a página {it.page + 1}")
+            go.clicked.connect(lambda _=False, it=it: (on_goto(it.page, it.rect), self.accept()))
+            row.addWidget(go)
+            row.addStretch()
+            g.addLayout(row, r, 0, 1, 2)
+            g.setColumnStretch(1, 1)
+            col.addWidget(card)
+        col.addStretch()
+        area.setWidget(inner)
+        root.addWidget(area, 1)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.button(QDialogButtonBox.Close).setText("Fechar")
+        bb.rejected.connect(self.reject)
+        root.addWidget(bb)

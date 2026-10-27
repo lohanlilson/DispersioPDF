@@ -110,6 +110,10 @@ class SettingsDialog(QDialog):
                                       "A versão de antes das alterações fica em Arquivo › Versões anteriores.\n"
                                       "Documentos novos (ainda sem arquivo) e documentos assinados continuam pedindo para salvar.")
         f.addRow(self.w["autosave"])
+        self.w["detect_payments"] = _check("Mostrar boletos, Pix e notas fiscais encontrados no documento", "detect_payments")
+        f.addRow(self.w["detect_payments"])
+        self.w["detect_orientation"] = _check("Avisar quando houver páginas de lado ou de cabeça para baixo", "detect_orientation")
+        f.addRow(self.w["detect_orientation"])
         self.w["confirm_delete_pages"] = _check("Pedir confirmação antes de excluir páginas", "confirm_delete_pages")
         f.addRow(self.w["confirm_delete_pages"])
         self.w["auto_update"] = _check("Verificar atualizações automaticamente ao abrir", "auto_update")

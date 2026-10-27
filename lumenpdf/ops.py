@@ -1359,6 +1359,113 @@ def deskew(doc, pages=None, min_deg=0.3):
     return out, fixed
 
 
+# ---------------------------------------------------------------- orientação (páginas de lado / de cabeça para baixo)
+_TEXT_DIR_ROT = {(1, 0): 0, (0, -1): 90, (-1, 0): 180, (0, 1): 270}
+_WORD_RE = None
+
+
+def _good_words(text):
+    """Palavras "de verdade" que o OCR leu: 4+ letras, com vogal. Página na posição errada gera lixo."""
+    global _WORD_RE
+    import re
+    if _WORD_RE is None:
+        _WORD_RE = re.compile(r"^[A-Za-zÀ-ÿ]{4,}$")
+    return sum(1 for w in text.split() if _WORD_RE.match(w.strip(".,;:()\"'-")) and any(v in w.lower() for v in "aeiouáéíóúâêôãõ"))
+
+
+def _text_rotation(page):
+    """Rotação que deixa o texto (camada de texto) de pé; None se a página não tem texto suficiente."""
+    votes = {}
+    for b in page.get_text("dict", flags=0)["blocks"]:
+        for ln in b.get("lines", []):
+            d = tuple(round(x) for x in ln["dir"])
+            if d in _TEXT_DIR_ROT:
+                n = sum(len(sp["text"].strip()) for sp in ln["spans"])
+                votes[_TEXT_DIR_ROT[d]] = votes.get(_TEXT_DIR_ROT[d], 0) + n
+    total = sum(votes.values())
+    if total < 40:
+        return None
+    rot, n = max(votes.items(), key=lambda kv: kv[1])
+    return rot if n >= 0.7 * total else None
+
+
+def _scan_rotation(page, tess, language="por"):
+    """Página digitalizada: descobre por OCR quanto girar (sentido horário) a imagem como está exibida."""
+    np = _np()
+    if np is None or not tess:
+        return None
+    from PIL import Image
+    pm = page.get_pixmap(dpi=110, colorspace=pymupdf.csGRAY, alpha=False, annots=False)
+    img = Image.frombytes("L", (pm.width, pm.height), pm.samples)
+    a = np.asarray(img, dtype=np.float32)
+    ink = (a < np.percentile(a, 92) - 70).astype(np.float32)
+    if ink.mean() < 0.004:
+        return None                                   # página sem conteúdo
+    # linhas de texto horizontais dão um perfil de linhas "em faixas"; verticais, de colunas
+    horiz = ink.sum(axis=1).var() / max(ink.shape[1], 1) ** 2 >= ink.sum(axis=0).var() / max(ink.shape[0], 1) ** 2
+    cands = (0, 180) if horiz else (90, 270)
+    import io
+    scores = {}
+    for k in cands:
+        im = img.rotate(-k, expand=True)
+        W, H = im.size
+        im = im.crop((int(W * 0.08), int(H * 0.15), int(W * 0.92), int(H * 0.6)))   # faixa com texto, OCR mais rápido
+        buf = io.BytesIO()
+        im.save(buf, "PNG")
+        tmp = pymupdf.open()
+        pg = tmp.new_page(width=im.width * 72 / 110, height=im.height * 72 / 110)
+        pg.insert_image(pg.rect, stream=buf.getvalue())
+        try:
+            tp = pg.get_textpage_ocr(language=language, dpi=110, full=True, tessdata=tess)
+            scores[k] = _good_words(pg.get_text(textpage=tp))
+        except Exception:
+            return None
+    best = max(scores, key=scores.get)
+    other = min(scores.values())
+    if scores[best] < 6 or scores[best] < 2 * other + 3:
+        return None                                   # sem certeza: não mexe
+    return best
+
+
+def orientation_fixes(doc, pages=None, language="por", progress=None, cancel=lambda: False):
+    """{página: rotação nova} das páginas de lado ou de cabeça para baixo (texto pela camada de texto ou por OCR)."""
+    tess = tessdata_dir()
+    out = {}
+    pages = list(pages) if pages is not None else list(range(doc.page_count))
+    for k, i in enumerate(pages):
+        if cancel():
+            break
+        if progress:
+            progress(k, len(pages))
+        page = doc[i]
+        rot = _text_rotation(page)
+        if rot is not None:
+            if rot != page.rotation % 360:
+                out[i] = rot
+            continue
+        if is_scan(page):
+            k_cw = _scan_rotation(page, tess, language)
+            if k_cw:
+                out[i] = (page.rotation + k_cw) % 360
+    return out
+
+
+def orientation_fixes_bytes(data, password=None, max_pages=40, language="por"):
+    """Mesmo que orientation_fixes, a partir dos bytes (roda num processo separado: o OCR não trava a janela)."""
+    d = pymupdf.open(stream=data, filetype="pdf")
+    if d.needs_pass and password:
+        d.authenticate(password)
+    try:
+        return orientation_fixes(d, range(min(d.page_count, max_pages)), language)
+    finally:
+        d.close()
+
+
+def apply_orientation(doc, fixes):
+    for i, r in fixes.items():
+        doc[i].set_rotation(r)
+
+
 def extract_images(doc, out_dir, base_name):
     """Salva as imagens embutidas no PDF na resolução original. Devolve a lista de arquivos."""
     os.makedirs(out_dir, exist_ok=True)

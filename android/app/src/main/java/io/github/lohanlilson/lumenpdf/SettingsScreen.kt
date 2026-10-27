@@ -74,6 +74,8 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
                 Text("Salva o documento alguns segundos depois de editar, ao sair do app e ao fechar. A versão de antes fica em " +
                     "⋮ › Versões anteriores. Documentos assinados continuam pedindo para salvar.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Toggle("Mostrar boletos, Pix e notas fiscais encontrados", p.detectPayments) { p.detectPayments = it }
+                Toggle("Avisar quando houver páginas de lado ou de cabeça para baixo", p.detectOrientation) { p.detectOrientation = it }
                 Toggle("Verificar atualizações automaticamente", p.autoUpdate) { p.autoUpdate = it }
 
                 Section("Formulários")

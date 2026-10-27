@@ -31,6 +31,10 @@ for _ in range(5): app.processEvents()
 w.tool_remove_blank(t)
 assert t.doc.page_count == 2, t.doc.page_count
 w.tool_deskew(t)
+import time as _t
+_end = _t.time() + 120
+while (w._worker.isRunning() or abs(ops.skew_angle(t.doc[0])) > 0.3) and _t.time() < _end:   # roda em segundo plano
+    app.processEvents(); _t.sleep(0.02)
 assert abs(ops.skew_angle(t.doc[0])) < 0.3, ops.skew_angle(t.doc[0])
 t.undo(); assert abs(ops.skew_angle(t.doc[0])) > 2
 t.redo()

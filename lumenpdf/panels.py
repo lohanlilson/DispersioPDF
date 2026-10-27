@@ -67,7 +67,7 @@ CATALOG = [
         ("delete_pages", "trash", "Excluir páginas"), ("insert_blank", "insertpage", "Inserir página em branco"),
         ("insert_file", "createpdf", "Inserir de arquivo"), ("extract", "extract", "Extrair páginas"),
         ("split", "split", "Dividir documento"), ("merge", "merge", "Combinar arquivos"),
-        ("remove_blank", "trash", "Remover páginas em branco"), ("deskew", "rotate_cw", "Endireitar páginas escaneadas"),
+        ("remove_blank", "trash", "Remover páginas em branco"), ("deskew", "rotate_cw", "Endireitar páginas (de lado, invertidas ou tortas)"),
     ]),
     ("Converter e exportar", [
         ("export_word", "word", "Exportar para Word"), ("export_excel", "excel", "Exportar para Excel"),
@@ -92,6 +92,7 @@ CATALOG = [
         ("field_check", "checkbox", "Caixa de seleção"), ("field_combo", "form", "Lista suspensa"),
     ]),
     ("Mais ferramentas", [
+        ("payments", "barcode", "Boletos, Pix e notas fiscais"),
         ("compare", "compare", "Comparar arquivos"), ("read_aloud", "speaker", "Ler em voz alta"),
         ("attach", "attach", "Anexar arquivo"), ("print", "print", "Imprimir"),
         ("print_batch", "print", "Imprimir vários arquivos"),

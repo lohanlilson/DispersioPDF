@@ -48,6 +48,18 @@ class Prefs(ctx: Context) {
         get() = _autosave.value
         set(v) { _autosave.value = v; sp.edit().putBoolean("salvar_auto", v).apply() }
 
+    private val _pay = mutableStateOf(sp.getBoolean("boletos", true))
+    /** mostra boletos, Pix e notas fiscais encontrados no documento */
+    var detectPayments: Boolean
+        get() = _pay.value
+        set(v) { _pay.value = v; sp.edit().putBoolean("boletos", v).apply() }
+
+    private val _orient = mutableStateOf(sp.getBoolean("posicao_paginas", true))
+    /** avisa quando há páginas de lado ou de cabeça para baixo */
+    var detectOrientation: Boolean
+        get() = _orient.value
+        set(v) { _orient.value = v; sp.edit().putBoolean("posicao_paginas", v).apply() }
+
     var tsaDefault: Boolean
         get() = sp.getBoolean("sign_tsa", true)
         set(v) { sp.edit().putBoolean("sign_tsa", v).apply() }

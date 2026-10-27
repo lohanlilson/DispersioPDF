@@ -380,3 +380,96 @@ object PdfA {
         return problems
     }
 }
+
+/** Páginas de lado ou de cabeça para baixo: descobre a rotação certa (texto digital pela direção das letras; digitalizada por OCR). */
+object Orientation {
+    private val recognizer by lazy {
+        com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
+    private val WORD = Regex("^[A-Za-zÀ-ÿ]{4,}$")
+
+    fun goodWords(text: String) = text.split(Regex("\\s+")).count { w ->
+        val t = w.trim('.', ',', ';', ':', '(', ')', '"', '\'', '-')
+        WORD.matches(t) && t.lowercase().any { it in "aeiouáéíóúâêôãõ" }
+    }
+
+    /** Quanto girar (horário) a página como está exibida, pela direção das letras; null se não há texto suficiente. */
+    fun textTurn(pc: PageChars): Int? {
+        val votes = IntArray(4)
+        var total = 0
+        for (k in 0 until pc.size - 1) {
+            val a = pc.frac[k] ?: continue
+            val b = pc.frac[k + 1] ?: continue
+            if (pc.text[k].isWhitespace() || pc.text[k + 1].isWhitespace()) continue
+            val dx = (b.l + b.r - a.l - a.r) / 2; val dy = (b.t + b.b - a.t - a.b) / 2
+            if (abs(dx) + abs(dy) > 0.06f || abs(dx) + abs(dy) < 1e-5f) continue      // quebra de linha
+            val v = when {
+                abs(dx) > 2 * abs(dy) -> if (dx > 0) 0 else 2
+                abs(dy) > 2 * abs(dx) -> if (dy < 0) 1 else 3   // subindo: girar 90° horário; descendo: 270°
+                else -> continue
+            }
+            votes[v]++; total++
+        }
+        if (total < 40) return null
+        val best = votes.indices.maxBy { votes[it] }
+        return if (votes[best] >= total * 0.7) best * 90 else null
+    }
+
+    private fun inkProfileHorizontal(bmp: Bitmap): Boolean? {
+        val w = bmp.width; val h = bmp.height
+        val px = IntArray(w * h); bmp.getPixels(px, 0, w, 0, 0, w, h)
+        val g = IntArray(px.size) { val c = px[it]; (((c shr 16) and 0xFF) * 299 + ((c shr 8) and 0xFF) * 587 + (c and 0xFF) * 114) / 1000 }
+        val hist = IntArray(256); g.forEach { hist[it]++ }
+        var acc = 0L; var p92 = 255
+        for (i in 0..255) { acc += hist[i]; if (acc >= g.size * 0.92) { p92 = i; break } }
+        val thr = p92 - 70
+        val rows = DoubleArray(h); val cols = DoubleArray(w); var ink = 0
+        for (y in 0 until h) for (x in 0 until w) if (g[y * w + x] < thr) { rows[y]++; cols[x]++; ink++ }
+        if (ink < g.size * 0.004) return null
+        fun v(a: DoubleArray, n: Int): Double { val m = a.average(); return a.sumOf { (it - m) * (it - m) } / a.size / (n.toDouble() * n) }
+        return v(rows, w) >= v(cols, h)
+    }
+
+    private fun ocrScore(bmp: Bitmap, turn: Int): Int {
+        val m = android.graphics.Matrix().apply { postRotate(turn.toFloat()) }
+        val r = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+        val crop = Bitmap.createBitmap(r, (r.width * 0.08).toInt(), (r.height * 0.15).toInt(), (r.width * 0.84).toInt(), (r.height * 0.45).toInt())
+        return try {
+            goodWords(com.google.android.gms.tasks.Tasks.await(recognizer.process(com.google.mlkit.vision.common.InputImage.fromBitmap(crop, 0))).text)
+        } finally {
+            if (r !== bmp) r.recycle()
+            crop.recycle()
+        }
+    }
+
+    /** Quanto girar (horário) uma página digitalizada; null se não tiver certeza. */
+    suspend fun scanTurn(engine: PdfEngine, pdf: OpenPdf, page: Int): Int? {
+        val bmp = engine.renderFresh(pdf, page, 1000)
+        try {
+            val horiz = inkProfileHorizontal(bmp) ?: return null
+            val cands = if (horiz) listOf(0, 180) else listOf(90, 270)
+            val scores = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { cands.associateWith { ocrScore(bmp, it) } }
+            val best = scores.maxBy { it.value }
+            val other = scores.values.min()
+            if (best.value < 6 || best.value < 2 * other + 3) return null
+            return best.key
+        } finally {
+            bmp.recycle()
+        }
+    }
+
+    /** {página: rotação nova (graus)} para as páginas que estão de lado ou de cabeça para baixo. */
+    suspend fun fixes(engine: PdfEngine, pdf: OpenPdf, pages: Iterable<Int>, onPage: (Int) -> Unit = {}): Map<Int, Int> {
+        val out = LinkedHashMap<Int, Int>()
+        for (p in pages) {
+            kotlinx.coroutines.yield()
+            onPage(p)
+            val pc = engine.pageChars(pdf, p)
+            val cur = engine.pageRotation(pdf, p)
+            val textChars = pc.text.count { !it.isWhitespace() && it != '\u0000' }
+            val turn = if (textChars > 15) textTurn(pc) else runCatching { scanTurn(engine, pdf, p) }.getOrNull()
+            if (turn != null && turn != 0) out[p] = (cur + turn) % 360
+        }
+        return out
+    }
+}

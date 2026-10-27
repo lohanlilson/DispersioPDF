@@ -1,5 +1,11 @@
 # Novidades do Lumen PDF para Android
 
+## 0.8.0
+
+- **Boletos, Pix e notas fiscais com um toque**: o app encontra a linha digitável (inclusive contas de consumo e tributos), o Pix copia e cola ou QR Code e a chave de acesso da NF-e/CT-e, mostra valor, vencimento e recebedor, confere os dígitos e copia com um toque. Lista completa em ⋮ › Boletos, Pix e notas.
+- **Alerta de boleto adulterado**: aviso em vermelho quando a linha digitável não confere com o código de barras.
+- **Páginas de lado ou de cabeça para baixo**: o app percebe sozinho (inclusive em digitalizações) e oferece endireitar com um toque; "Endireitar páginas" também gira as páginas.
+
 ## 0.7.0
 
 - **Salvamento automático**: o documento é salvo sozinho alguns segundos depois de editar, ao sair do app e ao fechar. A versão de antes fica em ⋮ › Versões anteriores. Dá para desligar em Preferências › Geral. Documentos assinados continuam pedindo para salvar.

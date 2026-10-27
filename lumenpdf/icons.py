@@ -24,6 +24,7 @@ _P = {
     "rect": '<rect x="4" y="5" width="16" height="14" rx="1"/>',
     "ellipse": '<ellipse cx="12" cy="12" rx="9" ry="7"/>',
     "line": '<path d="M5 19L19 5"/>',
+    "barcode": '<path d="M4 6v12M7 6v12M10 6v9M13 6v9M16 6v12M20 6v12"/><path d="M9.5 18h4"/>',
     "arrow": '<path d="M5 19L19 5"/><path d="M10 5h9v9"/>',
     "stamp": '<path d="M4 21h16"/><path d="M5 17h14v-4H5z"/><path d="M10 13V9.5a3 3 0 114 0V13"/>',
     "sign": '<path d="M3 17c3-5 5-1 7-4s2-7 4.5-5.5S13 15 16 15s3-3 5-2"/><path d="M3 21h18"/>',

@@ -29,6 +29,198 @@ class _SigThread(QThread):
             self.done.emit([])
 
 
+_RUNNING = set()   # tarefas em segundo plano ainda vivas (paradas com segurança ao fechar o programa)
+
+
+def _track(th):
+    _RUNNING.add(th)
+    th.finished.connect(lambda th=th: _RUNNING.discard(th))
+    return th
+
+
+def stop_background():
+    for th in list(_RUNNING):
+        th.requestInterruption()
+    for th in list(_RUNNING):
+        th.wait(5000)
+
+
+import atexit as _atexit
+_atexit.register(stop_background)
+
+
+class _PayThread(QThread):
+    done = Signal(object)
+
+    def __init__(self, data, password):
+        super().__init__()
+        self.data, self.password = data, password
+
+    def run(self):
+        try:
+            import pymupdf
+            from . import pagamentos
+            d = pymupdf.open(stream=self.data, filetype="pdf")
+            if d.needs_pass and self.password:
+                d.authenticate(self.password)
+            self.done.emit(pagamentos.scan(d, cancel=self.isInterruptionRequested))
+            d.close()
+        except Exception:
+            self.done.emit([])
+
+
+class _OrientThread(QThread):
+    done = Signal(object)
+    MAX_PAGES = 40
+
+    def __init__(self, data, password):
+        super().__init__()
+        self.data, self.password = data, password
+
+    def run(self):
+        """O OCR segura a trava do Python: roda num processo à parte para a janela não engasgar."""
+        import json, subprocess, sys, tempfile, time
+        tmp = tempfile.mkdtemp(prefix="lumen-pos-")
+        src, out = os.path.join(tmp, "doc.pdf"), os.path.join(tmp, "res.json")
+        proc = None
+        try:
+            with open(src, "wb") as f:
+                f.write(self.data)
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable]
+            else:
+                cmd = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py")]
+            cmd += ["--orient-scan", src, out, str(self.MAX_PAGES), cfg.get("ocr_lang") or "por"]
+            flags = 0x08000000 if sys.platform == "win32" else 0   # CREATE_NO_WINDOW
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    creationflags=flags)
+            proc.stdin.write(((self.password or "") + "\n").encode("utf-8"))
+            proc.stdin.close()
+            while proc.poll() is None:
+                if self.isInterruptionRequested():
+                    proc.kill()
+                    return
+                time.sleep(0.1)
+            with open(out) as f:
+                self.done.emit({int(k): v for k, v in json.load(f).items()})
+        except Exception:
+            self.done.emit({})
+        finally:
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class OrientBar(QFrame):
+    """Aviso: páginas de lado ou de cabeça para baixo, com botão para endireitar."""
+
+    def __init__(self, tab):
+        super().__init__()
+        self.tab = tab
+        self.fixes = {}
+        self.setObjectName("OrientBar")
+        self.setStyleSheet("QFrame#OrientBar{background:#fff6dd; border:1px solid #c58a00; border-radius:8px;}"
+                           "QFrame#OrientBar QLabel{color:#222; background:transparent;}")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 6, 8, 6)
+        ic = QLabel("<span style='font-size:18px; color:#c58a00'>⟳</span>")
+        self.text = QLabel()
+        self.text.setWordWrap(True)
+        fix = QPushButton("Endireitar")
+        fix.clicked.connect(self._apply)
+        close = QPushButton("×")
+        close.setFlat(True)
+        close.setFixedWidth(30)
+        close.setStyleSheet("font-size:18px; color:#555; border:none;")
+        close.clicked.connect(self.hide)
+        for w in (ic, self.text, fix, close):
+            lay.addWidget(w, 1 if w is self.text else 0)
+        self.hide()
+
+    def show_fixes(self, fixes):
+        self.fixes = fixes
+        if not fixes:
+            self.hide()
+            return
+        pages = sorted(fixes)
+        lst = ", ".join(str(p + 1) for p in pages[:12]) + ("…" if len(pages) > 12 else "")
+        self.text.setText(f"<b>{'A página' if len(pages) == 1 else 'As páginas'} {lst}</b> "
+                          f"{'está' if len(pages) == 1 else 'estão'} de lado ou de cabeça para baixo.")
+        self.show()
+
+    def _apply(self):
+        t = self.tab
+        t.checkpoint()
+        for p, r in self.fixes.items():
+            if p < t.doc.page_count:
+                t.doc[p].set_rotation(r)
+        t.changed(structure=True)
+        t.titleChanged.emit()
+        t.statusMsg.emit(f"{len(self.fixes)} página(s) endireitada(s). Dá para desfazer (Ctrl+Z).")
+        self.hide()
+
+
+class PaymentsBar(QFrame):
+    """Faixa com o boleto, Pix ou chave de NF-e encontrado: resumo, conferência e botão de copiar."""
+
+    def __init__(self, tab):
+        super().__init__()
+        self.tab = tab
+        self.items = []
+        self.setObjectName("PayBar")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 6, 8, 6)
+        self.icon = QLabel()
+        self.text = QLabel()
+        self.text.setWordWrap(True)
+        self.copy_btn = QPushButton()
+        self.copy_btn.clicked.connect(self._copy)
+        self.all_btn = QPushButton()
+        self.all_btn.clicked.connect(lambda: self.tab.window().run_tool("payments"))
+        close = QPushButton("×")
+        close.setFlat(True)
+        close.setFixedWidth(30)
+        close.setStyleSheet("font-size:18px; color:#555; border:none;")
+        close.setToolTip("Fechar")
+        close.clicked.connect(self.hide)
+        for w in (self.icon, self.text, self.copy_btn, self.all_btn, close):
+            lay.addWidget(w, 1 if w is self.text else 0)
+        self.hide()
+
+    def show_items(self, items):
+        self.items = items
+        if not items:
+            self.hide()
+            return
+        main = next((i for i in items if not i.ok), items[0])
+        bad = not main.ok
+        bg, fg = ("#fde8e9", "#d7373f") if bad else ("#eef3fc", "#1473e6")
+        self.setStyleSheet(f"QFrame#PayBar{{background:{bg}; border:1px solid {fg}; border-radius:8px;}}"
+                           f"QFrame#PayBar QLabel{{color:#222; background:transparent;}}")
+        self.icon.setText(f"<span style='font-size:18px; color:{fg}'>{'⚠' if bad else '▥'}</span>")
+        html = f"<b>{main.title}</b>"
+        if main.summary:
+            html += " · " + main.summary
+        if main.source == "texto e código":
+            html += " · <span style='color:#2d9d78'>✔ confere com o código de barras</span>" if main.kind != "pix" \
+                else " · <span style='color:#2d9d78'>✔ confere com o QR Code</span>"
+        if bad:
+            html += f"<br><span style='color:#b0262e'>{main.problem}</span>"
+        self.text.setText(html)
+        self.main = main
+        self.copy_btn.setText(main.copy_label)
+        self.copy_btn.setVisible(main.ok)
+        n = len(items)
+        self.all_btn.setText(f"Ver todos ({n})" if n > 1 else "Detalhes")
+        self.show()
+
+    def _copy(self):
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(self.main.copy)
+        self.tab.statusMsg.emit(self.main.copy_label.replace("Copiar", "Copiado:") + " – " + self.main.copy[:60])
+
+
 class SignatureBar(QFrame):
     """Faixa no topo do documento com o resumo das assinaturas (como nos leitores profissionais)."""
 
@@ -138,6 +330,11 @@ class DocTab(QWidget):
         view_col.setSpacing(6)
         self.sig_bar = SignatureBar(self)
         view_col.addWidget(self.sig_bar)
+        self.pay_bar = PaymentsBar(self)
+        view_col.addWidget(self.pay_bar)
+        self.orient_bar = OrientBar(self)
+        view_col.addWidget(self.orient_bar)
+        self.pay_items = None        # None = ainda não procurou
         from PySide6.QtWidgets import QSplitter
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -166,6 +363,45 @@ class DocTab(QWidget):
         if panel is not None:
             self.side.show_panel(panel)
         self.validate_signatures()
+        self.scan_payments()
+        self.check_orientation()
+
+    # ------------------------------------------------------------ boletos, Pix e notas
+    def scan_payments(self):
+        """Procura boleto, Pix e chave de NF-e em segundo plano (no arquivo como foi aberto)."""
+        self.pay_bar.hide()
+        if not cfg.get("detect_payments"):
+            return
+        self._pay_thread = _track(_PayThread(self.original_bytes, self.password))
+        self._pay_thread.done.connect(self._pay_done)
+        self._pay_thread.start()
+
+    def _pay_done(self, items):
+        self.pay_items = items
+        if cfg.get("detect_payments"):
+            self.pay_bar.show_items(items)
+
+    def check_orientation(self):
+        """Procura páginas de lado / de cabeça para baixo em segundo plano e oferece endireitar."""
+        self.orient_bar.hide()
+        if not cfg.get("detect_orientation"):
+            return
+        self._orient_thread = _track(_OrientThread(self.original_bytes, self.password))
+        self._orient_thread.done.connect(self._orient_done)
+        self._orient_thread.start()
+
+    def _orient_done(self, fixes):
+        # só vale se ninguém mexeu na rotação dessas páginas enquanto procurava
+        fixes = {p: r for p, r in fixes.items() if p < self.doc.page_count and self.doc[p].rotation != r}
+        if cfg.get("detect_orientation"):
+            self.orient_bar.show_fixes(fixes)
+
+    def goto_rect(self, page, rect=None):
+        frac = 0.0
+        if rect:
+            h = self.doc[page].rect.height or 1
+            frac = max(0.0, rect[1] / h - 0.08)
+        self.view.goto(page, frac)
 
     # ------------------------------------------------------------ preferências
     def apply_settings(self, initial=False):
@@ -370,6 +606,11 @@ class DocTab(QWidget):
 
     def cleanup(self):
         self._autosave_timer.stop()
+        for name in ("_pay_thread", "_orient_thread"):
+            th = getattr(self, name, None)
+            if th is not None and th.isRunning():
+                th.requestInterruption()
+                th.wait(5000)
         self.view.queue.clear()          # nada de desenhar páginas depois que o documento for fechado
         self.view._timer.stop()
         if self.pane:
