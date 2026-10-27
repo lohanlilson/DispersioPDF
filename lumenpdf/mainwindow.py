@@ -19,7 +19,7 @@ from .doctab import DocTab
 from .home import HomePage
 from .panels import ToolPanel, OrganizeDialog, tool_button, ALL_TOOLS, list_annots
 
-APP = "Lumen PDF"
+APP = "Dispersio PDF"
 MODE_TOOLS = {"note", "highlight", "underline", "strikeout", "freetext", "ink", "rect", "ellipse", "arrow",
               "line", "stamp", "edittext", "addtext", "image", "link", "redact", "crop", "signature",
               "field_text", "field_check", "field_combo", "certsign", "select", "hand"}
@@ -681,7 +681,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(50, self._print_next)
 
     def check_default_app(self, force=False):
-        """Pergunta (no primeiro uso) se o Lumen PDF deve ser o leitor padrão de PDF."""
+        """Pergunta (no primeiro uso) se o Dispersio PDF deve ser o leitor padrão de PDF."""
         if not system.IS_WINDOWS:
             return
         if not force:
@@ -690,13 +690,13 @@ class MainWindow(QMainWindow):
                 return
             self.settings.setValue("default_asked", "true")
         if system.is_default_pdf():
-            QMessageBox.information(self, APP, "O Lumen PDF já é o seu leitor de PDF padrão.")
+            QMessageBox.information(self, APP, "O Dispersio PDF já é o seu leitor de PDF padrão.")
             return
         box = QMessageBox(self)
         box.setWindowTitle(APP)
         box.setIconPixmap(QIcon(resource("assets", "logo.png")).pixmap(64, 64))
-        box.setText("<b>Usar o Lumen PDF como leitor de PDF padrão?</b>")
-        box.setInformativeText("O Windows vai abrir a tela de Aplicativos padrão. Escolha <b>Lumen PDF</b> "
+        box.setText("<b>Usar o Dispersio PDF como leitor de PDF padrão?</b>")
+        box.setInformativeText("O Windows vai abrir a tela de Aplicativos padrão. Escolha <b>Dispersio PDF</b> "
                                "para a extensão <b>.pdf</b> e clique em <b>Definir padrão</b>.")
         yes = box.addButton("Definir como padrão", QMessageBox.AcceptRole)
         box.addButton("Agora não", QMessageBox.RejectRole)

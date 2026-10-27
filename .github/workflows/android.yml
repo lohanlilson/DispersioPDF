@@ -115,7 +115,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           awk -v v="## $VERSAO" '$0==v{f=1;next} /^## /{f=0} f' android/CHANGELOG.md > notas.md
-          gh release create "android-v$VERSAO" "LumenPDF-$VERSAO.apk" --title "Lumen PDF para Android $VERSAO" \
+          gh release create "android-v$VERSAO" "LumenPDF-$VERSAO.apk" --title "Dispersio PDF para Android $VERSAO" \
             --notes-file notas.md --latest=false
 
       - name: Link fixo (sempre a última versão)
@@ -125,6 +125,6 @@ jobs:
         run: |
           # copia o APK da versão atual para a Release "android" com nome fixo (LumenPDF.apk)
           gh release download "android-v$VERSAO" -p "LumenPDF-$VERSAO.apk" -O LumenPDF.apk --clobber
-          gh release view android >/dev/null 2>&1 || gh release create android --title "Lumen PDF para Android — última versão" \
+          gh release view android >/dev/null 2>&1 || gh release create android --title "Dispersio PDF para Android — última versão" \
             --notes "Link fixo do APK mais recente: https://github.com/${{ github.repository }}/releases/download/android/LumenPDF.apk" --latest=false
           gh release upload android LumenPDF.apk --clobber

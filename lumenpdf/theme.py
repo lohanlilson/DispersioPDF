@@ -1,4 +1,4 @@
-"""Tema visual do Lumen PDF (claro e escuro), com a identidade violeta + dourado da marca."""
+"""Tema visual do Dispersio PDF (claro e escuro), com a identidade violeta + dourado da marca."""
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 from . import icons

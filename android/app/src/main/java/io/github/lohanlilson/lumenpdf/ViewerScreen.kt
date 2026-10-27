@@ -179,6 +179,9 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var showComments by remember { mutableStateOf(false) }
     var payList by remember { mutableStateOf(false) }
     var translating by remember { mutableStateOf(false) }
+    var readingTr by remember { mutableStateOf(false) }
+    var snippet by remember { mutableStateOf<String?>(null) }
+    var articlesQuery by remember { mutableStateOf<String?>(null) }
     var pickLang by remember { mutableStateOf(false) }
     var replaceDlg by remember { mutableStateOf(false) }
     val fdfOut = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.fdf")) { u -> if (u != null) vm.exportComments(d, u) }
@@ -262,14 +265,14 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                         title = { Text(d.name, maxLines = 1, style = MaterialTheme.typography.titleMedium) },
                         navigationIcon = { IconButton({ vm.requestClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") } },
                         actions = {
-                            if (d.dirty) Box {
+                            if (d.dirty && !d.readOnly) Box {
                                 IconButton({ saveMenu = true }) { Icon(Icons.Filled.Save, "Salvar", tint = MaterialTheme.colorScheme.primary) }
                                 DropdownMenu(saveMenu, { saveMenu = false }) {
                                     DropdownMenuItem(text = { Text("Salvar") }, onClick = { saveMenu = false; doSave() })
                                     DropdownMenuItem(text = { Text("Salvar uma cópia…") }, onClick = { saveMenu = false; saveAs.launch(d.name) })
                                 }
                             }
-                            IconButton({ d.editing = !d.editing; d.tool = Tool.NONE; d.strokes.clear(); d.selection = null }) {
+                            if (!d.readOnly) IconButton({ d.editing = !d.editing; d.tool = Tool.NONE; d.strokes.clear(); d.selection = null }) {
                                 Icon(if (d.editing) Icons.Filled.EditOff else Icons.Filled.Edit, if (d.editing) "Sair da edição" else "Editar")
                             }
                             IconButton({ searchMode = true }) { Icon(Icons.Filled.Search, "Localizar") }
@@ -306,6 +309,13 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     DropdownMenuItem(text = { Text("Comentários…") }, onClick = { menu = false; showComments = true })
                                     DropdownMenuItem(text = { Text("Boletos, Pix e notas…") }, onClick = { menu = false; vm.paymentsNow(d); payList = true })
                                     DropdownMenuItem(text = { Text("Traduzir…") }, onClick = { menu = false; if (d.language != null) translating = true else pickLang = true })
+                                    DropdownMenuItem(text = { Text("Artigos sobre este documento") }, onClick = {
+                                        menu = false
+                                        scope.launch {
+                                            val qq = vm.articleQuery(vm.tr?.original ?: d)
+                                            if (qq.isBlank()) vm.toast = "Não consegui tirar um tema deste documento (é uma imagem? use o OCR antes)." else articlesQuery = qq
+                                        }
+                                    })
                                     DropdownMenuItem(text = { Text("Criar links de sites e e-mails") }, onClick = { menu = false; vm.autolink(d) })
                                     DropdownMenuItem(text = { Text("Exportar comentários (FDF)…") }, onClick = {
                                         menu = false; fdfOut.launch(d.name.removeSuffix(".pdf").removeSuffix(".PDF") + "_comentarios.fdf")
@@ -504,7 +514,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 }
             }
             if (d.selection != null) Box(Modifier.align(Alignment.BottomCenter)) {
-                SelectionBar(vm, d) { copyText(ctx, it) }
+                SelectionBar(vm, d, onTranslate = { snippet = it }) { copyText(ctx, it) }
             }
             reader?.let { r ->
                 Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 6.dp,
@@ -585,7 +595,8 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 if (bars || d.signatures.any { !it.ok }) SignatureBanner(d) { sigSheet = true }
                 if (bars || d.payments?.any { !it.ok } == true) PaymentsBanner(d, onCopied = { vm.toast = it }) { payList = true }
                 if (bars) OrientBanner(d) { vm.straighten(d, d.orientFixes) }
-                if (bars) TranslateBanner(d, Traducao.target(vm.prefs)) { translating = true }
+                if (bars || vm.tr?.let { it.original === d || it.translated === d } == true)
+                    TranslateBanner(vm, d, Traducao.target(vm.prefs), onTranslate = { translating = true }, onReading = { readingTr = true })
             }
             // indicador de página
             Surface(
@@ -740,7 +751,18 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
         if (src == null || src == dst || !Traducao.supported(src)) {
             translating = false
             if (src == dst) vm.toast = "O documento já está em ${Traducao.NAMES[dst]}." else pickLang = true
-        } else TranslatedReading(vm, d, src, dst) { translating = false; d.translateHidden = true }
+        } else ModelGate(src, dst, onCancel = { translating = false }) {
+            translating = false
+            vm.startTranslation(vm.tr?.original ?: d, src, dst)
+        }
+    }
+    articlesQuery?.let { qq -> ArticlesScreen(vm, qq) { articlesQuery = null } }
+    if (readingTr) vm.tr?.let { st -> TranslatedReading(vm, st) { readingTr = false } } ?: run { readingTr = false }
+    snippet?.let { text ->
+        val dst = Traducao.target(vm.prefs)
+        var src = Traducao.detect(text) ?: vm.tr?.src ?: d.language ?: "en"
+        if (src == dst) src = if (dst == "en") "pt" else "en"
+        SnippetTranslation(text, src, dst) { snippet = null }
     }
     if (pickLang) AlertDialog(onDismissRequest = { pickLang = false }, title = { Text("Em que idioma está o documento?") },
         text = {
@@ -1342,7 +1364,7 @@ private fun GotoDialog(d: ViewerDoc, onDismiss: () -> Unit, onGo: (Int) -> Unit)
 
 private fun copyText(ctx: Context, text: String) {
     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cm.setPrimaryClip(ClipData.newPlainText("Lumen PDF", text))
+    cm.setPrimaryClip(ClipData.newPlainText("Dispersio PDF", text))
     Toast.makeText(ctx, if (text.isBlank()) "Esta página não tem texto (talvez seja uma imagem escaneada)." else "Texto copiado",
         Toast.LENGTH_SHORT).show()
 }

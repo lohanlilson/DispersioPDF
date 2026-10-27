@@ -1,4 +1,12 @@
-# Novidades do Lumen PDF para Android
+# Novidades do Dispersio PDF para Android
+
+## 0.10.0
+
+- **Novo nome: Dispersio PDF** (o fenômeno do ícone: o prisma abrindo a luz nas cores). Nada muda nas suas configurações.
+- **Tradução no próprio PDF**: "Traduzir" mostra o documento traduzido no mesmo layout, página por página; botões Original | Tradução e Leitura (tradução, original ou intercalado).
+- **Tradução mais limpa**: citações e números sobrescritos voltam no fim da frase; Referências, cabeçalhos e números de página ficam no original; colunas lidas na ordem certa.
+- **Traduzir trecho selecionado** (botão na barra da seleção).
+- **Pesquisa de artigos mais dinâmica**: sugestões enquanto digita, filtros em botões, resumo traduzido, Parecidos / Citado por / Referências com voltar, rolagem contínua, DOI ou link colado e ⋮ › Artigos sobre este documento.
 
 ## 0.9.1
 

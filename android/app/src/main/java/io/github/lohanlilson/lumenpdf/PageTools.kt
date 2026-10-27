@@ -171,7 +171,7 @@ object PageEdit {
                             val values = ContentValues().apply {
                                 put(MediaStore.Images.Media.DISPLAY_NAME, fname)
                                 put(MediaStore.Images.Media.MIME_TYPE, if (jpeg) "image/jpeg" else "image/png")
-                                if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Lumen PDF")
+                                if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Dispersio PDF")
                             }
                             val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: continue
                             ctx.contentResolver.openOutputStream(uri)?.use { o ->
@@ -188,7 +188,7 @@ object PageEdit {
     }
 }
 
-/** PDF/A-2b (arquivamento de longo prazo). Mesmas regras do Lumen PDF do computador. */
+/** PDF/A-2b (arquivamento de longo prazo). Mesmas regras do Dispersio PDF do computador. */
 object PdfA {
     private val families = listOf(
         listOf("courier", "mono", "consolas") to "LiberationMono",
@@ -354,7 +354,7 @@ object PdfA {
             info.title = title.ifBlank { null }
             info.author = author.ifBlank { null }
             info.subject = null; info.keywords = null; info.trapped = null
-            info.creator = "Lumen PDF"; info.producer = "Lumen PDF"
+            info.creator = "Dispersio PDF"; info.producer = "Dispersio PDF"
             info.creationDate = now; info.modificationDate = now
             val d = iso(now)
             val xmp = buildString {
@@ -366,7 +366,7 @@ object PdfA {
                 if (title.isNotBlank()) append("   <dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">${esc(title)}</rdf:li></rdf:Alt></dc:title>\n")
                 if (author.isNotBlank()) append("   <dc:creator><rdf:Seq><rdf:li>${esc(author)}</rdf:li></rdf:Seq></dc:creator>\n")
                 append("   <xmp:CreateDate>$d</xmp:CreateDate>\n   <xmp:ModifyDate>$d</xmp:ModifyDate>\n   <xmp:MetadataDate>$d</xmp:MetadataDate>\n")
-                append("   <xmp:CreatorTool>Lumen PDF</xmp:CreatorTool>\n   <pdf:Producer>Lumen PDF</pdf:Producer>\n")
+                append("   <xmp:CreatorTool>Dispersio PDF</xmp:CreatorTool>\n   <pdf:Producer>Dispersio PDF</pdf:Producer>\n")
                 append("   <xmpMM:DocumentID>uuid:${UUID.randomUUID()}</xmpMM:DocumentID>\n")
                 append("  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>")
             }

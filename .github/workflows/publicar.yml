@@ -1,6 +1,6 @@
 # Quando __version__ (lumenpdf/__init__.py) muda na branch main, gera no Windows o executável, o instalador,
 # o patch da versão anterior e o versao.json, e publica tudo como Release "vX.Y.Z".
-# O Lumen PDF instalado detecta a nova versão sozinho.
+# O Dispersio PDF instalado detecta a nova versão sozinho.
 name: Publicar versão
 
 on:
@@ -168,7 +168,7 @@ jobs:
         run: |
           cp "Saida/LumenPDF-Setup-$VERSAO.exe" Saida/LumenPDF-Setup.exe
           gh release create "v$VERSAO" Saida/*.exe Saida/versao.json Saida/manifest.json \
-            --title "Lumen PDF $VERSAO" --notes-file Saida/NOTAS.md --latest
+            --title "Dispersio PDF $VERSAO" --notes-file Saida/NOTAS.md --latest
 
       - name: Instalador com nome fixo na versão já publicada
         if: steps.versao.outputs.publicar == 'nao'

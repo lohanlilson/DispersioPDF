@@ -1,4 +1,4 @@
-; Instalador completo do Lumen PDF (Inno Setup 6)
+; Instalador completo do Dispersio PDF (Inno Setup 6)
 #include "common.iss"
 
 [Setup]
@@ -43,13 +43,21 @@ Name: "pt"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Criar atalho na Área de Trabalho"; GroupDescription: "Atalhos:"
-Name: "assocpdf"; Description: "Registrar o Lumen PDF para abrir arquivos .pdf"; GroupDescription: "Integração com o Windows:"
+Name: "assocpdf"; Description: "Registrar o Dispersio PDF para abrir arquivos .pdf"; GroupDescription: "Integração com o Windows:"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "LumenShell.dll"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; a DLL pode estar em uso pelo Explorador: se estiver, é substituída na próxima reinicialização
 Source: "{#SourceDir}\LumenShell.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete skipifsourcedoesntexist
 Source: "..\assets\pdfdoc.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+[InstallDelete]
+; atalhos com o nome antigo do programa
+Type: files; Name: "{autoprograms}\{#OldAppName}.lnk"
+Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
+Type: files; Name: "{userprograms}\{#OldAppName}.lnk"
+Type: files; Name: "{userdesktop}\{#OldAppName}.lnk"
+Type: filesandordirs; Name: "{autoprograms}\{#OldAppName}"
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "LumenPDF.App"
@@ -65,8 +73,8 @@ Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#AppExe
 #include "shellext.iss"
 
 [Run]
-Filename: "{app}\{#AppExe}"; Parameters: "--set-default"; Description: "Definir o Lumen PDF como leitor de PDF padrão"; Flags: nowait postinstall skipifsilent; Tasks: assocpdf
-Filename: "{app}\{#AppExe}"; Description: "Abrir o Lumen PDF agora"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\{#AppExe}"; Parameters: "--set-default"; Description: "Definir o Dispersio PDF como leitor de PDF padrão"; Flags: nowait postinstall skipifsilent; Tasks: assocpdf
+Filename: "{app}\{#AppExe}"; Description: "Abrir o Dispersio PDF agora"; Flags: nowait postinstall skipifsilent unchecked
 
 Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 

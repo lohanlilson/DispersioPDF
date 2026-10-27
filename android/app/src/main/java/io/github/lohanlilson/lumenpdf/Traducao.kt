@@ -41,6 +41,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -112,89 +114,146 @@ object Traducao {
 
 }
 
-/** Faixa no topo: documento em outro idioma, com botão para traduzir. */
+/** Faixa no topo: oferece traduzir; depois mostra o andamento e alterna Original / Tradução no próprio documento. */
 @Composable
-fun TranslateBanner(d: ViewerDoc, target: String, onTranslate: () -> Unit) {
-    val src = d.language ?: return
-    if (src == target || d.translateHidden || !Traducao.supported(src)) return
+fun TranslateBanner(vm: AppVm, d: ViewerDoc, target: String, onTranslate: () -> Unit, onReading: () -> Unit) {
+    val st = vm.tr
+    val mine = st != null && (st.original === d || st.translated === d)
+    if (!mine) {
+        val src = d.language ?: return
+        if (src == target || d.translateHidden || !Traducao.supported(src) || d.readOnly) return
+    }
     Surface(color = Color(0xFFF1ECFE), modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 14.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 12.dp, end = 2.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Translate, null, tint = Color(0xFF7C3AED))
-            Text("Documento em ${Traducao.NAMES[src] ?: src}", color = Color(0xFF222222), style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(start = 8.dp).weight(1f))
-            TextButton(onTranslate) { Text("Traduzir") }
-            IconButton({ d.translateHidden = true }) { Icon(Icons.Filled.Close, "Fechar", tint = Color(0xFF555555)) }
+            if (!mine) {
+                Text("Documento em ${Traducao.NAMES[d.language] ?: d.language}", color = Color(0xFF222222), style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(start = 8.dp).weight(1f))
+                TextButton(onTranslate) { Text("Traduzir") }
+                IconButton({ d.translateHidden = true }) { Icon(Icons.Filled.Close, "Fechar", tint = Color(0xFF555555)) }
+            } else {
+                st!!
+                Text(when {
+                    st.error != null -> "Erro: ${st.error}"
+                    st.running -> "Traduzindo… ${st.pages.size} de ${st.total}"
+                    else -> "Traduzido"
+                }, color = Color(0xFF222222), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 6.dp).weight(1f), maxLines = 1)
+                val showing = vm.doc === st.translated && st.translated != null
+                SegChip("Original", !showing) { vm.showTranslated(false) }
+                SegChip("Tradução", showing, enabled = st.translated != null) { vm.showTranslated(true) }
+                TextButton(onReading) { Text("Leitura") }
+            }
         }
     }
 }
 
-/** Leitura traduzida: o texto de cada página traduzido (sem internet), com o original a um toque. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TranslatedReading(vm: AppVm, d: ViewerDoc, src: String, dst: String, onClose: () -> Unit) {
+private fun SegChip(label: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(50),
+        color = if (on) Color(0xFF7C3AED) else Color.Transparent, border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF7C3AED)),
+        modifier = Modifier.padding(horizontal = 2.dp)) {
+        Text(label, color = if (on) Color.White else if (enabled) Color(0xFF5B2BB5) else Color(0xFF9A93B0),
+            style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+    }
+}
+
+/** Pede para baixar o pacote de idioma (uma vez) e então chama onReady. */
+@Composable
+fun ModelGate(src: String, dst: String, onCancel: () -> Unit, onReady: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var ready by remember { mutableStateOf(false) }
-    var ask by remember { mutableStateOf<List<String>?>(null) }
+    var missing by remember { mutableStateOf<List<String>?>(null) }
     var downloading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var original by remember { mutableStateOf(false) }
-    val cache = remember { mutableStateMapOf<Int, List<Pair<String, String>>>() }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(src, dst) {
         val m = runCatching { Traducao.missing(src, dst) }.getOrElse { error = it.message; return@LaunchedEffect }
-        if (m.isEmpty()) ready = true else ask = m
+        if (m.isEmpty()) onReady() else missing = m
     }
-    val state = rememberLazyListState(initialFirstVisibleItemIndex = d.page)
+    val m = missing ?: return
+    AlertDialog(onDismissRequest = { if (!downloading) onCancel() },
+        title = { Text(if (downloading) "Baixando o pacote de idioma…" else "Baixar pacote de idioma?") },
+        text = {
+            Column {
+                Text("Para traduzir sem internet, o app baixa uma vez o pacote de " + m.joinToString(" e ") { Traducao.NAMES[it] ?: it } +
+                    " (cerca de ${30 * m.size} MB). Melhor no Wi-Fi.")
+                if (downloading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp))
+                error?.let { Text("Não foi possível baixar: $it", color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = { if (!downloading) TextButton({
+            downloading = true; error = null
+            scope.launch {
+                runCatching { Traducao.download(src, dst) }.onSuccess { downloading = false; onReady() }.onFailure { error = it.message; downloading = false }
+            }
+        }) { Text("Baixar") } },
+        dismissButton = { if (!downloading) TextButton(onCancel) { Text("Agora não") } })
+}
+
+/** Leitura traduzida: só a tradução, o original ou os dois intercalados (bilíngue). Mostra as páginas conforme ficam prontas.
+ *  Referências, números e citações ficam como no original; cabeçalhos e números de página não aparecem. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TranslatedReading(vm: AppVm, st: TrState, onClose: () -> Unit) {
+    val sp = remember { vm.getApplication<android.app.Application>().getSharedPreferences("prefs", 0) }
+    var mode by remember { mutableStateOf(sp.getInt("leitura_traducao", 0)) }
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = st.original.page.coerceAtMost(maxOf(0, st.total - 1)))
     val bg = Color(0xFFFBF8F1); val fg = Color(0xFF1E1C18)
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Scaffold(containerColor = bg, topBar = {
-            TopAppBar(title = { Text(if (original) "Original" else "Tradução (${Traducao.NAMES[dst]})") },
-                navigationIcon = { IconButton(onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") } },
-                actions = { TextButton({ original = !original }) { Text(if (original) "Ver tradução" else "Ver original") } })
+            TopAppBar(title = { Text("Leitura traduzida") }, navigationIcon = { IconButton(onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") } })
         }) { pad ->
             Column(Modifier.fillMaxSize().background(bg).padding(pad)) {
-                if (downloading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Baixando o pacote de idioma (uma vez só)…", Modifier.padding(16.dp)) }
-                error?.let { Text("Não foi possível traduzir: $it", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-                if (ready) {
-                    Text("Tradução automática gratuita, feita no próprio aparelho: boa para entender; confira trechos importantes no original.",
-                        Modifier.padding(horizontal = 20.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall, color = fg.copy(alpha = 0.6f))
-                    LazyColumn(state = state, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)) {
-                        items(d.pageCount) { i ->
-                            val paras = cache[i]
-                            LaunchedEffect(i) {
-                                if (cache[i] == null) {
-                                    val src0 = reflow(vm.engine.pageText(d.pdf, i))
-                                    cache[i] = src0.map { it to runCatching { Traducao.translate(src, dst, it) }.getOrDefault(it) }
+                Row(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+                    listOf("Tradução", "Original", "Intercalado").forEachIndexed { i, l -> SegChip(l, mode == i) { mode = i; sp.edit().putInt("leitura_traducao", i).apply() } }
+                }
+                if (st.running) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Traduzindo… ${st.pages.size} de ${st.total} páginas", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.bodySmall) }
+                Text("Tradução automática gratuita, feita no próprio aparelho. Citações, referências e números ficam como no original.",
+                    Modifier.padding(horizontal = 20.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall, color = fg.copy(alpha = 0.6f))
+                LazyColumn(state = state, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)) {
+                    items(st.total) { i ->
+                        val items = st.pages[i]
+                        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Página ${i + 1}", color = fg.copy(alpha = 0.55f), style = MaterialTheme.typography.labelMedium)
+                            if (items == null) Text(if (st.running) "Traduzindo…" else "—", color = fg.copy(alpha = 0.6f))
+                            else SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                for ((b, t) in items) {
+                                    if (b.keep && (b.why == "cabeçalho/rodapé" || b.why == "número da página")) continue
+                                    val o = b.shown
+                                    val big = b.bold || b.size >= 13f
+                                    val w = if (big) FontWeight.SemiBold else FontWeight.Normal
+                                    when {
+                                        b.keep -> Text(o, color = fg.copy(alpha = 0.55f), fontSize = 14.sp, lineHeight = 20.sp)
+                                        mode == 1 -> Text(o, color = fg, fontSize = 17.sp, lineHeight = 25.sp, fontWeight = w)
+                                        mode == 0 -> Text(t ?: o, color = fg, fontSize = 17.sp, lineHeight = 25.sp, fontWeight = w)
+                                        else -> Column {
+                                            Text(t ?: o, color = fg, fontSize = 17.sp, lineHeight = 25.sp, fontWeight = w)
+                                            Text(o, color = fg.copy(alpha = 0.55f), fontSize = 14.sp, lineHeight = 20.sp)
+                                        }
+                                    }
                                 }
-                            }
-                            Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("Página ${i + 1}", color = fg.copy(alpha = 0.55f), style = MaterialTheme.typography.labelMedium)
-                                when {
-                                    paras == null -> Text("Traduzindo…", color = fg.copy(alpha = 0.6f))
-                                    paras.isEmpty() -> Text("(página sem texto: é uma imagem. Use “Reconhecer texto (OCR)” antes.)", color = fg.copy(alpha = 0.6f))
-                                    else -> SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        paras.forEach { (o, t) -> Text(if (original) o else t, color = fg, fontSize = 17.sp, lineHeight = 25.sp) }
-                                    } }
-                                }
-                                HorizontalDivider(color = fg.copy(alpha = 0.12f))
-                            }
+                            } }
+                            HorizontalDivider(color = fg.copy(alpha = 0.12f))
                         }
                     }
                 }
             }
         }
-        ask?.let { m ->
-            AlertDialog(onDismissRequest = onClose,
-                title = { Text("Baixar pacote de idioma?") },
-                text = { Text("Para traduzir sem internet, o app baixa uma vez o pacote de " + m.joinToString(" e ") { Traducao.NAMES[it] ?: it } +
-                    " (cerca de ${30 * m.size} MB). Melhor no Wi-Fi.") },
-                confirmButton = { TextButton({
-                    ask = null; downloading = true
-                    scope.launch {
-                        runCatching { Traducao.download(src, dst) }.onSuccess { ready = true }.onFailure { error = it.message }
-                        downloading = false
-                    }
-                }) { Text("Baixar") } },
-                dismissButton = { TextButton(onClose) { Text("Agora não") } })
-        }
     }
+}
+
+/** Tradução de um trecho selecionado (balão). */
+@Composable
+fun SnippetTranslation(text: String, src: String, dst: String, onDismiss: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var ready by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    if (!ready) ModelGate(src, dst, onCancel = onDismiss) { ready = true }
+    LaunchedEffect(ready) {
+        if (ready) result = runCatching { Citacoes.translate(text.replace(Regex("\\s+"), " ")) { Traducao.translate(src, dst, it) } }
+            .getOrElse { "Não foi possível traduzir: ${it.message}" }
+    }
+    if (ready) AlertDialog(onDismissRequest = onDismiss,
+        title = { Text("Tradução (${Traducao.NAMES[src] ?: src} → ${Traducao.NAMES[dst] ?: dst})") },
+        text = { SelectionContainer { Text(result ?: "Traduzindo…") } },
+        confirmButton = { TextButton({ result?.let { copyText(ctx, "Tradução", it) }; onDismiss() }) { Text("Copiar") } },
+        dismissButton = { TextButton(onDismiss) { Text("Fechar") } })
 }

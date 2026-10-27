@@ -106,7 +106,7 @@ object Convert {
         ) + sheets.toMap())
     }
 
-    /** Salva as páginas como JPG em Imagens/Lumen PDF (aparecem na galeria). Devolve quantas foram salvas. */
+    /** Salva as páginas como JPG em Imagens/Dispersio PDF (aparecem na galeria). Devolve quantas foram salvas. */
     suspend fun images(ctx: Context, engine: PdfEngine, pdf: OpenPdf, baseName: String, onPage: (Int) -> Unit): Int {
         var n = 0
         for (i in 0 until pdf.sizes.size) {
@@ -115,7 +115,7 @@ object Convert {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, "${baseName}_pagina${i + 1}.jpg")
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Lumen PDF")
+                if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Dispersio PDF")
             }
             val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: continue
             ctx.contentResolver.openOutputStream(uri)?.use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }

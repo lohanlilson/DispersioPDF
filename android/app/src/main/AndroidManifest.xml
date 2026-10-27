@@ -38,7 +38,7 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
-            <!-- "Compartilhar" com o Lumen PDF -->
+            <!-- "Compartilhar" com o Dispersio PDF -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

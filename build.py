@@ -1,4 +1,4 @@
-"""Gera o executável, o instalador e (opcionalmente) o patch de atualização do Lumen PDF.
+"""Gera o executável, o instalador e (opcionalmente) o patch de atualização do Dispersio PDF.
 
   python build.py                       executável + instalador completo
   python build.py --patch-from 1.0.0    também gera o patch da 1.0.0 para a versão atual
@@ -44,11 +44,11 @@ def version_file(ver):
   kids=[StringFileInfo([StringTable('041604B0', [
     StringStruct('CompanyName', '{m["AUTHOR"]}'),
     StringStruct('LegalCopyright', '© 2026 {m["AUTHOR"]} - {m["EMAIL"]}'),
-    StringStruct('FileDescription', 'Lumen PDF - leitor e editor de PDF'),
+    StringStruct('FileDescription', 'Dispersio PDF - leitor e editor de PDF'),
     StringStruct('FileVersion', '{ver}'),
     StringStruct('InternalName', 'LumenPDF'),
     StringStruct('OriginalFilename', 'LumenPDF.exe'),
-    StringStruct('ProductName', 'Lumen PDF'),
+    StringStruct('ProductName', 'Dispersio PDF'),
     StringStruct('ProductVersion', '{ver}')])]),
     VarFileInfo([VarStruct('Translation', [0x0416, 1200])])]
 )"""

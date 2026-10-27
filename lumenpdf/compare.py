@@ -40,7 +40,7 @@ class CompareWindow(QWidget):
     def __init__(self, parent, doc_a, name_a, doc_b, name_b, title="Comparar arquivos", intro=""):
         super().__init__(parent, Qt.Window)
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setWindowTitle(f"{title} — Lumen PDF")
+        self.setWindowTitle(f"{title} — Dispersio PDF")
         self.resize(1300, 820)
         self.doc_a, self.doc_b, self.name_a, self.name_b, self.title_ = doc_a, doc_b, name_a, name_b, title
         QApplication.setOverrideCursor(Qt.WaitCursor)

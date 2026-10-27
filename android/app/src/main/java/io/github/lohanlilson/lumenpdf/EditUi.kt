@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.ArrowOutward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.FormatUnderlined
@@ -273,13 +274,14 @@ fun commitInk(vm: AppVm, d: ViewerDoc) {
 
 /** Seleção de texto: ações sobre o trecho selecionado. */
 @Composable
-fun SelectionBar(vm: AppVm, d: ViewerDoc, onCopy: (String) -> Unit) {
+fun SelectionBar(vm: AppVm, d: ViewerDoc, onTranslate: ((String) -> Unit)? = null, onCopy: (String) -> Unit) {
     val sel = d.selection ?: return
     Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
         Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton({ onCopy(sel.text); d.selection = null }) { Icon(Icons.Filled.ContentCopy, "Copiar") }
-            listOf(Triple(Markup.HIGHLIGHT, Icons.Filled.Highlight, vm.prefs.highlightColor),
+            if (onTranslate != null) IconButton({ onTranslate(sel.text); d.selection = null }) { Icon(Icons.Filled.Translate, "Traduzir") }
+            if (!d.readOnly) listOf(Triple(Markup.HIGHLIGHT, Icons.Filled.Highlight, vm.prefs.highlightColor),
                 Triple(Markup.UNDERLINE, Icons.Filled.FormatUnderlined, 0xFF2D9D78),
                 Triple(Markup.STRIKEOUT, Icons.Filled.FormatStrikethrough, 0xFFD7373F)).forEach { (kind, icon, color) ->
                 IconButton({

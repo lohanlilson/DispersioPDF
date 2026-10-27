@@ -57,7 +57,7 @@ fun LumenRoot(vm: AppVm) {
     }
     vm.error?.let { msg ->
         AlertDialog(onDismissRequest = { vm.error = null }, confirmButton = { TextButton({ vm.error = null }) { Text("OK") } },
-            title = { Text("Lumen PDF") }, text = { Text(msg) })
+            title = { Text("Dispersio PDF") }, text = { Text(msg) })
     }
     vm.password?.let { p -> PasswordDialog(p, onCancel = { vm.password = null }, onOk = { vm.submitPassword(it) }) }
     vm.update?.let { u -> UpdateDialog(u, onDismiss = { vm.update = null }) }
@@ -103,7 +103,7 @@ private fun UpdateDialog(u: UpdateInfo, onDismiss: () -> Unit) {
                 if (u.notes.isNotBlank()) Text(u.notes.replace("**", ""), style = MaterialTheme.typography.bodyMedium)
                 progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
                 if (file != null && !Updater.canInstall(ctx)) {
-                    Text("Permita que o Lumen PDF instale atualizações e toque em Instalar.", color = MaterialTheme.colorScheme.primary)
+                    Text("Permita que o Dispersio PDF instale atualizações e toque em Instalar.", color = MaterialTheme.colorScheme.primary)
                 }
                 err?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }

@@ -407,7 +407,7 @@ def articles_dir():
     base = os.path.join(os.path.expanduser("~"), "Documents")
     if not os.path.isdir(base):
         base = os.path.expanduser("~")
-    d = os.path.join(base, "Lumen PDF", "Artigos")
+    d = os.path.join(base, "Dispersio PDF", "Artigos")
     os.makedirs(d, exist_ok=True)
     return d
 

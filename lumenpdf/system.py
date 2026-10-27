@@ -29,7 +29,7 @@ def default_pdf_progid():
 
 
 def is_default_pdf():
-    """True se o Windows abre .pdf com o Lumen PDF (por ProgId ou escolhido via 'Abrir com')."""
+    """True se o Windows abre .pdf com o Dispersio PDF (por ProgId ou escolhido via 'Abrir com')."""
     if not IS_WINDOWS:
         return True
     prog = default_pdf_progid().lower()
@@ -52,7 +52,7 @@ def is_registered():
 
 
 def open_default_apps_settings():
-    """Abre a tela do Windows onde o usuário confirma o Lumen PDF como padrão.
+    """Abre a tela do Windows onde o usuário confirma o Dispersio PDF como padrão.
     O Windows 10/11 não permite que um programa se defina como padrão sozinho."""
     if not IS_WINDOWS:
         return

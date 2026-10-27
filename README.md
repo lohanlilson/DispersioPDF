@@ -1,4 +1,4 @@
-# Lumen PDF
+# Dispersio PDF
 
 Leitor e editor de PDF completo em Python (PySide6 + PyMuPDF), com layout no estilo dos leitores profissionais:
 abas de documentos, painel **Todas as ferramentas** à esquerda, barra rápida flutuante, painéis de miniaturas /

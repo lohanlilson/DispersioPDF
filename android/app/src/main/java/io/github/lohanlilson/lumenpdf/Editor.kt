@@ -53,7 +53,7 @@ fun argb(c: Long) = floatArrayOf(((c shr 16) and 0xFF) / 255f, ((c shr 8) and 0x
  * Em documentos assinados a gravação é incremental (só acrescenta), então as assinaturas continuam válidas.
  */
 object Editor {
-    var author: String = "Lumen PDF"
+    var author: String = "Dispersio PDF"
 
     private fun signed(doc: PDDocument): Boolean =
         doc.documentCatalog.acroForm?.fieldTree?.any { it is PDSignatureField && it.signature != null } == true

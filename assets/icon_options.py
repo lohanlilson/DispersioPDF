@@ -1,4 +1,4 @@
-"""Seis propostas de ícone para o Lumen PDF (escolha uma; a escolhida vira o app_icon do make_icon.py)."""
+"""Seis propostas de ícone para o Dispersio PDF (escolha uma; a escolhida vira o app_icon do make_icon.py)."""
 import math
 import sys
 

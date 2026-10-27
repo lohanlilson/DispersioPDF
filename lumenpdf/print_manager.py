@@ -1158,7 +1158,7 @@ class PrintManager(QDialog):
                           QMarginsF(0, 0, 0, 0))
         w.setPageLayout(lay)
         w.setTitle(", ".join(s.name for s in self.sources))
-        w.setCreator("Lumen PDF")
+        w.setCreator("Dispersio PDF")
         k = w.resolution() / 72
         seq = self._job_sequence(dict(o, copies=1), self.sheets)
         prog = self._progress(len(seq), "Gerando PDF…")

@@ -1,4 +1,4 @@
-"""Lumen PDF — leitor e editor de PDF completo (PySide6 + PyMuPDF)."""
+"""Dispersio PDF — leitor e editor de PDF completo (PySide6 + PyMuPDF)."""
 import json
 import os
 import sys

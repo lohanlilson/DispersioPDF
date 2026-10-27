@@ -49,7 +49,7 @@ import androidx.compose.ui.window.DialogProperties
 fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val p = vm.prefs
-    var name by remember { mutableStateOf(vm.authorName().takeIf { it != "Lumen PDF" } ?: "") }
+    var name by remember { mutableStateOf(vm.authorName().takeIf { it != "Dispersio PDF" } ?: "") }
     var pads by remember { mutableStateOf(0) }
     var certs by remember { mutableStateOf(Certs.storedPfx(ctx)) }
     var signPad by remember { mutableStateOf(false) }
@@ -129,7 +129,7 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
                 }
 
                 Section("Sobre")
-                Text("Lumen PDF para Android ${BuildConfig.VERSION_NAME}")
+                Text("Dispersio PDF para Android ${BuildConfig.VERSION_NAME}")
                 Text("Desenvolvido por Lohan Lilson S. Lopes", style = MaterialTheme.typography.bodySmall)
                 Text("lohanlilson@gmail.com", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(bottom = 40.dp))

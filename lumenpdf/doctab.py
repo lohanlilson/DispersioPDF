@@ -1027,7 +1027,7 @@ class DocTab(QWidget):
             try:
                 pages = ops.parse_ranges(txt, self.doc.page_count)
             except ValueError:
-                QMessageBox.warning(self, "Lumen PDF", f"Intervalo de páginas inválido: “{txt}”.\n\nUse, por exemplo: 1-3, 7")
+                QMessageBox.warning(self, "Dispersio PDF", f"Intervalo de páginas inválido: “{txt}”.\n\nUse, por exemplo: 1-3, 7")
                 return
         if not pages:
             return

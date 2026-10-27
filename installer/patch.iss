@@ -1,4 +1,4 @@
-; Patch de atualização do Lumen PDF: substitui apenas os arquivos alterados na pasta onde ele está instalado.
+; Patch de atualização do Dispersio PDF: substitui apenas os arquivos alterados na pasta onde ele está instalado.
 #include "common.iss"
 #ifndef FromVersion
   #error "Informe /DFromVersion=x.y.z"
@@ -44,7 +44,7 @@ Name: "pt"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 
 [Messages]
 WelcomeLabel1=Atualizar o [name]
-WelcomeLabel2=Este assistente vai atualizar o Lumen PDF da versão {#FromVersion} para a versão {#AppVersion}.%n%nApenas os arquivos alterados serão substituídos. Feche o Lumen PDF antes de continuar.
+WelcomeLabel2=Este assistente vai atualizar o Dispersio PDF da versão {#FromVersion} para a versão {#AppVersion}.%n%nApenas os arquivos alterados serão substituídos. Feche o Dispersio PDF antes de continuar.
 
 [Files]
 Source: "..\build\patch\files\*"; DestDir: "{app}"; Excludes: "LumenShell.dll"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
@@ -53,6 +53,14 @@ Source: "..\build\patch\files\LumenShell.dll"; DestDir: "{app}"; Flags: ignoreve
 Source: "..\assets\pdfdoc.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 #include "..\build\patch\delete.iss"
+
+[InstallDelete]
+; atalhos com o nome antigo do programa
+Type: files; Name: "{autoprograms}\{#OldAppName}.lnk"
+Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
+Type: files; Name: "{userprograms}\{#OldAppName}.lnk"
+Type: files; Name: "{userdesktop}\{#OldAppName}.lnk"
+Type: filesandordirs; Name: "{autoprograms}\{#OldAppName}"
 
 [Icons]
 ; recria os atalhos com o identificador do app (ícone correto na barra de tarefas)
@@ -80,9 +88,18 @@ begin
   Result := RegKeyExists(HKLM, 'Software\Classes\{#ProgId}') or RegKeyExists(HKCU, 'Software\Classes\{#ProgId}');
 end;
 
+var
+  HadDesktopIcon: Integer;
+
 function DesktopIconExists(): Boolean;
 begin
-  Result := FileExists(ExpandConstant('{autodesktop}\{#AppName}.lnk'));
+  { decide antes de apagar o atalho com o nome antigo }
+  if HadDesktopIcon = 0 then
+  begin
+    if FileExists(ExpandConstant('{autodesktop}\{#AppName}.lnk')) or FileExists(ExpandConstant('{autodesktop}\{#OldAppName}.lnk')) or
+       FileExists(ExpandConstant('{userdesktop}\{#OldAppName}.lnk')) then HadDesktopIcon := 1 else HadDesktopIcon := 2;
+  end;
+  Result := HadDesktopIcon = 1;
 end;
 
 function InstalledVersion(): String;
@@ -99,10 +116,11 @@ var
   V: String;
 begin
   Result := True;
+  DesktopIconExists();   { guarda se havia atalho na área de trabalho antes de trocar o nome }
   V := InstalledVersion();
   if V = '' then
   begin
-    MsgBox('O Lumen PDF não está instalado neste computador.' #13#10 +
+    MsgBox('O Dispersio PDF não está instalado neste computador.' #13#10 +
            'Use o instalador completo (LumenPDF-Setup).', mbError, MB_OK);
     Result := False;
   end

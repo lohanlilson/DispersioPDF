@@ -1,9 +1,9 @@
-"""Lumen PDF."""
+"""Dispersio PDF."""
 import os
 import sys
 
-__version__ = "1.10.0"
-APP_NAME = "Lumen PDF"
+__version__ = "1.11.0"
+APP_NAME = "Dispersio PDF"
 APP_ID = "LumenPDF"
 PROG_ID = "LumenPDF.Document"
 AUTHOR = "Lohan Lilson S. Lopes"

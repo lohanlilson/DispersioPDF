@@ -10,7 +10,7 @@ from . import icons, ops, signing
 from .config import cfg, DEFAULTS
 from .dialogs import ColorButton
 
-ACCENTS = [("Violeta Lumen (padrão)", "#6d3cf0"), ("Azul", "#1473e6"), ("Magenta", "#e8266c"), ("Verde", "#2d9d78"),
+ACCENTS = [("Violeta Dispersio (padrão)", "#6d3cf0"), ("Azul", "#1473e6"), ("Magenta", "#e8266c"), ("Verde", "#2d9d78"),
            ("Laranja", "#e68619"), ("Vermelho", "#d7373f"), ("Grafite", "#4b4b4b")]
 
 

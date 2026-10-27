@@ -100,7 +100,7 @@ fun HomeScreen(vm: AppVm) {
             }
             if (vm.recentList.isEmpty()) {
                 item {
-                    Text("Nenhum documento aberto ainda.\nToque em “Abrir PDF” ou abra um PDF pelo WhatsApp, e-mail ou Arquivos e escolha o Lumen PDF.",
+                    Text("Nenhum documento aberto ainda.\nToque em “Abrir PDF” ou abra um PDF pelo WhatsApp, e-mail ou Arquivos e escolha o Dispersio PDF.",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
                 }
@@ -124,7 +124,7 @@ private fun Hero() {
             Image(painterResource(R.drawable.lumen_logo), null, Modifier.size(52.dp))
             Spacer(Modifier.width(14.dp))
             Column {
-                Text("Lumen PDF", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("Dispersio PDF", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("Leia, comente, preencha e assine seus PDFs", color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.bodyMedium)
             }

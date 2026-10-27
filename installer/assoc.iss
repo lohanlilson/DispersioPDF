@@ -4,7 +4,7 @@
 
 ; Tipo de arquivo (ProgID)
 Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "Documento PDF"; Flags: uninsdeletekey; {#AssocCond}
-Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Documento PDF (Lumen PDF)"; {#AssocCond}
+Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Documento PDF (Dispersio PDF)"; {#AssocCond}
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\pdfdoc.ico"; {#AssocCond}
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell"; ValueType: string; ValueName: ""; ValueData: "open"; {#AssocCond}
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; {#AssocCond}
@@ -28,8 +28,8 @@ Root: HKA; Subkey: "Software\LumenPDF\Capabilities"; ValueType: string; ValueNam
 Root: HKA; Subkey: "Software\LumenPDF\Capabilities\FileAssociations"; ValueType: string; ValueName: ".pdf"; ValueData: "{#ProgId}"; {#AssocCond}
 Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppName}"; ValueData: "Software\LumenPDF\Capabilities"; Flags: uninsdeletevalue; {#AssocCond}
 
-; "Imprimir com Lumen PDF" no botão direito de qualquer PDF (mesmo que outro programa seja o padrão)
-Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\.pdf\shell\LumenPDF.Print"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Imprimir com Lumen PDF"; Flags: uninsdeletekey
+; "Imprimir com Dispersio PDF" no botão direito de qualquer PDF (mesmo que outro programa seja o padrão)
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\.pdf\shell\LumenPDF.Print"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Imprimir com Dispersio PDF"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\.pdf\shell\LumenPDF.Print"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"
 Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\.pdf\shell\LumenPDF.Print"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"
 Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\.pdf\shell\LumenPDF.Print\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" /p ""%1"""

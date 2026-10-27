@@ -78,6 +78,8 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     /** idioma do documento (para oferecer tradução) */
     var language by mutableStateOf<String?>(null)
     var translateHidden by mutableStateOf(false)
+    /** cópia traduzida (só leitura): sem editar nem salvar */
+    var readOnly = false
     var canUndo by mutableStateOf(false)
     var canRedo by mutableStateOf(false)
     var fields by mutableStateOf<List<Pair<FormField, FracRect>>>(emptyList())
@@ -121,6 +123,18 @@ const val KEEP_PASSWORD = "\u0000manter"
 class Parsed(val fields: List<FormField>, val annots: List<Editor.AnnotRef>)
 
 data class PendingPassword(val uri: Uri, val name: String, val wrong: Boolean)
+
+/** Tradução do documento aberto: páginas prontas, cópia traduzida para ver no lugar do original. */
+class TrState(val original: ViewerDoc, val src: String, val dst: String) {
+    var translated by mutableStateOf<ViewerDoc?>(null)
+    val pages = androidx.compose.runtime.mutableStateMapOf<Int, List<Pair<TBlock, String?>>>()
+    var running by mutableStateOf(true)
+    var error by mutableStateOf<String?>(null)
+    val total = original.pageCount
+    var job: kotlinx.coroutines.Job? = null
+    var version = 0
+    var autoShow = true
+}
 
 class AppVm(app: Application) : AndroidViewModel(app) {
     companion object { var AUTOSAVE_MS = 5000L }
@@ -196,7 +210,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             password = PendingPassword(uri, name, pwd != null)
             return
         }
-        doc?.let { closeDoc() }
+        doc?.let { if (it.readOnly) showTranslated(false); closeDoc() }
         val key = uri.toString()
         val start = if (!prefs.rememberPage) 0 else recents.list().firstOrNull { it.uri == key }?.page?.coerceIn(0, pdf.sizes.size - 1) ?: 0
         recents.touch(key, name)
@@ -619,7 +633,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             val app = getApplication<Application>()
             val src = workFile(d, "imagens-origem.pdf")
             val n = withContext(Dispatchers.IO) { PageEdit.extractImages(app, src, d.password, d.name.removeSuffix(".pdf").removeSuffix(".PDF")) }
-            toast = if (n == 0) "Este documento não tem imagens." else "$n imagem(ns) salvas na galeria (Imagens › Lumen PDF)"
+            toast = if (n == 0) "Este documento não tem imagens." else "$n imagem(ns) salvas na galeria (Imagens › Dispersio PDF)"
         } catch (e: Exception) {
             error = "Não foi possível extrair as imagens.\n${e.message ?: e.javaClass.simpleName}"
         } finally {
@@ -748,11 +762,11 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         val values = android.content.ContentValues().apply {
             put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, f.name)
             put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
-            if (android.os.Build.VERSION.SDK_INT >= 29) put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Lumen PDF")
+            if (android.os.Build.VERSION.SDK_INT >= 29) put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Dispersio PDF")
         }
         val uri = app.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
         if (uri != null) app.contentResolver.openOutputStream(uri)?.use { o -> f.inputStream().use { it.copyTo(o) } }
-        withContext(Dispatchers.Main) { toast = "Imagem salva na galeria (Imagens › Lumen PDF)" }
+        withContext(Dispatchers.Main) { toast = "Imagem salva na galeria (Imagens › Dispersio PDF)" }
     }
 
     fun loadScale(d: ViewerDoc) {
@@ -947,6 +961,92 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         toast = "${fixes.size} página(s) endireitada(s). Dá para desfazer."
     }
 
+    /** Pesquisa de artigos a partir do documento aberto (título ou termos principais). */
+    suspend fun articleQuery(d: ViewerDoc): String = runCatching { withReadDoc(d) { Artigos.queryFromDocument(it) } }.getOrDefault("")
+
+    // ------------------------------------------------------------ tradução no próprio documento
+    var tr by mutableStateOf<TrState?>(null)
+
+    /** Traduz em segundo plano; as páginas prontas já aparecem na cópia traduzida (botão Original / Tradução). */
+    fun startTranslation(d: ViewerDoc, src: String, dst: String) {
+        val cur = tr
+        if (cur != null && cur.original === d && cur.dst == dst) { showTranslated(true); return }
+        stopTranslation()
+        val st = TrState(d, src, dst)
+        tr = st
+        val app = getApplication<Application>()
+        st.job = viewModelScope.launch {
+            try {
+                val srcFile = withContext(Dispatchers.IO) {
+                    d.work ?: File(app.cacheDir, "traducao-origem.pdf").also { f ->
+                        app.contentResolver.openInputStream(Uri.parse(d.uri))!!.use { i -> f.outputStream().use { i.copyTo(it) } }
+                    }
+                }
+                val pages = (0 until d.pageCount).toList()
+                var sinceBuild = 0
+                withContext(Dispatchers.IO) {
+                    PDDocument.load(srcFile, d.password ?: "").use { pd ->
+                        DocTranslator.run(pd, pages, src, dst, onPage = { p, items ->
+                            withContext(Dispatchers.Main) { st.pages[p] = items }
+                            sinceBuild++
+                            if (st.translated == null || sinceBuild >= 4 || st.pages.size == pages.size) {
+                                sinceBuild = 0
+                                rebuildTranslated(st, srcFile)
+                            }
+                        }, cancelled = { tr !== st || !isActive })
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                st.error = e.message ?: e.javaClass.simpleName
+            } finally {
+                st.running = false
+            }
+        }
+    }
+
+    private val isActive get() = true
+
+    private suspend fun rebuildTranslated(st: TrState, srcFile: File) {
+        val app = getApplication<Application>()
+        val dir = File(app.cacheDir, "traducao").apply { mkdirs() }
+        val out = File(dir, "traduzido-${sha1(st.original.uri)}-${st.version++}.pdf")
+        val snapshot = withContext(Dispatchers.Main) { st.pages.toMap() }
+        withContext(Dispatchers.IO) { TranslatedPdf.build(app, srcFile, st.original.password, out, snapshot) }
+        val pdf = engine.open(app, Uri.fromFile(out), null, st.original.pdf.sizes.toList())
+        withContext(Dispatchers.Main) {
+            val t = st.translated
+            if (t == null) {
+                val nd = ViewerDoc(pdf, Uri.fromFile(out).toString(), st.original.name.removeSuffix(".pdf") + " (" + (Traducao.NAMES[st.dst] ?: st.dst) + ")",
+                    st.original.page, null).also { it.readOnly = true; it.night = st.original.night; it.zoom = st.original.zoom }
+                st.translated = nd
+                if (st.autoShow && doc === st.original && tr === st) showTranslated(true)
+            } else {
+                val old = t.pdf
+                t.pdf = pdf
+                t.lastBitmaps.evictAll()
+                viewModelScope.launch { engine.close(old) }
+            }
+        }
+    }
+
+    fun showTranslated(on: Boolean) {
+        val st = tr ?: return
+        val t = st.translated
+        if (on && t != null && doc === st.original) { t.page = st.original.page; t.zoom = st.original.zoom; doc = t }
+        else if (!on && doc === t && t != null) { st.original.page = t.page; doc = st.original }
+        st.autoShow = on && t == null
+    }
+
+    fun stopTranslation() {
+        val st = tr ?: return
+        st.job?.cancel()
+        if (doc === st.translated) doc = st.original
+        st.translated?.let { t -> viewModelScope.launch { engine.close(t.pdf) } }
+        tr = null
+    }
+
     // ------------------------------------------------------------ salvamento automático
     private var autosaveJob: Job? = null
 
@@ -1010,6 +1110,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     fun requestClose() {
         val d = doc ?: return
+        if (d.readOnly && tr?.translated === d) { showTranslated(false); return }   // voltar da tradução para o original
         when {
             !d.dirty -> closeDoc()
             canAutosave(d) -> viewModelScope.launch { if (autoSave(d) && !d.dirty) closeDoc() else confirmClose = true }
@@ -1020,7 +1121,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     fun viewModelScopeLaunch(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) = viewModelScope.launch(block = block)
 
     fun authorName(): String = getApplication<Application>().getSharedPreferences("prefs", 0).getString("autor", null)
-        ?.takeIf { it.isNotBlank() } ?: "Lumen PDF"
+        ?.takeIf { it.isNotBlank() } ?: "Dispersio PDF"
 
     fun setAuthorName(n: String) {
         getApplication<Application>().getSharedPreferences("prefs", 0).edit().putString("autor", n.trim()).apply()
@@ -1028,6 +1129,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     fun closeDoc() {
         val d = doc ?: return
+        if (tr != null) stopTranslation()
         autosaveJob?.cancel()
         dropReadDoc()
         recents.setPage(d.uri, d.page)
@@ -1134,7 +1236,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             progress = "Convertendo…"
             if (kind == "imagens") {
                 val n = Convert.images(app, engine, d.pdf, d.name.removeSuffix(".pdf").removeSuffix(".PDF")) { progress = "Salvando página ${it + 1}…" }
-                toast = "$n imagem(ns) salvas na galeria (Imagens › Lumen PDF)"
+                toast = "$n imagem(ns) salvas na galeria (Imagens › Dispersio PDF)"
                 return@launch
             }
             val pages = allText(d)

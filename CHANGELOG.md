@@ -1,6 +1,14 @@
-# Novidades do Lumen PDF
+# Novidades do Dispersio PDF
 
 As notas de cada versão aparecem na janela de atualização do programa.
+
+## 1.11.0
+
+- **Novo nome: Dispersio PDF.** Dispersão é o fenômeno do ícone: o prisma que abre a luz branca nas cores. Suas preferências, assinaturas e arquivos recentes continuam iguais; os atalhos antigos são trocados pelos novos.
+- **Tradução no próprio PDF**: o botão "Traduzir" agora troca as páginas pela versão traduzida no mesmo layout (figuras, tabelas e colunas no lugar), conforme cada página fica pronta. Botões **Original | Tradução** para alternar, **Leitura** (só tradução, original, lado a lado ou intercalado/bilíngue) e **Salvar PDF traduzido**.
+- **Tradução mais limpa**: citações ([12], (Silva et al., 2020)) e números sobrescritos ficam fora da tradução e voltam no fim da frase; a lista de Referências, cabeçalhos/rodapés repetidos e números de página não são traduzidos; artigos de duas colunas são lidos na ordem certa e o parágrafo que continua na outra coluna ou página é traduzido inteiro.
+- **Traduzir trecho selecionado**: botão direito na seleção › Traduzir seleção.
+- **Pesquisa de artigos mais dinâmica**: sugestões de temas e artigos enquanto você digita; filtros em botões (Só PDF grátis, Últimos 5 anos, Revisões, Brasil, Em português, Com resumo) e ordem (Relevância, Mais citados, Recentes); resumo traduzido no próprio cartão; **Parecidos, Citado por e Referências** para navegar de um artigo a outro (com Voltar); rolagem contínua; cole um DOI ou link para ir direto ao artigo; e **Artigos sobre este documento** a partir do PDF aberto.
 
 ## 1.10.0
 

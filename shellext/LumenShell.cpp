@@ -1,4 +1,4 @@
-// LumenShell.dll — extensões do Explorador do Windows para o Lumen PDF:
+// LumenShell.dll — extensões do Explorador do Windows para o Dispersio PDF:
 //   * IThumbnailProvider: miniatura do arquivo .pdf com a primeira página;
 //   * IPreviewHandler:    painel de visualização (Alt+P) com as páginas do documento.
 // A renderização usa o mecanismo de PDF do próprio Windows (Windows.Data.Pdf, Windows 10+), sem dependências.
@@ -493,7 +493,7 @@ private:
                 msg = L"Carregando…";
             else if (m_state->done && m_state->total > m_state->pages.size())
                 msg = L"Mostrando " + std::to_wstring(m_state->pages.size()) + L" de " +
-                      std::to_wstring(m_state->total) + L" páginas — abra no Lumen PDF para ver o documento completo.";
+                      std::to_wstring(m_state->total) + L" páginas — abra no Dispersio PDF para ver o documento completo.";
         }
         if (!msg.empty()) {
             RECT tr = {kMargin, m_state && !m_state->pages.empty() ? y : H / 2 - 20, W - kMargin, 0};

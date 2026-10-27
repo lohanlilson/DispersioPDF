@@ -64,8 +64,8 @@ def _xmp(title, author, created, modified, doc_id):
 {f'   <dc:title><rdf:Alt><rdf:li xml:lang="x-default">{esc(title)}</rdf:li></rdf:Alt></dc:title>' + chr(10) if title else ""}{f'   <dc:creator><rdf:Seq><rdf:li>{esc(author)}</rdf:li></rdf:Seq></dc:creator>' + chr(10) if author else ""}   <xmp:CreateDate>{created}</xmp:CreateDate>
    <xmp:ModifyDate>{modified}</xmp:ModifyDate>
    <xmp:MetadataDate>{modified}</xmp:MetadataDate>
-   <xmp:CreatorTool>Lumen PDF</xmp:CreatorTool>
-   <pdf:Producer>Lumen PDF</pdf:Producer>
+   <xmp:CreatorTool>Dispersio PDF</xmp:CreatorTool>
+   <pdf:Producer>Dispersio PDF</pdf:Producer>
    <xmpMM:DocumentID>uuid:{doc_id}</xmpMM:DocumentID>
   </rdf:Description>
  </rdf:RDF>
@@ -275,7 +275,7 @@ def convert(data, title=None, author=None):
     author = author or meta.get("author") or ""
     created = now
     iso = now.isoformat(timespec="seconds")
-    md = {"creator": "Lumen PDF", "producer": "Lumen PDF", "creationDate": _pdf_date(created), "modDate": _pdf_date(now)}
+    md = {"creator": "Dispersio PDF", "producer": "Dispersio PDF", "creationDate": _pdf_date(created), "modDate": _pdf_date(now)}
     if title:
         md["title"] = title
     if author:

@@ -124,7 +124,7 @@ class Leva6Test {
         Log.i("LumenTest", "importados: $n $types")
         assertEquals(3, n)
         assertTrue(types.containsAll(listOf("Text", "Highlight", "Square")))
-        // FDF no formato gerado pelo Lumen PDF do computador (e pelo Acrobat)
+        // FDF no formato gerado pelo Dispersio PDF do computador (e pelo Acrobat)
         val desktop = """%FDF-1.2
 1 0 obj
 <</FDF<</Annots[2 0 R 3 0 R]/F(teste.pdf)>>>>

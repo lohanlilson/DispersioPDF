@@ -57,7 +57,7 @@ class ViewerTest {
         for (n in 1..3) {
             val page = doc.startPage(PdfDocument.PageInfo.Builder(595, 842, n).create())
             val c = page.canvas
-            c.drawText("Lumen PDF - página $n", 50f, 80f, title)
+            c.drawText("Dispersio PDF - página $n", 50f, 80f, title)
             var y = 120f
             repeat(40) { k ->
                 val extra = if (n == 2 && k == 10) " Foro da comarca de Goiânia." else ""

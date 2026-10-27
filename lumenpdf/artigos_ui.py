@@ -62,7 +62,7 @@ def ensure_models(parent, path):
     if not miss:
         return True
     names = ", ".join(f"{traducao.NAMES.get(a, a)} → {traducao.NAMES.get(b, b)}" for a, b in miss)
-    if QMessageBox.question(parent, "Tradução", f"Para traduzir sem internet, o Lumen PDF precisa baixar uma vez o pacote "
+    if QMessageBox.question(parent, "Tradução", f"Para traduzir sem internet, o Dispersio PDF precisa baixar uma vez o pacote "
                             f"de idioma ({names}), cerca de {65 * len(miss)} MB.\n\nBaixar agora?") != QMessageBox.Yes:
         return False
     for pair in miss:

@@ -1,5 +1,7 @@
 ; Definições compartilhadas entre o instalador completo e os patches.
-#define AppName      "Lumen PDF"
+#define AppName      "Dispersio PDF"
+; nome antigo (atalhos com esse nome são trocados pelos novos na atualização)
+#define OldAppName   "Lumen PDF"
 #define AppExe       "LumenPDF.exe"
 #ifndef AppPublisher
   #define AppPublisher "Lohan Lilson S. Lopes"

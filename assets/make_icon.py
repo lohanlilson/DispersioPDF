@@ -1,4 +1,4 @@
-"""Identidade visual do Lumen PDF (lumen = luz).
+"""Identidade visual do Dispersio PDF (lumen = luz).
 
 Marca: o Prisma — a luz branca atravessa um prisma e se abre em violeta e dourado.
 Gera: logo.png (1024), lumenpdf.png (256), lumenpdf.ico (programa) e pdfdoc.ico (arquivos .pdf).
