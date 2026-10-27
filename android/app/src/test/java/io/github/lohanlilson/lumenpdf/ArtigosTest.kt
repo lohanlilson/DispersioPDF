@@ -47,3 +47,15 @@ class ArtigosTest {
         assertNull(Traducao.detect("Tabela 1"))
     }
 }
+
+class AcentosTest {
+    private val t = java.io.File("src/main/assets/dados/acentos.txt").readLines().filter { "=" in it && !it.startsWith("#") }
+        .associate { it.substringBefore("=") to it.substringAfter("=") }
+
+    @org.junit.Test fun acentos() {
+        org.junit.Assert.assertEquals("maus tratos em cães", Artigos.restoreAccents("maus tratos em caes", t))
+        org.junit.Assert.assertEquals("Toxicidade em CÃES", Artigos.restoreAccents("Toxicidade em CAES", t))
+        org.junit.Assert.assertEquals(listOf("maus tratos em caes", "maus tratos em cães"), Artigos.variants("maus tratos em caes", t))
+        org.junit.Assert.assertEquals(listOf("maus-tratos em cães", "maus tratos em caes"), Artigos.variants("maus-tratos em cães", t))
+    }
+}

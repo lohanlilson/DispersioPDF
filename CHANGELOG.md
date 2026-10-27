@@ -4,7 +4,7 @@ As notas de cada versão aparecem na janela de atualização do programa.
 
 ## 1.10.0
 
-- **Pesquisar artigos científicos** (Início › Artigos científicos, ou Mais ferramentas): busca em mais de 250 milhões de trabalhos (OpenAlex; Europe PMC como reserva) e mostra só os que têm PDF gratuito e legal. Filtros por ano e ordem (relevantes, mais citados, recentes), opção de procurar também em inglês, baixar e abrir com um clique e **copiar a referência no padrão ABNT**.
+- **Pesquisar artigos científicos** (Início › Artigos científicos, ou Mais ferramentas): busca em mais de 250 milhões de trabalhos (OpenAlex; Europe PMC como reserva) e mostra só os que têm PDF gratuito e legal. Filtros por ano e ordem (relevantes, mais citados, recentes), opção de procurar também em inglês, baixar e abrir com um clique e **copiar a referência no padrão ABNT**. Com "procurar também em inglês", a pesquisa é traduzida e os resultados em inglês aparecem intercalados com os em português; acento faltando ("caes", "violencia") ou hífen não fazem perder resultados.
 - **Tradução gratuita e sem internet**: ao abrir um documento em outro idioma, aparece a faixa "Traduzir". A leitura traduzida mostra página por página, com o original ou lado a lado, e dá para **salvar o PDF traduzido** com o texto no lugar do original. O pacote de cada idioma (~65 MB) é baixado uma vez. O idioma da tradução segue o do Windows (dá para mudar em Preferências › Geral).
 
 ## 1.9.0

@@ -174,6 +174,79 @@ def search(query, year_from=None, sort="relevance", page=1, api_key="", lang=Non
         raise SearchError(f"Não foi possível pesquisar agora ({first}; {e}). Verifique a internet.") from e
 
 
+def strip_accents(s):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+
+_ACC = None
+
+
+def restore_accents(q):
+    """Recoloca acentos em palavras comuns digitadas sem eles (caes → cães), mantendo maiúsculas."""
+    global _ACC
+    if _ACC is None:
+        _ACC = {}
+        try:
+            from . import resource
+            with open(resource("assets", "dados", "acentos.txt"), encoding="utf-8") as f:
+                for ln in f:
+                    if "=" in ln and not ln.startswith("#"):
+                        a, b = ln.strip().split("=", 1)
+                        _ACC[a] = b
+        except Exception:
+            pass
+
+    def fix(m):
+        w = m.group()
+        b = _ACC.get(w.lower())
+        if not b:
+            return w
+        return b.upper() if w.isupper() and len(w) > 1 else (b[0].upper() + b[1:] if w[0].isupper() else b)
+    return re.sub(r"[A-Za-z]+", fix, q)
+
+
+def variants(q):
+    """A pesquisa como foi digitada e uma versão corrigida: com os acentos que faltaram ou, se já tinha acentos,
+    sem acentos e hífens. Acento faltando ou trocado não pode esconder resultados."""
+    out = []
+    fixed = restore_accents(q)
+    for v in (q, fixed if fixed != q else strip_accents(q).replace("-", " ")):
+        v = " ".join(v.split())
+        if v and v.lower() not in [x.lower() for x in out]:
+            out.append(v)
+    return out
+
+
+def norm_key(a):
+    t = re.sub(r"[^a-z0-9]+", " ", strip_accents(a.title).lower()).strip()
+    return (a.doi or "").lower() or t
+
+
+def search_many(queries, year_from=None, sort="relevance", page=1, api_key="", seen=None):
+    """Pesquisa várias versões (português, sem acento, inglês) e intercala os resultados, sem repetir."""
+    seen = set(seen or ())
+    lists, total, errors = [], 0, []
+    for q in queries:
+        try:
+            arts, n = search(q, year_from, sort, page, api_key)
+            lists.append(arts)
+            total += n
+        except SearchError as e:
+            errors.append(e)
+    if not lists and errors:
+        raise errors[0]
+    out = []
+    for i in range(max((len(x) for x in lists), default=0)):
+        for lst in lists:          # um de cada lista por vez: os em inglês aparecem junto dos em português
+            if i < len(lst):
+                k = norm_key(lst[i])
+                if k not in seen:
+                    seen.add(k)
+                    out.append(lst[i])
+    return out, total
+
+
 def safe_name(title, maxlen=90):
     s = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", title).strip()
     s = re.sub(r"\s+", " ", s)

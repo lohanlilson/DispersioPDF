@@ -110,11 +110,6 @@ object Traducao {
         Tasks.await(translator(src, dst).translate(text))
     }
 
-    /** Traduz a pesquisa para o inglês só se o pacote já estiver no aparelho (não baixa nada sem perguntar). */
-    suspend fun toEnglishIfReady(q: String): String? = runCatching {
-        val src = detect(("$q ").repeat(12)) ?: "pt"
-        if (src == "en" || missing(src, "en").isNotEmpty()) null else translate(src, "en", q)
-    }.getOrNull()
 }
 
 /** Faixa no topo: documento em outro idioma, com botão para traduzir. */

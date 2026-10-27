@@ -181,6 +181,51 @@ object Artigos {
         }.getOrElse { throw java.io.IOException("Não foi possível pesquisar agora (${first?.message}; ${it.message}). Verifique a internet.") }
     }
 
+    fun stripAccents(s: String) = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
+
+    private var acc: Map<String, String>? = null
+    fun loadAccents(ctx: android.content.Context) {
+        if (acc != null) return
+        acc = runCatching {
+            ctx.assets.open("dados/acentos.txt").bufferedReader().readLines().filter { "=" in it && !it.startsWith("#") }
+                .associate { it.substringBefore("=").trim() to it.substringAfter("=").trim() }
+        }.getOrDefault(emptyMap())
+    }
+
+    /** Recoloca acentos em palavras comuns digitadas sem eles (caes → cães). */
+    fun restoreAccents(q: String, table: Map<String, String>? = acc): String = Regex("[A-Za-z]+").replace(q) { m ->
+        val w = m.value
+        val b = table?.get(w.lowercase()) ?: return@replace w
+        when {
+            w.length > 1 && w.all { it.isUpperCase() } -> b.uppercase()
+            w[0].isUpperCase() -> b.replaceFirstChar { it.uppercase() }
+            else -> b
+        }
+    }
+
+    /** A pesquisa digitada e uma versão corrigida (com os acentos que faltaram ou, se já tinha, sem acentos e hífens). */
+    fun variants(q: String, table: Map<String, String>? = acc): List<String> {
+        val fixed = restoreAccents(q, table)
+        val out = ArrayList<String>()
+        for (v in listOf(q, if (fixed != q) fixed else stripAccents(q).replace("-", " "))) {
+            val n = v.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+            if (n.isNotEmpty() && out.none { it.equals(n, true) }) out += n
+        }
+        return out
+    }
+
+    fun key(a: Article) = a.doi.lowercase().ifEmpty { stripAccents(a.title).lowercase().replace(Regex("[^a-z0-9]+"), " ").trim() }
+
+    /** Pesquisa várias versões e intercala os resultados (os em inglês aparecem junto dos em português), sem repetir. */
+    fun searchMany(queries: List<String>, yearFrom: Int?, sort: String, page: Int, seen: MutableSet<String>): Pair<List<Article>, Int> {
+        val lists = ArrayList<List<Article>>(); var total = 0; var err: Exception? = null
+        for (q in queries) runCatching { search(q, yearFrom, sort, page) }.onSuccess { (a, n) -> lists += a; total += n }.onFailure { err = it as? Exception }
+        if (lists.isEmpty() && err != null) throw err!!
+        val out = ArrayList<Article>()
+        for (i in 0 until (lists.maxOfOrNull { it.size } ?: 0)) for (l in lists) if (i < l.size && seen.add(key(l[i]))) out += l[i]
+        return out to total
+    }
+
     fun safeName(title: String) = title.replace(Regex("[\\\\/:*?\"<>|\\r\\n\\t]+"), " ").replace(Regex("\\s+"), " ").trim()
         .take(90).trimEnd(' ', '.').ifEmpty { "Artigo" } + ".pdf"
 
@@ -241,15 +286,20 @@ fun ArticlesScreen(vm: AppVm, onClose: () -> Unit) {
         busy = "Pesquisando…"; msg = null
         scope.launch {
             try {
-                val queries = mutableListOf(text)
-                if (english) Traducao.toEnglishIfReady(text)?.let { if (!it.equals(text, true)) queries += it }
-                val seen = results.map { it.doi.ifEmpty { it.title } }.toMutableSet()
-                var t = 0
-                for (qq in queries) {
-                    val (arts, n) = withContext(Dispatchers.IO) { Artigos.search(qq, null, sort, page) }
-                    t += n
-                    arts.forEach { a -> if (seen.add(a.doi.ifEmpty { a.title })) results += a }
+                Artigos.loadAccents(ctx)
+                val queries = Artigos.variants(text).toMutableList()
+                if (english && Traducao.detect("$text ".repeat(12)) != "en") {
+                    if (Traducao.missing("pt", "en").isNotEmpty()) {
+                        busy = "Preparando a pesquisa em inglês (download único, cerca de 30 MB)…"
+                        runCatching { Traducao.download("pt", "en") }
+                    }
+                    runCatching { Traducao.translate("pt", "en", Artigos.restoreAccents(text)) }.getOrNull()
+                        ?.trim()?.trimEnd('.')?.takeIf { it.isNotEmpty() && queries.none { q -> q.equals(it, true) } }
+                        ?.let { queries += it; busy = "Pesquisando também em inglês (“$it”)…" }
                 }
+                val seen = results.map { Artigos.key(it) }.toMutableSet()
+                val (arts, t) = withContext(Dispatchers.IO) { Artigos.searchMany(queries, null, sort, page, seen) }
+                results += arts
                 total = maxOf(total, t)
                 if (results.isEmpty()) msg = "Nada encontrado com PDF gratuito. Tente outras palavras" + if (!english) " ou marque “também em inglês”." else "."
             } catch (e: Exception) { msg = e.message } finally { busy = null }

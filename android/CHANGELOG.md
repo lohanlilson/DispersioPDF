@@ -1,5 +1,10 @@
 # Novidades do Lumen PDF para Android
 
+## 0.9.1
+
+- **Pesquisa de artigos em português e inglês de verdade**: com "também em inglês" marcado, o app prepara o tradutor sozinho (download único) e mostra os resultados em inglês intercalados com os em português.
+- **Acentos não atrapalham mais**: "caes", "violencia", "maus tratos" sem hífen encontram o mesmo que "cães", "violência", "maus-tratos".
+
 ## 0.9.0
 
 - **Pesquisar artigos científicos** (tela inicial › Artigos científicos): artigos de acesso aberto com PDF gratuito, opção de procurar também em inglês, abrir com um toque e copiar a referência ABNT.

@@ -38,6 +38,16 @@ def fake(url, timeout=25):
 artigos._get_json = fake
 arts, n = artigos.search("dog bite")
 assert arts[0].source == "Europe PMC" and arts[0].title == "Dog bite injuries" and arts[0].abnt().startswith("LONG, K. Dog bite injuries. Animals, v. 14, 2024.")
+# acento faltando não esconde resultados; versões intercaladas sem repetir
+assert artigos.restore_accents("maus tratos em CAES") == "maus tratos em CÃES"
+assert artigos.variants("maus tratos em caes") == ["maus tratos em caes", "maus tratos em cães"]
+assert artigos.variants("maus-tratos em cães") == ["maus-tratos em cães", "maus tratos em caes"]
+_s = artigos.search
+artigos.search = lambda q, *a, **k: ([artigos.Article(f"{q} {i}", doi=f"10/{q}{i}") for i in range(2)] +
+                                     [artigos.Article("Comum", doi="10/x")], 3)
+_out, _n = artigos.search_many(["pt", "en"])
+assert [a.title for a in _out] == ["pt 0", "en 0", "pt 1", "en 1", "Comum"] and _n == 6, [a.title for a in _out]
+artigos.search = _s
 assert artigos.safe_name('Cães: "maus-tratos"/abuso?') == "Cães maus-tratos abuso.pdf"
 
 # --- idioma

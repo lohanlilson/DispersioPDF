@@ -186,7 +186,7 @@ class ArticlesDialog(QDialog):
             self.list.clear()
         else:
             self.page += 1
-        queries = [q]
+        queries = artigos.variants(q)
         if self.en.isChecked() and not _looks_english(q):
             path = None
             try:
@@ -195,8 +195,10 @@ class ArticlesDialog(QDialog):
                 pass
             if path and (not traducao.missing(path) or ensure_models(self, path)):
                 try:
-                    en = traducao.translate_paragraphs([q], path, "en")[0]
-                    if en.lower() != q.lower():
+                    # traduz a versão com os acentos corretos (o tradutor erra com "caes", acerta com "cães")
+                    src_q = artigos.restore_accents(q)
+                    en = traducao.translate_paragraphs([src_q], path, "en")[0].strip().rstrip(".")
+                    if en and en.lower() not in [x.lower() for x in queries]:
                         queries.append(en)
                 except Exception:
                     pass
@@ -204,19 +206,13 @@ class ArticlesDialog(QDialog):
         sort = self.sort.currentData()
         key = cfg.get("openalex_key")
         page = self.page
-        self.status.setText("Pesquisando" + (f" (“{queries[-1]}”)" if len(queries) > 1 else "") + "…")
+        en = [x for x in queries if _looks_english(x)]
+        self.status.setText("Pesquisando" + (f" também em inglês (“{en[-1]}”)" if en and en[-1] != q else "") + "…")
+
+        seen = {artigos.norm_key(a) for a in self.results}
 
         def work(j):
-            seen, out, total = {a.doi or a.title for a in self.results}, [], 0
-            for qq in queries:
-                arts, n = artigos.search(qq, yf, sort, page, key)
-                total += n
-                for a in arts:
-                    k = a.doi or a.title
-                    if k not in seen:
-                        seen.add(k)
-                        out.append(a)
-            return out, total
+            return artigos.search_many(queries, yf, sort, page, key, seen)
         job = _keep(self, _Job(work))
         job.done.connect(self._shown)
         job.failed.connect(lambda e: self.status.setText(f"<span style='color:#d7373f'>{html.escape(e)}</span>"))
