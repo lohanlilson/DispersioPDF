@@ -83,9 +83,10 @@ dlg.q.setText("animal cruelty"); dlg.search()
 end = time.time() + 20
 while not dlg.results and time.time() < end:
     app.processEvents(); time.sleep(0.02)
-assert dlg.list.count() == 1 and "Vet Path" in dlg.list.item(0).text()
-dlg.copy_ref(); assert app.clipboard().text().startswith("BEHR, Melissa J.")
-dlg.open_selected()
+cards = dlg.inner.findChildren(artigos_ui.ArticleCard)
+assert len(cards) == 1 and dlg.results[0].venue == "Vet Path"
+dlg.copy_ref(dlg.results[0]); assert app.clipboard().text().startswith("BEHR, Melissa J.")
+dlg.open_article(dlg.results[0])
 end = time.time() + 20
 while w.cur() is None and time.time() < end:
     app.processEvents(); time.sleep(0.02)
@@ -109,4 +110,72 @@ tr = pymupdf.open(out_fn)[0].get_text()
 print(tr[:300])
 assert "crueldade" in tr.lower() and "cruelty is a significant" not in tr
 tw.close()
+
+# --- pesquisa dinâmica: filtros, resumo traduzido, parecidos/citado por/referências, voltar, DOI, sugestões, rolagem
+def A(i, **k):
+    return artigos.Article(f"Artigo {i}", ["Ana Souza"], 2020, "Rev", language="en", doi=f"https://doi.org/10.1/{i}",
+                           pdf_urls=["https://x/a.pdf"], id=f"W{1000 + i}", citations=3, related=["W1", "W2"], refs=["W3"],
+                           abstract="Animal cruelty is a significant indicator of interpersonal violence.", **k)
+calls = []
+def fake_search(q, year_from=None, sort="relevance", page=1, api_key="", lang=None, filters=("pdf",)):
+    calls.append((q, sort, page, tuple(filters)))
+    return [A(page * 100 + i) for i in range(25)], 60
+artigos.search = fake_search
+artigos.by_ids = lambda ids, key="", filters=(): [A(900 + n) for n, _ in enumerate(ids)]
+artigos.citing = lambda wid, page=1, key="", filters=(), sort="citations": ([A(800)], 1)
+artigos.by_key = lambda key, api_key="": A(7, title="Pelo DOI") if False else artigos.Article("Pelo DOI", id="W77")
+cfg.set("articles_english", False)
+d2 = artigos_ui.ArticlesDialog(w); d2.resize(900, 700); d2.show()
+d2.en.setChecked(False)
+d2.q.setText("crueldade animal"); d2.search()
+wait = lambda cond: [app.processEvents() or time.sleep(0.02) for _ in iter(lambda: cond() or time.time() > end, True)]
+end = time.time() + 20; wait(lambda: len(d2.results) == 25)
+assert len(d2.results) == 25 and calls[-1][3] == ("pdf",)
+# rolagem contínua carrega a próxima página
+for _ in range(30): app.processEvents(); time.sleep(0.01)
+assert d2.area.verticalScrollBar().maximum() > 0
+d2.area.verticalScrollBar().setValue(d2.area.verticalScrollBar().maximum())
+end = time.time() + 20; wait(lambda: len(d2.results) == 50)
+assert len(d2.results) == 50 and calls[-1][2] == 2
+# filtro em botão refaz a pesquisa
+d2.chips["review"].setChecked(True)
+end = time.time() + 20; wait(lambda: calls[-1][3] == ("pdf", "review") and len(d2.results) == 25)
+assert calls[-1][3] == ("pdf", "review")
+d2.sorts.button(1).click()
+end = time.time() + 20; wait(lambda: calls[-1][1] == "citations")
+assert calls[-1][1] == "citations"
+# resumo traduzido
+card = d2.inner.findChildren(artigos_ui.ArticleCard)[0]
+card.toggle_abstract()
+end = time.time() + 60; wait(lambda: "tradução automática" in card.abs.text())
+print(card.abs.text()[:200])
+assert "crueldade" in card.abs.text().lower()
+# navegar: parecidos → voltar; citado por; referências
+end = time.time() + 5; wait(lambda: False)
+d2.navigate("related", d2.results[0])
+end = time.time() + 20; wait(lambda: d2.results and d2.results[0].title == "Artigo 900")
+assert [a.title for a in d2.results] == ["Artigo 900", "Artigo 901"] and d2.back.isVisible()
+d2.navigate("refs", d2.results[0])
+end = time.time() + 20; wait(lambda: len(d2.results) == 1)
+d2.go_back(); app.processEvents()
+assert [a.title for a in d2.results] == ["Artigo 900", "Artigo 901"]
+d2.go_back(); app.processEvents()
+assert len(d2.results) == 25 and not d2.back.isVisible()
+d2.navigate("citing", d2.results[0])
+end = time.time() + 20; wait(lambda: d2.results and d2.results[0].title == "Artigo 800")
+# DOI colado vai direto ao artigo
+d2.q.setText("https://doi.org/10.1177/0886260508319362"); d2.search()
+end = time.time() + 20; wait(lambda: d2.results and d2.results[0].title == "Pelo DOI")
+assert d2.results[0].title == "Pelo DOI"
+# sugestões enquanto digita
+artigos.autocomplete = lambda t, timeout=6: [("tema", "animal cruelty", "", "animal-cruelty"), ("artigo", "Is Animal Cruelty a Red Flag", "", "W2085928795")]
+d2.q.setText("animal cru"); d2._suggest()
+end = time.time() + 20; wait(lambda: d2._sugg_model.rowCount() > 0)
+assert any("animal cruelty" in x for x in d2._sugg_model.stringList())
+# artigos sobre o documento aberto
+d2.search_open_document()
+end = time.time() + 20; wait(lambda: calls[-1][0] != "crueldade animal")
+print("consulta do documento:", d2.q.text())
+assert "Animal cruelty" in d2.q.text()
+d2.close()
 print("artigos e tradução ok")

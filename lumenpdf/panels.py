@@ -93,7 +93,7 @@ CATALOG = [
     ]),
     ("Mais ferramentas", [
         ("payments", "barcode", "Boletos, Pix e notas fiscais"),
-        ("articles", "search", "Pesquisar artigos científicos"), ("translate", "translate", "Traduzir documento"),
+        ("articles", "search", "Pesquisar artigos científicos"), ("articles_doc", "search", "Artigos sobre este documento"), ("translate", "translate", "Traduzir documento"),
         ("compare", "compare", "Comparar arquivos"), ("read_aloud", "speaker", "Ler em voz alta"),
         ("attach", "attach", "Anexar arquivo"), ("print", "print", "Imprimir"),
         ("print_batch", "print", "Imprimir vários arquivos"),

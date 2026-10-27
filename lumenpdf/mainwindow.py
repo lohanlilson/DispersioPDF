@@ -1514,6 +1514,14 @@ class MainWindow(QMainWindow):
         from .artigos_ui import ArticlesDialog
         ArticlesDialog(self).exec()
 
+    def tool_articles_doc(self, tab, **kw):
+        """Artigos sobre o documento aberto (título e termos principais)."""
+        from PySide6.QtCore import QTimer
+        from .artigos_ui import ArticlesDialog
+        d = ArticlesDialog(self)
+        QTimer.singleShot(0, d.search_open_document)
+        d.exec()
+
     def tool_translate(self, tab, src=None, **kw):
         from . import traducao
         from .artigos_ui import ensure_models, route_or_warn
