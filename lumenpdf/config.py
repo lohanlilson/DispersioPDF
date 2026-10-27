@@ -11,6 +11,7 @@ DEFAULTS = {
     "recent_max": 20,
     "auto_update": True,
     "confirm_delete_pages": True,
+    "autosave": True,                    # salva sozinho alguns segundos depois de cada alteração e ao fechar
     "default_asked": False,
     # Aparência
     "theme": "light",                    # light | dark | system

@@ -20,6 +20,11 @@ class MainActivity : FragmentActivity() {
         setContent { LumenTheme(vm.prefs.theme) { LumenRoot(vm) } }
     }
 
+    override fun onStop() {
+        super.onStop()
+        vm.flushAutosave()   // saiu do app sem salvar: grava antes que o Android encerre o processo
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handle(intent)

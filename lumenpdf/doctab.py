@@ -2,7 +2,7 @@
 import os
 
 import pymupdf
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFileDialog, QMessageBox, QInputDialog,
                                QFrame, QLabel, QPushButton)
 
@@ -88,6 +88,22 @@ class SignatureBar(QFrame):
 class DocTab(QWidget):
     titleChanged = Signal()
     statusMsg = Signal(str)
+    AUTOSAVE_MS = 8000   # salva sozinho 8 s depois da última alteração
+
+    # "modified" dispara o salvamento automático: toda alteração passa por aqui
+    @property
+    def modified(self):
+        return self._modified
+
+    @modified.setter
+    def modified(self, v):
+        self._modified = bool(v)
+        t = self.__dict__.get("_autosave_timer")
+        if t is not None:
+            if v and self.can_autosave():
+                t.start(self.AUTOSAVE_MS)
+            elif not v:
+                t.stop()
 
     def __init__(self, data, path=None, password=None, settings=None):
         super().__init__()
@@ -97,8 +113,13 @@ class DocTab(QWidget):
         self.original_bytes = data  # arquivo como está em disco (usado para validar assinaturas)
         self.sig_results = []
         self.undo_stack, self.redo_stack = [], []
-        self.modified = False
+        self._modified = False
+        self._backed_up = False        # versão anterior já guardada nesta sessão (o salvamento automático guarda só uma)
+        self._autosave_error = False   # falhou (arquivo em uso / somente leitura): para até o próximo salvar manual
         self.has_signatures = self._detect_signatures()
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.timeout.connect(self.autosave)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -348,6 +369,9 @@ class DocTab(QWidget):
         return self.pane is not None
 
     def cleanup(self):
+        self._autosave_timer.stop()
+        self.view.queue.clear()          # nada de desenhar páginas depois que o documento for fechado
+        self.view._timer.stop()
         if self.pane:
             self.pane.cleanup()
 
@@ -388,31 +412,66 @@ class DocTab(QWidget):
         self.titleChanged.emit()
 
     # ------------------------------------------------------------ salvar
-    def save(self, path=None):
+    def can_autosave(self):
+        """Salvar sem perguntar: opção ligada, documento com arquivo, sem assinatura digital e sem falha anterior."""
+        return bool(cfg.get("autosave") and self.path and not self.has_signatures and not self._autosave_error
+                    and os.path.isdir(os.path.dirname(os.path.abspath(self.path))))
+
+    def autosave(self):
+        if not (self.modified and self.can_autosave()):
+            return False
+        from PySide6.QtWidgets import QApplication
+        busy = QApplication.activeModalWidget() is not None or QApplication.mouseButtons() != Qt.NoButton \
+            or getattr(self.view, "busy", False)
+        if busy:   # no meio de um diálogo, arraste ou operação: tenta de novo daqui a pouco
+            self._autosave_timer.start(3000)
+            return False
+        return self.save(auto=True)
+
+    def save(self, path=None, auto=False):
         path = path or self.path
         if not path:
-            return self.save_as()
-        if self.has_signatures and self.modified:
+            return False if auto else self.save_as()
+        if self.has_signatures and self.modified and not auto:
             r = QMessageBox.warning(self, "Documento assinado",
                                     "Este documento possui assinatura digital. Salvar as alterações invalidará "
                                     "a assinatura. Deseja continuar?", QMessageBox.Yes | QMessageBox.No)
             if r != QMessageBox.Yes:
                 return False
         data = self.doc.tobytes(garbage=3, deflate=True)
-        self.original_bytes = data
-        try:
-            from . import backups
-            backups.backup(path)   # versão anterior guardada (Arquivo › Versões anteriores)
-        except Exception:
-            pass
+        if not auto or not self._backed_up:
+            try:
+                from . import backups
+                backups.backup(path)   # versão anterior guardada (Arquivo › Versões anteriores)
+                self._backed_up = True
+            except Exception:
+                pass
         tmp = path + ".tmp"
-        with open(tmp, "wb") as f:
-            f.write(data)
-        os.replace(tmp, path)
+        try:
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except OSError as e:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            if not auto:
+                raise
+            self._autosave_error = True
+            self.statusMsg.emit("Não foi possível salvar automaticamente (o arquivo pode estar aberto em outro programa "
+                                "ou ser somente leitura). Use Salvar ou Salvar como.")
+            return False
+        self.original_bytes = data
         self.path = path
+        self._autosave_error = False
         self.modified = False
         self.titleChanged.emit()
-        self.statusMsg.emit(f"Salvo em {path}")
+        if auto:
+            from datetime import datetime
+            self.statusMsg.emit(f"Salvo automaticamente às {datetime.now():%H:%M}")
+        else:
+            self.statusMsg.emit(f"Salvo em {path}")
         return True
 
     def save_as(self):

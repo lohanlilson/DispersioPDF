@@ -42,6 +42,9 @@ import java.io.File
 /** Abre um PDF como se viesse de outro app, procura um texto e dá zoom; salva capturas de tela para conferência. */
 @RunWith(AndroidJUnit4::class)
 class ViewerTest {
+    @org.junit.Before
+    fun semSalvarSozinho() { AppVm.AUTOSAVE_MS = 600_000 }   // aqui o teste é o Salvar manual
+
     @get:Rule
     val compose = createEmptyComposeRule()
 

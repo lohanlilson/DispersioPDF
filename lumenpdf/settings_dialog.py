@@ -105,6 +105,11 @@ class SettingsDialog(QDialog):
         sp.setValue(cfg.get("recent_max"))
         self.w["recent_max"] = sp
         f.addRow("Arquivos recentes na lista:", sp)
+        self.w["autosave"] = _check("Salvar automaticamente as alterações", "autosave")
+        self.w["autosave"].setToolTip("Salva o documento alguns segundos depois de cada alteração e ao fechar, sem perguntar.\n"
+                                      "A versão de antes das alterações fica em Arquivo › Versões anteriores.\n"
+                                      "Documentos novos (ainda sem arquivo) e documentos assinados continuam pedindo para salvar.")
+        f.addRow(self.w["autosave"])
         self.w["confirm_delete_pages"] = _check("Pedir confirmação antes de excluir páginas", "confirm_delete_pages")
         f.addRow(self.w["confirm_delete_pages"])
         self.w["auto_update"] = _check("Verificar atualizações automaticamente ao abrir", "auto_update")

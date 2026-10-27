@@ -35,6 +35,9 @@ import java.io.File
 /** Marca-texto: arrastar destaca na hora; tocar numa palavra destaca a palavra; a seleção é rápida mesmo em páginas cheias. */
 @RunWith(AndroidJUnit4::class)
 class MarcaTextoTest {
+    @org.junit.Before
+    fun semSalvarSozinho() { AppVm.AUTOSAVE_MS = 600_000 }   // aqui o teste é o Salvar manual
+
     @get:Rule
     val compose = createEmptyComposeRule()
     private val ctx get() = InstrumentationRegistry.getInstrumentation().targetContext

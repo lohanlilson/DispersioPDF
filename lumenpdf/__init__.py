@@ -2,7 +2,7 @@
 import os
 import sys
 
-__version__ = "1.7.1"
+__version__ = "1.8.0"
 APP_NAME = "Lumen PDF"
 APP_ID = "LumenPDF"
 PROG_ID = "LumenPDF.Document"

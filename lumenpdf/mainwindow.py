@@ -342,6 +342,8 @@ class MainWindow(QMainWindow):
         if i <= 0:
             return False
         tab = self.tab_widgets[i]
+        if tab.modified and tab.can_autosave():
+            tab.save(auto=True)          # salvamento automático: não pergunta (se falhar, pergunta abaixo)
         if tab.modified:
             r = QMessageBox.question(self, "Salvar alterações", f"Deseja salvar as alterações em \"{tab.title()[2:]}\"?",
                                      QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
@@ -479,7 +481,7 @@ class MainWindow(QMainWindow):
             if action == "restaurar":
                 with open(fp, "rb") as f:
                     t.replace_with(f.read())     # dá para desfazer; salve para confirmar
-                self.statusBar().showMessage("Versão anterior restaurada. Salve para manter (dá para desfazer com Ctrl+Z).", 8000)
+                self.statusBar().showMessage("Versão anterior restaurada" + (" (será salva automaticamente" if t.can_autosave() else ". Salve para manter (") + "; dá para desfazer com Ctrl+Z).", 8000)
             else:
                 self.open_path(fp)
 

@@ -15,6 +15,11 @@ import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -55,7 +60,16 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var version = 0
     val undo = ArrayDeque<java.io.File>()
     val redo = ArrayDeque<java.io.File>()
-    var dirty by mutableStateOf(false)
+    private val _dirty = mutableStateOf(false)
+    /** há alterações não gravadas no arquivo; cada nova alteração avança [changeTick] (salvamento automático) */
+    var dirty: Boolean
+        get() = _dirty.value
+        set(v) { _dirty.value = v; if (v) changeTick++ }
+    var changeTick by mutableIntStateOf(0)
+    /** versão anterior já guardada nesta sessão (o salvamento automático guarda só uma) */
+    var backedUp = false
+    /** o local não aceitou gravação: para de salvar sozinho até o próximo salvar manual */
+    var autosaveFailed by mutableStateOf(false)
     var canUndo by mutableStateOf(false)
     var canRedo by mutableStateOf(false)
     var fields by mutableStateOf<List<Pair<FormField, FracRect>>>(emptyList())
@@ -101,6 +115,8 @@ class Parsed(val fields: List<FormField>, val annots: List<Editor.AnnotRef>)
 data class PendingPassword(val uri: Uri, val name: String, val wrong: Boolean)
 
 class AppVm(app: Application) : AndroidViewModel(app) {
+    companion object { var AUTOSAVE_MS = 5000L }
+
     /** edições em fila: um toque durante outra edição espera a vez em vez de ser descartado */
     private val editLock = kotlinx.coroutines.sync.Mutex()
     private val lumen = app as LumenApp
@@ -179,6 +195,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         doc = ViewerDoc(pdf, key, name, start, pwd).also { it.night = prefs.nightPages }
         refreshRecents()
         loadFields(doc!!)
+        watchAutosave(doc!!)
     }
 
     // ------------------------------------------------------------ edição
@@ -840,22 +857,69 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     /** Grava a versão editada no arquivo original. Devolve false se o local não aceita gravação. */
     fun save(d: ViewerDoc, onNeedSaveAs: () -> Unit) = viewModelScope.launch {
-        val f = d.work ?: return@launch
-        val app = getApplication<Application>()
-        val ok = runCatching {
-            withContext(Dispatchers.IO) {
-                val u = Uri.parse(d.uri)
-                runCatching { Versions.backup(app, d.uri) }   // versão anterior guardada (menu › Versões anteriores)
-                if (u.scheme == "file") f.copyTo(File(u.path!!), overwrite = true)
-                else app.contentResolver.openOutputStream(u, "wt")!!.use { o -> f.inputStream().use { it.copyTo(o) } }
-            }
-        }.isSuccess
-        if (ok) {
-            d.dirty = false
-            recents.thumbFile(d.uri).delete()
+        if (d.work == null) return@launch
+        if (writeBack(d, auto = false)) {
             toast = "Salvo"
             if (closeAfterSave) { closeAfterSave = false; closeDoc() }
         } else onNeedSaveAs()
+    }
+
+    /** Copia a cópia de trabalho para o arquivo original (sem ser interrompido no meio). */
+    private suspend fun writeBack(d: ViewerDoc, auto: Boolean): Boolean {
+        val f = d.work ?: return false
+        val app = getApplication<Application>()
+        val tick = d.changeTick
+        val ok = withContext(NonCancellable + Dispatchers.IO) {
+            runCatching {
+                val u = Uri.parse(d.uri)
+                if (!auto || !d.backedUp) {
+                    runCatching { Versions.backup(app, d.uri) }   // versão anterior guardada (menu › Versões anteriores)
+                    d.backedUp = true
+                }
+                if (u.scheme == "file") f.copyTo(File(u.path!!), overwrite = true)
+                else app.contentResolver.openOutputStream(u, "wt")!!.use { o -> f.inputStream().use { it.copyTo(o) } }
+            }.isSuccess
+        }
+        if (ok) {
+            if (d.changeTick == tick) d.dirty = false     // alterou durante a gravação: fica pendente para a próxima
+            d.autosaveFailed = false
+            recents.thumbFile(d.uri).delete()
+        } else if (auto) {
+            d.autosaveFailed = true
+            toast = "Não foi possível salvar automaticamente neste local. Use Salvar uma cópia."
+        }
+        return ok
+    }
+
+    // ------------------------------------------------------------ salvamento automático
+    private var autosaveJob: Job? = null
+
+    /** Pode salvar sem perguntar: opção ligada, documento editado, sem assinatura digital e sem falha anterior. */
+    fun canAutosave(d: ViewerDoc) = prefs.autosave && d.work != null && !d.autosaveFailed && d.signatures.isEmpty()
+
+    private fun watchAutosave(d: ViewerDoc) {
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            snapshotFlow { d.changeTick }.collectLatest {
+                if (!d.dirty) return@collectLatest
+                delay(AUTOSAVE_MS)          // espera parar de editar
+                autoSave(d)
+            }
+        }
+    }
+
+    /** Salva agora, se der (ao sair do app ou fechar o documento). */
+    suspend fun autoSave(d: ViewerDoc): Boolean {
+        var n = 0
+        while ((d.busy || d.pendingMarks.isNotEmpty()) && n++ < 300) delay(100)   // termina a edição em andamento
+        if (!d.dirty || !canAutosave(d) || doc !== d) return false
+        return writeBack(d, auto = true)
+    }
+
+    /** O app foi para segundo plano: grava já (o Android pode encerrar o app depois). */
+    fun flushAutosave() {
+        val d = doc ?: return
+        if (d.dirty && canAutosave(d)) viewModelScope.launch { autoSave(d) }
     }
 
     fun saveAs(d: ViewerDoc, target: Uri) = viewModelScope.launch {
@@ -889,7 +953,11 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     fun requestClose() {
         val d = doc ?: return
-        if (d.dirty) confirmClose = true else closeDoc()
+        when {
+            !d.dirty -> closeDoc()
+            canAutosave(d) -> viewModelScope.launch { if (autoSave(d) && !d.dirty) closeDoc() else confirmClose = true }
+            else -> confirmClose = true
+        }
     }
 
     fun viewModelScopeLaunch(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) = viewModelScope.launch(block = block)
@@ -903,6 +971,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
 
     fun closeDoc() {
         val d = doc ?: return
+        autosaveJob?.cancel()
         dropReadDoc()
         recents.setPage(d.uri, d.page)
         doc = null

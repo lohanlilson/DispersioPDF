@@ -42,6 +42,12 @@ class Prefs(ctx: Context) {
         get() = _screen.value
         set(v) { _screen.value = v; sp.edit().putBoolean("tela_ligada", v).apply() }
 
+    private val _autosave = mutableStateOf(sp.getBoolean("salvar_auto", true))
+    /** salva sozinho alguns segundos depois de editar, ao sair do app e ao fechar o documento */
+    var autosave: Boolean
+        get() = _autosave.value
+        set(v) { _autosave.value = v; sp.edit().putBoolean("salvar_auto", v).apply() }
+
     var tsaDefault: Boolean
         get() = sp.getBoolean("sign_tsa", true)
         set(v) { sp.edit().putBoolean("sign_tsa", v).apply() }

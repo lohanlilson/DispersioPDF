@@ -1,5 +1,10 @@
 # Novidades do Lumen PDF para Android
 
+## 0.7.0
+
+- **Salvamento automático**: o documento é salvo sozinho alguns segundos depois de editar, ao sair do app e ao fechar. A versão de antes fica em ⋮ › Versões anteriores. Dá para desligar em Preferências › Geral. Documentos assinados continuam pedindo para salvar.
+- Novo visual "Noite" no ícone do app e dos arquivos PDF.
+
 ## 0.6.0
 
 - **Medir distâncias e áreas:** barra de edição › Medir. Defina a escala da planta (ex.: 1:100) ou calibre sobre uma medida conhecida.

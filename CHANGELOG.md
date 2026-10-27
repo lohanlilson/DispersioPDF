@@ -2,6 +2,11 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.8.0
+
+- **Salvamento automático**: o documento é salvo sozinho alguns segundos depois de cada alteração e ao fechar, sem perguntar. A versão de antes das alterações fica em Arquivo › Versões anteriores. Quem preferir salvar manualmente pode desligar em Preferências › Geral. Documentos novos (ainda sem arquivo) e documentos assinados continuam pedindo para salvar.
+- Correção: fechar uma aba enquanto as páginas ainda estavam sendo desenhadas podia gerar um erro.
+
 ## 1.7.1
 
 - **Nova identidade visual "Noite"**: o logo do programa e o ícone dos arquivos PDF ganharam o fundo índigo escuro, com o prisma brilhando e o espectro de luz em violeta, azul e dourado. Aparece no Explorador do Windows, no menu Iniciar, nas abas e na tela inicial.

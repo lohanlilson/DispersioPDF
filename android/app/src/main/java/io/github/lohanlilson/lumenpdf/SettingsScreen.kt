@@ -70,6 +70,10 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
                         RadioButton(p.theme == k, { p.theme = k }); Text(l)
                     }
                 }
+                Toggle("Salvar automaticamente as alterações", p.autosave) { p.autosave = it }
+                Text("Salva o documento alguns segundos depois de editar, ao sair do app e ao fechar. A versão de antes fica em " +
+                    "⋮ › Versões anteriores. Documentos assinados continuam pedindo para salvar.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Toggle("Verificar atualizações automaticamente", p.autoUpdate) { p.autoUpdate = it }
 
                 Section("Formulários")

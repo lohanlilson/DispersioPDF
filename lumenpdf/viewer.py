@@ -365,7 +365,7 @@ class PdfView(QGraphicsView):
             self._timer.start()
 
     def _render_next(self):
-        if not self.queue or not self.doc:
+        if not self.queue or self.doc is None or self.doc.is_closed or not self.doc:
             return
         i = self.queue.pop(0)
         if i >= self.doc.page_count:
