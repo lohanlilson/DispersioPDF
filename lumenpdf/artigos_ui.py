@@ -279,120 +279,116 @@ class ArticlesDialog(QDialog):
 
 # ------------------------------------------------------------------ leitura traduzida
 class TranslateWindow(QDialog):
-    """Lê o documento traduzido (offline), página por página, com o original ao lado se quiser."""
+    """Tela de leitura da tradução do documento: só a tradução, o original, lado a lado ou intercalado (bilíngue).
+    Mostra as páginas conforme ficam prontas. Referências, cabeçalhos e números de página ficam no original."""
 
-    def __init__(self, win, tab, src, dst, path):
+    MODES = ("Tradução", "Original", "Lado a lado", "Intercalado")
+
+    def __init__(self, win, tab):
         super().__init__(win)
-        self.win, self.tab, self.src, self.dst, self.path = win, tab, src, dst, path
-        self.setWindowTitle(f"Tradução — {tab.title().lstrip('● ')}")
+        self.tab = tab
+        self.setWindowTitle(f"Leitura traduzida — {tab.title().lstrip('● ')}")
         self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
         self.resize(1000, 760)
-        self.pages = {}       # página -> [(rect, original, tradução, tamanho)]
         root = QVBoxLayout(self)
         top = QHBoxLayout()
         self.info = QLabel()
         top.addWidget(self.info, 1)
         self.mode = QButtonGroup(self)
-        for k, label in enumerate(("Tradução", "Original", "Lado a lado")):
+        for k, label in enumerate(self.MODES):
             r = QRadioButton(label)
-            r.setChecked(k == 0)
+            r.setChecked(k == cfg.get("reading_mode"))
             self.mode.addButton(r, k)
             top.addWidget(r)
-        self.mode.idToggled.connect(lambda *_: self.render())
+        self.mode.idToggled.connect(lambda i, on: on and (cfg.set("reading_mode", i), self.render()))
         root.addLayout(top)
         self.view = QTextBrowser()
         self.view.setOpenExternalLinks(True)
         root.addWidget(self.view, 1)
-        bot = QHBoxLayout()
-        note = QLabel("Tradução automática gratuita e sem internet: boa para entender; confira trechos importantes no original.")
+        note = QLabel("Tradução automática gratuita e sem internet: boa para entender; confira trechos importantes no original. "
+                      "Citações, referências e números ficam como no original.")
         note.setObjectName("Muted")
         note.setWordWrap(True)
-        bot.addWidget(note, 1)
-        self.save_btn = QPushButton("Salvar PDF traduzido…")
-        self.save_btn.setEnabled(False)
-        self.save_btn.clicked.connect(self.save_pdf)
-        bot.addWidget(self.save_btn)
-        root.addLayout(bot)
-        self.n = tab.doc.page_count
-        self._start()
-
-    def _start(self):
-        data, pwd = self.tab.doc.tobytes(), self.tab.password
-
-        def work(j):
-            import pymupdf
-            d = pymupdf.open("pdf", data)
-            if d.needs_pass and pwd:
-                d.authenticate(pwd)
-            for p in range(d.page_count):
-                if j.cancel:
-                    break
-                blocks = traducao.page_paragraphs(d[p])
-                tr = traducao.translate_paragraphs([b[1] for b in blocks], self.path, self.dst)
-                j.item.emit((p, d.page_count, [(r, o, t, s, b) for (r, o, s, b), t in zip(blocks, tr)]))
-            return True
-        self.job = _keep(self, _Job(work))
-        self.job.item.connect(self._page)
-        self.job.done.connect(lambda _: self._finished())
-        self.job.failed.connect(lambda e: self.info.setText(f"<span style='color:#d7373f'>Erro na tradução: {html.escape(e)}</span>"))
-        self.info.setText(f"Traduzindo do {traducao.NAMES.get(self.src)} para o {traducao.NAMES.get(self.dst)}… página 1 de {self.n}")
-        self.job.start()
-
-    def _page(self, res):
-        pg, n, blocks = res
-        self.pages[pg] = blocks
-        self.info.setText(f"Traduzindo do {traducao.NAMES.get(self.src)} para o {traducao.NAMES.get(self.dst)}… "
-                          f"página {min(pg + 2, n)} de {n}")
+        root.addWidget(note)
+        tab.trUpdated.connect(self.render)
         self.render()
 
-    def _finished(self):
-        self.info.setText(f"Traduzido do {traducao.NAMES.get(self.src)} para o {traducao.NAMES.get(self.dst)} — {len(self.pages)} página(s).")
-        self.save_btn.setEnabled(bool(self.pages))
-
     def render(self):
+        from . import traducao
+        tr = self.tab.tr or {}
+        pages = tr.get("pages", {})
+        name = traducao.NAMES.get(tr.get("dst"), tr.get("dst"))
+        self.info.setText((f"Traduzindo para o {name}… {len(pages)} de {tr.get('total')} página(s)" if tr.get("running")
+                           else f"Traduzido para o {name} — {len(pages)} página(s)."))
         mode = self.mode.checkedId()
         sb = self.view.verticalScrollBar()
         pos = sb.value()
+        esc = html.escape
         out = ["<style>p{margin:0 0 10px 0; line-height:135%} h3{color:#7c3aed; margin-top:18px}"
-               " td{vertical-align:top; padding:0 10px 8px 0}</style>"]
-        for p in sorted(self.pages):
+               " td{vertical-align:top; padding:0 12px 8px 0} .o{color:#777} .k{color:#888; font-size:small}"
+               " .t{font-weight:600}</style>"]
+        for p in sorted(pages):
             out.append(f"<h3>Página {p + 1}</h3>")
+            items = [(b, t) for b, t in pages[p] if not (b.keep and b.why in ("cabeçalho/rodapé", "número da página"))]
             if mode == 2:
                 out.append("<table width='100%'>")
-                for _r, o, t, s, _b in self.pages[p]:
-                    out.append(f"<tr><td width='50%' style='color:#666'>{html.escape(o)}</td><td width='50%'>{html.escape(t)}</td></tr>")
+            for b, t in items:
+                o = b.shown
+                t = o if t is None else t
+                cls = " class='t'" if (b.bold or b.size >= 13) else ""
+                if b.keep:
+                    if mode == 2:
+                        out.append(f"<tr><td colspan='2' class='k'>{esc(o)}</td></tr>")
+                    else:
+                        out.append(f"<p class='k'>{esc(o)}</p>")
+                elif mode == 0:
+                    out.append(f"<p{cls}>{esc(t)}</p>")
+                elif mode == 1:
+                    out.append(f"<p{cls}>{esc(o)}</p>")
+                elif mode == 2:
+                    out.append(f"<tr><td width='50%' class='o'>{esc(o)}</td><td width='50%'>{esc(t)}</td></tr>")
+                else:
+                    out.append(f"<p{cls}>{esc(t)}</p><p class='o' style='margin-top:-6px'>{esc(o)}</p>")
+            if mode == 2:
                 out.append("</table>")
-            else:
-                for _r, o, t, s, b in self.pages[p]:
-                    txt = o if mode == 1 else t
-                    style = " style='font-weight:600; font-size:large'" if s >= 13 else (" style='font-weight:600'" if b else "")
-                    out.append(f"<p{style}>{html.escape(txt)}</p>")
         self.view.setHtml("".join(out))
         sb.setValue(pos)
 
-    def save_pdf(self):
-        base = os.path.splitext(self.tab.path or os.path.join(os.path.expanduser("~"), "Documento.pdf"))[0]
-        fn, _ = QFileDialog.getSaveFileName(self, "Salvar PDF traduzido", f"{base} ({traducao.NAMES.get(self.dst)}).pdf",
-                                            "PDF (*.pdf)")
-        if not fn:
-            return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+
+class SelectionTranslation(QDialog):
+    """Balão com a tradução do trecho selecionado."""
+
+    def __init__(self, win, text, src, dst):
+        super().__init__(win, Qt.Tool)
+        self.setWindowTitle(f"Tradução ({traducao.NAMES.get(src, src)} → {traducao.NAMES.get(dst, dst)})")
+        self.resize(460, 260)
+        from PySide6.QtGui import QCursor
+        self.move(QCursor.pos() + __import__("PySide6.QtCore", fromlist=["QPoint"]).QPoint(12, 12))
+        lay = QVBoxLayout(self)
+        self.out = QTextBrowser()
+        self.out.setPlainText("Traduzindo…")
+        lay.addWidget(self.out, 1)
+        row = QHBoxLayout()
+        orig = QLabel(html.escape(text[:160]) + ("…" if len(text) > 160 else ""))
+        orig.setObjectName("Muted")
+        orig.setWordWrap(True)
+        row.addWidget(orig, 1)
+        cp = QPushButton("Copiar")
+        cp.clicked.connect(lambda: QApplication.clipboard().setText(self.out.toPlainText()))
+        row.addWidget(cp)
+        lay.addLayout(row)
         try:
-            data = {p: [(r, t, s, bold) for r, _o, t, s, bold in b] for p, b in self.pages.items()}
-            out = traducao.translated_pdf(self.tab.doc, data)
-            out.save(fn, garbage=3, deflate=True)
-        finally:
-            QApplication.restoreOverrideCursor()
-        self.win.open_path(fn)
-
-    def closeEvent(self, e):
-        if getattr(self, "job", None) and self.job.isRunning():
-            self.job.cancel = True
-            self.job.wait(5000)
-        super().closeEvent(e)
-
-    def reject(self):
-        if getattr(self, "job", None) and self.job.isRunning():
-            self.job.cancel = True
-            self.job.wait(5000)
-        super().reject()
+            path = traducao.route(src, dst)
+        except Exception:
+            path = None
+        if path is None:
+            self.out.setPlainText(f"Sem tradução gratuita de {traducao.NAMES.get(src, src)} para {traducao.NAMES.get(dst, dst)}.")
+            return
+        if traducao.missing(path) and not ensure_models(win, path):
+            self.out.setPlainText("É preciso baixar o pacote de idioma para traduzir.")
+            return
+        flat = " ".join(text.split())
+        job = _keep(self, _Job(lambda j: traducao.translate_paragraphs([flat], path, dst)[0]))
+        job.done.connect(self.out.setPlainText)
+        job.failed.connect(lambda e: self.out.setPlainText(f"Não foi possível traduzir: {e}"))
+        job.start()

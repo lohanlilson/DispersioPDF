@@ -93,17 +93,18 @@ t = w.cur()
 assert t and t.path == src
 assert t.translate_bar.isVisible() and "inglês" in t.translate_bar.text.text()
 w.run_tool("translate")
-tw = [x for x in w.findChildren(artigos_ui.TranslateWindow)][-1]
 end = time.time() + 120
-while not tw.save_btn.isEnabled() and time.time() < end:
+while (t.tr is None or t.tr["running"]) and time.time() < end:
     app.processEvents(); time.sleep(0.05)
-assert tw.pages and tw.save_btn.isEnabled()
+assert t.tr and t.tr["pages"] and t.showing_translation()
+t.open_reading()
+tw = w.findChildren(artigos_ui.TranslateWindow)[-1]
 html_txt = tw.view.toPlainText()
 print(html_txt[:300])
 assert "crueldade" in html_txt.lower() and "Página 1" in html_txt
 out_fn = os.path.join(tmp, "traduzido.pdf")
 QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (out_fn, ""))
-tw.save_pdf()
+t.save_translation()
 tr = pymupdf.open(out_fn)[0].get_text()
 print(tr[:300])
 assert "crueldade" in tr.lower() and "cruelty is a significant" not in tr

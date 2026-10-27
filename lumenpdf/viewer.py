@@ -1422,6 +1422,8 @@ class PdfView(QGraphicsView):
             menu.addSeparator()
             menu.addAction("Ocultar (tarja)", self.redact_selection)
             menu.addAction("Ler em voz alta", lambda: self.request_tool("speak", text=self.selected_text()))
+            if getattr(self, "on_translate_selection", None):
+                menu.addAction("Traduzir seleção", lambda: self.on_translate_selection(self.selected_text()))
         else:
             menu.addAction("Selecionar tudo", self.select_all)
             menu.addAction("Adicionar nota aqui", lambda: i is not None and self._add_note(i, pt))

@@ -40,9 +40,15 @@ def _track(th):
 
 def stop_background():
     for th in list(_RUNNING):
-        th.requestInterruption()
+        try:
+            th.requestInterruption()
+        except RuntimeError:          # objeto Qt já destruído
+            _RUNNING.discard(th)
     for th in list(_RUNNING):
-        th.wait(15000)
+        try:
+            th.wait(15000)
+        except RuntimeError:
+            pass
 
 
 import atexit as _atexit
@@ -161,35 +167,91 @@ class OrientBar(QFrame):
         self.hide()
 
 
+class _TrJob(QThread):
+    page = Signal(object)
+
+    def __init__(self, data, password, path, dst):
+        super().__init__()
+        self.data, self.password, self.path, self.dst = data, password, path, dst
+
+    def run(self):
+        try:
+            import pymupdf
+            from . import traducao
+            d = pymupdf.open(stream=self.data, filetype="pdf")
+            if d.needs_pass and self.password:
+                d.authenticate(self.password)
+            traducao.translate_document(d, self.path, self.dst, lambda p, items: self.page.emit((p, items)),
+                                        cancel=self.isInterruptionRequested)
+            d.close()
+        except Exception as e:
+            self.page.emit(("erro", str(e)))
+
+
 class TranslateBar(QFrame):
-    """Documento em outro idioma: oferece traduzir (offline e gratuito)."""
+    """Tradução: oferece traduzir; depois mostra o andamento e alterna Original / Tradução no próprio documento."""
 
     def __init__(self, tab):
         super().__init__()
         self.tab = tab
         self.setObjectName("TrBar")
         self.setStyleSheet("QFrame#TrBar{background:#f1ecfe; border:1px solid #7c3aed; border-radius:8px;}"
-                           "QFrame#TrBar QLabel{color:#222; background:transparent;}")
+                           "QFrame#TrBar QLabel{color:#222; background:transparent;}"
+                           "QFrame#TrBar QPushButton:checked{background:#7c3aed; color:white; border-color:#7c3aed;}")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 6, 8, 6)
         ic = QLabel("<span style='font-size:17px; color:#7c3aed'>文A</span>")
         self.text = QLabel()
-        self.btn = QPushButton()
-        self.btn.clicked.connect(lambda: self.tab.window().run_tool("translate"))
+        self.go = QPushButton()
+        self.go.clicked.connect(lambda: self.tab.window().run_tool("translate"))
+        self.orig = QPushButton("Original")
+        self.trad = QPushButton("Tradução")
+        for b in (self.orig, self.trad):
+            b.setCheckable(True)
+        self.orig.clicked.connect(lambda: self.tab.show_translation(False))
+        self.trad.clicked.connect(lambda: self.tab.show_translation(True))
+        self.read = QPushButton("Leitura")
+        self.read.setToolTip("Texto traduzido em tela de leitura: só tradução, lado a lado ou intercalado com o original")
+        self.read.clicked.connect(self.tab.open_reading)
+        self.save = QPushButton("Salvar PDF traduzido…")
+        self.save.clicked.connect(self.tab.save_translation)
+        self.stop = QPushButton("Parar")
+        self.stop.clicked.connect(self.tab.stop_translation)
         close = QPushButton("×")
         close.setFlat(True)
         close.setFixedWidth(30)
         close.setStyleSheet("font-size:18px; color:#555; border:none;")
-        close.clicked.connect(self.hide)
-        for w in (ic, self.text, self.btn, close):
+        close.clicked.connect(self._close)
+        for w in (ic, self.text, self.go, self.orig, self.trad, self.read, self.save, self.stop, close):
             lay.addWidget(w, 1 if w is self.text else 0)
+        self.hide()
+
+    def _close(self):
+        self.tab.show_translation(False)
         self.hide()
 
     def offer(self, src, dst):
         from . import traducao
         self.text.setText(f"Este documento está em <b>{traducao.NAMES.get(src, src)}</b>.")
-        self.btn.setText(f"Traduzir para o {traducao.NAMES.get(dst, dst)}" if dst in ("pt", "es") else
-                         f"Traduzir para {traducao.NAMES.get(dst, dst)}")
+        self.go.setText(f"Traduzir para o {traducao.NAMES.get(dst, dst)}" if dst in ("pt", "es") else
+                        f"Traduzir para {traducao.NAMES.get(dst, dst)}")
+        for w in (self.orig, self.trad, self.read, self.save, self.stop):
+            w.hide()
+        self.go.show()
+        self.show()
+
+    def progress(self, done, total, running, showing, dst):
+        from . import traducao
+        name = traducao.NAMES.get(dst, dst)
+        self.text.setText(f"Traduzindo para o {name}… página {min(done + 1, total)} de {total}" if running
+                          else f"Traduzido para o {name} (sem internet, gratuito).")
+        self.go.hide()
+        for w in (self.orig, self.trad, self.read):
+            w.show()
+        self.orig.setChecked(not showing)
+        self.trad.setChecked(showing)
+        self.save.setVisible(not running and done > 0)
+        self.stop.setVisible(running)
         self.show()
 
 
@@ -312,6 +374,7 @@ class SignatureBar(QFrame):
 class DocTab(QWidget):
     titleChanged = Signal()
     statusMsg = Signal(str)
+    trUpdated = Signal()
     AUTOSAVE_MS = 8000   # salva sozinho 8 s depois da última alteração
 
     # "modified" dispara o salvamento automático: toda alteração passa por aqui
@@ -369,6 +432,8 @@ class DocTab(QWidget):
         self.translate_bar = TranslateBar(self)
         view_col.addWidget(self.translate_bar)
         self.pay_items = None        # None = ainda não procurou
+        self.tr_view = None          # documento traduzido (só leitura), no lugar do original
+        self.tr = None
         from PySide6.QtWidgets import QSplitter
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -382,6 +447,7 @@ class DocTab(QWidget):
         self.nav = NavPill(self.view)
 
         self.view.before_change = self.checkpoint
+        self.view.on_translate_selection = self.translate_selection
         self.view.after_change = self.changed
         self.view.status.connect(self.statusMsg)
         self.view.modeChanged.connect(self.rail.sync)
@@ -430,6 +496,125 @@ class DocTab(QWidget):
         fixes = {p: r for p, r in fixes.items() if p < self.doc.page_count and self.doc[p].rotation != r}
         if cfg.get("detect_orientation"):
             self.orient_bar.show_fixes(fixes)
+
+    # ------------------------------------------------------------ tradução no próprio documento
+
+    def start_translation(self, src, dst, path):
+        """Traduz em segundo plano; cada página pronta já aparece traduzida (botão Original / Tradução)."""
+        import pymupdf
+        self.stop_translation()
+        data = self.doc.tobytes()
+        self.tr = {"src": src, "dst": dst, "path": path, "doc": pymupdf.open("pdf", data), "pages": {},
+                   "total": self.doc.page_count, "running": True}
+        self._tr_job = _track(_TrJob(data, self.password, path, dst))
+        self._tr_job.page.connect(self._tr_page)
+        self._tr_job.finished.connect(self._tr_finished)
+        self._tr_job.start()
+        self.show_translation(True)
+
+    def _tr_page(self, res):
+        from . import traducao
+        tr = getattr(self, "tr", None)
+        if not tr:
+            return
+        p, items = res
+        if p == "erro":
+            self.statusMsg.emit(f"Erro na tradução: {items}")
+            return
+        tr["pages"][p] = items
+        try:
+            traducao.overlay_page(tr["doc"][p], items)
+        except Exception:
+            pass
+        if self.tr_view is not None:
+            self.tr_view.refresh([p])
+        self._tr_bar()
+        self.trUpdated.emit()
+
+    def _tr_finished(self):
+        tr = getattr(self, "tr", None)
+        if tr:
+            tr["running"] = False
+            self._tr_bar()
+            self.trUpdated.emit()
+
+    def _tr_bar(self):
+        tr = self.tr
+        self.translate_bar.progress(len(tr["pages"]), tr["total"], tr["running"], self.showing_translation(), tr["dst"])
+
+    def stop_translation(self):
+        job = getattr(self, "_tr_job", None)
+        if job is not None and job.isRunning():
+            job.requestInterruption()
+            job.wait(15000)
+        if getattr(self, "tr", None):
+            self.tr["running"] = False
+            self._tr_bar()
+
+    def showing_translation(self):
+        return self.tr_view is not None and self.tr_view.isVisible()
+
+    def show_translation(self, on):
+        """Alterna, no mesmo lugar, entre o documento original e a versão traduzida (só leitura)."""
+        tr = getattr(self, "tr", None)
+        if on and not tr:
+            return
+        if on and self.tr_view is None:
+            self.tr_view = PdfView()
+            self.tr_view.before_change = lambda *a, **k: None
+            self.tr_view.after_change = lambda *a, **k: None
+            self.tr_view.on_translate_selection = self.translate_selection
+            self.tr_view.status.connect(self.statusMsg)
+            self.splitter.insertWidget(0, self.tr_view)
+            self.tr_view.hide()
+        if on:
+            if self.tr_view.doc is not tr["doc"]:
+                self.tr_view.set_document(tr["doc"])
+            self.tr_view.set_mode("select")
+            self.tr_view.zoom, self.tr_view.zoom_mode = self.view.zoom, self.view.zoom_mode
+            self.tr_view.show()
+            self.view.hide()
+            page, frac = self.view.position()
+            self.tr_view.relayout()
+            self.tr_view.goto(page, frac)
+        elif self.tr_view is not None and self.tr_view.isVisible():
+            page, frac = self.tr_view.position()
+            self.view.show()
+            self.tr_view.hide()
+            self.view.goto(page, frac)
+        if tr:
+            self._tr_bar()
+
+    def open_reading(self):
+        from .artigos_ui import TranslateWindow
+        if not getattr(self, "tr", None):
+            return
+        w = TranslateWindow(self.window(), self)
+        w.setAttribute(Qt.WA_DeleteOnClose)
+        w.show()
+
+    def save_translation(self):
+        from . import traducao
+        tr = getattr(self, "tr", None)
+        if not tr:
+            return
+        base = os.path.splitext(self.path or os.path.join(os.path.expanduser("~"), "Documento.pdf"))[0]
+        fn, _ = QFileDialog.getSaveFileName(self, "Salvar PDF traduzido",
+                                            f"{base} ({traducao.NAMES.get(tr['dst'], tr['dst'])}).pdf", "PDF (*.pdf)")
+        if not fn:
+            return
+        tr["doc"].save(fn, garbage=3, deflate=True)
+        self.statusMsg.emit(f"PDF traduzido salvo em {fn}")
+
+    def translate_selection(self, text):
+        """Traduz o trecho selecionado e mostra num balão."""
+        from . import traducao
+        from .artigos_ui import SelectionTranslation
+        dst = cfg.get("translate_to") or traducao.system_language()
+        src = traducao.detect(text) or (getattr(self, "tr", None) or {}).get("src") or self.doc_language() or "en"
+        if src == dst:
+            src = "en" if dst != "en" else "pt"
+        SelectionTranslation(self.window(), text, src, dst).show()
 
     def doc_language(self, pages=6):
         from . import traducao
@@ -553,6 +738,10 @@ class DocTab(QWidget):
             return False
 
     def set_mode(self, mode):
+        if self.showing_translation():
+            self.show_translation(False)     # editar sempre no original
+            if mode not in ("select", "hand"):
+                self.statusMsg.emit("Voltei ao original para editar (a tradução é só para leitura).")
         self.view.set_mode(mode)
         col = self.view.colors.get(mode)
         if col:
@@ -659,7 +848,7 @@ class DocTab(QWidget):
 
     def cleanup(self):
         self._autosave_timer.stop()
-        for name in ("_pay_thread", "_orient_thread"):
+        for name in ("_pay_thread", "_orient_thread", "_tr_job"):
             th = getattr(self, name, None)
             if th is not None and th.isRunning():
                 th.requestInterruption()

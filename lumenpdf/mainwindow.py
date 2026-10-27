@@ -1516,7 +1516,7 @@ class MainWindow(QMainWindow):
 
     def tool_translate(self, tab, src=None, **kw):
         from . import traducao
-        from .artigos_ui import TranslateWindow, ensure_models, route_or_warn
+        from .artigos_ui import ensure_models, route_or_warn
         dst = cfg.get("translate_to") or traducao.system_language()
         src = src or tab.doc_language()
         if not src:
@@ -1537,10 +1537,7 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
         if path is None or not ensure_models(self, path):
             return
-        tab.translate_bar.hide()
-        w = TranslateWindow(self, tab, src, dst, path)
-        w.setAttribute(Qt.WA_DeleteOnClose)
-        w.show()
+        tab.start_translation(src, dst, path)
 
     def tool_payments(self, tab, **kw):
         from . import pagamentos

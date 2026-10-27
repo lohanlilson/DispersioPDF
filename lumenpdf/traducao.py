@@ -218,18 +218,71 @@ def sentences(text):
 
 _KEEP = re.compile(r"^[\d\s.,;:()\[\]%±×=<>+\-–/·*]+$")
 
+# ------------------------------------------------------------------ citações: fora da tradução, de volta no lugar
+_SUP = ""   # marca de número sobrescrito (nota/citação) dentro do texto:  12,15 
+_SUP_END = ""
+_SUP_RE = re.compile(_SUP + "([^" + _SUP_END + "]*)" + _SUP_END)
+_SUPER = str.maketrans("0123456789,-–", "⁰¹²³⁴⁵⁶⁷⁸⁹˒⁻⁻")
+_CITE_BRACKET = re.compile(r"\s?\[\s*\d+[a-z]?(?:\s*[-–,;]\s*\d+[a-z]?)*\s*\]")
+_CITE_AUTHOR = re.compile(r"\s?\((?=[^()]*\b(?:19|20)\d{2}[a-z]?\b)"
+                          r"(?=[^()]*[A-ZÀ-Ý][A-Za-zÀ-ÿ'’\-]+(?:\s+et\s+al\.?|\s+(?:and|&|e|y)\s+[A-ZÀ-Ý]|,|\s+(?:19|20)\d{2}))"
+                          r"[^()]{3,240}\)")
+
+
+def split_citations(sentence):
+    """Tira citações ([12], (Silva et al., 2020), números sobrescritos) da frase. Devolve (frase limpa, citações)."""
+    cites = []
+
+    def take(m):
+        cites.append(m.group().strip())
+        return " "
+    s = _SUP_RE.sub(lambda m: (cites.append(_SUP + m.group(1) + _SUP_END), " ")[1], sentence)
+    s = _CITE_BRACKET.sub(take, s)
+    s = _CITE_AUTHOR.sub(take, s)
+    s = re.sub(r"\s+([.,;:!?)])", r"\1", re.sub(r"\s{2,}", " ", s)).strip()
+    return s, cites
+
+
+def join_citations(text, cites):
+    """Devolve as citações no fim da frase traduzida, antes do ponto final."""
+    if not cites:
+        return text
+    m = re.match(r"^(.*?)([.!?:;]*[\"”»)]*)$", text.rstrip(), re.S)
+    body, end = (m.group(1), m.group(2)) if m else (text, "")
+    out = body
+    for c in cites:
+        if c.startswith(_SUP):
+            out += c[1:-1].strip().translate(_SUPER)
+        else:
+            out += " " + c
+    return out + end
+
+
+def plain(text):
+    """Texto para exibir: sobrescritos como ¹², sem as marcas internas."""
+    return _SUP_RE.sub(lambda m: m.group(1).strip().translate(_SUPER), text)
+
 
 def translate_paragraphs(paras, path, dst=None, glossary=None):
-    """Traduz uma lista de parágrafos seguindo a rota de pacotes. Números, fórmulas e referências curtas ficam iguais."""
+    """Traduz parágrafos seguindo a rota de pacotes. Citações e números sobrescritos ficam fora da tradução e voltam
+    no fim de cada frase; números, fórmulas e referências curtas ficam iguais."""
     out = []
     for para in paras:
-        if not para.strip() or _KEEP.match(para) or len(re.findall(r"[A-Za-zÀ-ÿ]", para)) < 3:
-            out.append(para)
+        if not para.strip() or _KEEP.match(plain(para)) or len(re.findall(r"[A-Za-zÀ-ÿ]", plain(para))) < 3:
+            out.append(plain(para))
             continue
-        sents = sentences(para)
-        for pair in path:
-            sents = _engine(pair).run(sents)
-        t = " ".join(sents)
+        pieces = [split_citations(s) for s in sentences(para)]
+        todo = [i for i, (c, _) in enumerate(pieces) if len(re.findall(r"[A-Za-zÀ-ÿ]", c)) >= 2]
+        done = {}
+        if todo:
+            sents = [pieces[i][0] for i in todo]
+            for pair in path:
+                sents = _engine(pair).run(sents)
+            done = dict(zip(todo, sents))
+        res = []
+        for i, (clean, cites) in enumerate(pieces):
+            res.append(join_citations(done.get(i, clean), cites))
+        t = " ".join(r for r in res if r)
         if (dst or path[-1][1]) == "pt":
             t = pt_br(t)
         for k, v in (glossary or {}).items():
@@ -238,9 +291,35 @@ def translate_paragraphs(paras, path, dst=None, glossary=None):
     return out
 
 
-# ------------------------------------------------------------------ texto das páginas
-def page_paragraphs(page):
-    """[(retângulo, parágrafo, tamanho da letra, negrito)] da página, com hifenização desfeita e linhas unidas."""
+# ------------------------------------------------------------------ leitura do documento: ordem, cabeçalhos, referências
+from dataclasses import dataclass, field as _field
+
+
+@dataclass
+class Block:
+    page: int
+    rect: object
+    text: str               # com as marcas de sobrescrito
+    size: float = 10.0
+    bold: bool = False
+    keep: bool = False      # não traduzir (referências, cabeçalho/rodapé, números)
+    cont: bool = False      # continua o parágrafo anterior (outra coluna ou página)
+    why: str = ""
+
+    @property
+    def shown(self):
+        return plain(self.text)
+
+
+_REF_HEAD = re.compile(r"^\s*(?:\d+\.?\s*)?(?:references?(?:\s+list)?|bibliography|literature\s+cited|works\s+cited|"
+                       r"refer[êe]ncias(?:\s+bibliogr[áa]ficas)?|bibliografia|referencias|r[ée]f[ée]rences|literatur(?:verzeichnis)?|"
+                       r"riferimenti(?:\s+bibliografici)?)\s*:?\s*$", re.I)
+_AFTER_REFS = re.compile(r"^\s*(?:\d+\.?\s*)?(?:appendix|appendices|ap[êe]ndices?|anexos?|supplementary|supporting\s+information|"
+                         r"material\s+suplementar)\b", re.I)
+_PAGE_NO = re.compile(r"^\s*(?:p(?:age|ágina|ag)?\.?\s*)?\d{1,4}(?:\s*(?:of|de|/)\s*\d{1,4})?\s*$", re.I)
+
+
+def _raw_blocks(page, pno):
     import pymupdf
     out = []
     d = page.get_text("dict", flags=pymupdf.TEXT_DEHYPHENATE)
@@ -248,20 +327,222 @@ def page_paragraphs(page):
         if b.get("type") != 0:
             continue
         lines = []
+        spans_all = []
         for ln in b["lines"]:
-            s = "".join(sp["text"] for sp in ln["spans"]).strip()
+            spans = [sp for sp in ln["spans"] if sp["text"]]
+            if not spans:
+                continue
+            big = max(sp["size"] for sp in spans)
+            parts = []
+            for sp in spans:
+                t = sp["text"]
+                sup = (sp["flags"] & 1 or sp["size"] < big * 0.78) and re.fullmatch(r"\s*[\d,;\-–*†‡§]{1,15}\s*", t) \
+                    and re.search(r"\d", t)
+                if sup:
+                    parts.append(_SUP + t.strip() + _SUP_END)
+                else:
+                    parts.append(t)
+                    spans_all.append(sp)
+            s = "".join(parts).strip()
             if s:
                 lines.append(s)
         if not lines:
             continue
-        txt = " ".join(lines)
-        txt = re.sub(r"\s+", " ", txt).strip()
-        spans = [sp for ln in b["lines"] for sp in ln["spans"] if sp["text"].strip()]
-        size = max((sp["size"] for sp in spans), default=10)
-        chars = sum(len(sp["text"]) for sp in spans) or 1
-        bold = sum(len(sp["text"]) for sp in spans if sp["flags"] & 16 or "bold" in sp["font"].lower()) > chars / 2
-        out.append((pymupdf.Rect(b["bbox"]), txt, size, bold))
+        txt = ""
+        for ln in lines:
+            if txt.endswith("-") and ln[:1].islower():
+                txt = txt[:-1] + ln
+            else:
+                txt = (txt + " " + ln) if txt else ln
+        txt = re.sub(r"[ \t]+", " ", txt).strip()
+        size = max((sp["size"] for sp in spans_all), default=10)
+        chars = sum(len(sp["text"]) for sp in spans_all) or 1
+        bold = sum(len(sp["text"]) for sp in spans_all if sp["flags"] & 16 or "bold" in sp["font"].lower()) > chars / 2
+        out.append(Block(pno, pymupdf.Rect(b["bbox"]), txt, size, bold))
     return out
+
+
+def _reading_order(blocks, width, height=None):
+    """Ordem de leitura em páginas de duas colunas: o que ocupa a largura toda separa faixas; em cada faixa,
+    primeiro a coluna da esquerda, depois a da direita."""
+    mid = width / 2
+
+    def side(b):
+        x0, x1 = b.rect.x0, b.rect.x1
+        if height and (b.rect.y1 < height * 0.085 or b.rect.y0 > height * 0.915):
+            return "F"                                   # cabeçalho / rodapé
+        if x0 < mid - width * 0.04 and x1 > mid + width * 0.04:
+            return "F"                                   # ocupa a largura toda
+        cx = (x0 + x1) / 2
+        if abs(cx - mid) < width * 0.03:
+            return "F"                                   # centralizado (título, número da página)
+        return "L" if cx < mid else "R"
+    if sum(side(b) == "L" for b in blocks) < 2 or sum(side(b) == "R" for b in blocks) < 2:
+        return sorted(blocks, key=lambda b: (round(b.rect.y0), b.rect.x0))
+    out, band = [], []
+    for b in sorted(blocks, key=lambda b: (b.rect.y0, b.rect.x0)):
+        if side(b) == "F":
+            out += sorted([x for x in band if side(x) == "L"], key=lambda x: x.rect.y0)
+            out += sorted([x for x in band if side(x) == "R"], key=lambda x: x.rect.y0)
+            band = []
+            out.append(b)
+        else:
+            band.append(b)
+    out += sorted([x for x in band if side(x) == "L"], key=lambda x: x.rect.y0)
+    out += sorted([x for x in band if side(x) == "R"], key=lambda x: x.rect.y0)
+    return out
+
+
+def analyze(doc, pages=None):
+    """{página: [Block]} na ordem de leitura, marcando o que não se traduz e o que continua o parágrafo anterior."""
+    pages = list(pages) if pages is not None else list(range(doc.page_count))
+    per = {}
+    for p in pages:
+        pg = doc[p]
+        per[p] = _reading_order(_raw_blocks(pg, p), pg.rect.width, pg.rect.height)
+    # cabeçalho e rodapé que se repetem (nome da revista, DOI, número da página)
+    from collections import Counter
+    key = lambda b: re.sub(r"\d+", "#", plain(b.text).lower()).strip()  # noqa: E731
+    edge = lambda b: b.rect.y1 < doc[b.page].rect.height * 0.085 or b.rect.y0 > doc[b.page].rect.height * 0.915  # noqa: E731
+    cnt = Counter(key(b) for bl in per.values() for b in bl if edge(b))
+    rep = max(2, int(len(pages) * 0.3 + 0.5))
+    for bl in per.values():
+        for b in bl:
+            t = plain(b.text)
+            if _PAGE_NO.match(t):
+                b.keep, b.why = True, "número da página"
+            elif edge(b) and len(pages) >= 2 and cnt[key(b)] >= rep:
+                b.keep, b.why = True, "cabeçalho/rodapé"
+            elif _KEEP.match(t) or len(re.findall(r"[A-Za-zÀ-ÿ]", t)) < 3:
+                b.keep, b.why = True, "números"
+    # lista de referências: do título "References" em diante (até um apêndice)
+    in_refs = False
+    for p in pages:
+        for b in per[p]:
+            t = plain(b.text)
+            if _REF_HEAD.match(t):
+                in_refs = True
+                continue
+            if in_refs and _AFTER_REFS.match(t) and len(t) < 80:
+                in_refs = False
+                continue
+            if in_refs and not b.keep:
+                b.keep, b.why = True, "referências"
+    # parágrafo que continua na outra coluna ou na página seguinte
+    prev = None
+    for p in pages:
+        for b in per[p]:
+            if b.keep:
+                continue
+            t = plain(b.text)
+            if prev is not None and not re.search(r"[.!?:”\"»)]\s*$", plain(prev.text)) and t[:1].islower() \
+                    and abs(prev.size - b.size) < 1.5 and not prev.bold:
+                b.cont = True
+            prev = b
+    return per
+
+
+def _split_like(text, parts):
+    """Divide a tradução de um parágrafo que atravessa blocos, na proporção do original, sempre num espaço."""
+    if len(parts) == 1:
+        return [text]
+    lens = [max(1, len(plain(x))) for x in parts]
+    total = sum(lens)
+    cuts, acc, last = [], 0, 0
+    for n in lens[:-1]:
+        acc += n
+        pos = int(len(text) * acc / total)
+        sp = text.rfind(" ", last + 1, pos + 1)
+        if sp <= last:
+            sp = text.find(" ", pos)
+        if sp <= last:
+            sp = max(last, min(pos, len(text)))
+        cuts.append(sp)
+        last = sp
+    out, prev = [], 0
+    for c in cuts + [len(text)]:
+        out.append(text[prev:c].strip())
+        prev = c
+    return out
+
+
+def translate_document(doc, path, dst, on_page, pages=None, cancel=lambda: False, glossary=None):
+    """Traduz o documento em ordem de leitura e chama on_page(página, [(Block, tradução ou None)]) quando cada página
+    termina. Parágrafos que atravessam colunas/páginas são traduzidos inteiros e redivididos."""
+    per = analyze(doc, pages)
+    order = [b for p in sorted(per) for b in per[p]]
+    units, cur = [], None
+    for b in order:
+        if b.keep:
+            continue
+        if b.cont and cur:
+            cur.append(b)
+        else:
+            cur = [b]
+            units.append(cur)
+    left = {p: sum(1 for u in units if any(b.page == p for b in u)) for p in per}
+    result = {}
+
+    def flush():
+        for p in sorted(per):
+            if p in done_pages:
+                continue
+            if left[p] > 0:
+                break
+            done_pages.add(p)
+            on_page(p, [(b, result.get(id(b))) for b in per[p]])
+    done_pages = set()
+    flush()
+    for u in units:
+        if cancel():
+            return
+        text = ""
+        for b in u:
+            t = b.text
+            if text.endswith("-") and t[:1].islower():
+                text = text[:-1] + t
+            else:
+                text = (text + " " + t) if text else t
+        tr = translate_paragraphs([text], path, dst, glossary)[0]
+        for b, t in zip(u, _split_like(tr, [b.text for b in u])):
+            result[id(b)] = t
+        for p in {b.page for b in u}:
+            left[p] -= 1
+        flush()
+
+
+def overlay_page(page, items):
+    """Escreve a tradução por cima do texto original da página (imagens e desenhos ficam). items: [(Block, tradução)]."""
+    import pymupdf
+    todo = [(b, t) for b, t in items if t and not b.keep]
+    if not todo:
+        return
+    for b, _t in todo:
+        page.add_redact_annot(b.rect, fill=None)
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+    others = [b.rect for b, _ in items]
+    for b, t in todo:
+        r = pymupdf.Rect(b.rect)
+        if r.height < b.size * 2:      # uma linha só (título): pode crescer para a direita até a margem ou o próximo bloco
+            limit = page.rect.width - 36
+            for o in others:
+                if o is not b.rect and o.x0 > r.x1 and o.y0 < r.y1 and o.y1 > r.y0:
+                    limit = min(limit, o.x0 - 4)
+            r.x1 = max(r.x1, limit)
+        html = "<p>" + (t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")) + "</p>"
+        css = ("body, p {margin: 0; padding: 0;} "
+               f"p {{font-family: sans-serif; font-size: {max(5.0, b.size * 0.95):.1f}px; line-height: 1.15;"
+               f"{' font-weight: bold;' if b.bold else ''}}}")
+        try:
+            page.insert_htmlbox(r, html, css=css, scale_low=0.4)
+        except Exception:
+            page.insert_textbox(r, t, fontsize=max(5.0, b.size * 0.85))
+
+
+def page_paragraphs(page):
+    """[(retângulo, parágrafo, tamanho da letra, negrito)] da página (compatibilidade)."""
+    return [(b.rect, b.shown, b.size, b.bold)
+            for b in _reading_order(_raw_blocks(page, page.number), page.rect.width, page.rect.height)]
 
 
 def translated_pdf(doc, pages_tr, progress=None):
