@@ -78,6 +78,7 @@ dependencies {
     // exibição: PDFium (mesmo motor do Chrome)
     implementation("io.legere:pdfiumandroid:1.0.35")
     implementation("com.google.zxing:core:3.5.3")   // código de barras do boleto e QR do Pix
+    implementation("com.google.mlkit:translate:17.0.3")   // tradução offline e gratuita (pacote do idioma baixado uma vez)
     // edição, formulários e assinatura: PDFBox (com BouncyCastle)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // escanear documentos com a câmera (scanner do Google: bordas, perspectiva e filtros)
@@ -92,4 +93,5 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")   // org.json de verdade nos testes da JVM
 }

@@ -72,6 +72,14 @@ def run(log_path=None):
         assert ops.tessdata_dir(), "dados do OCR"
         print_("posição das páginas ok")
 
+        # tradução offline: bibliotecas empacotadas (o pacote de idioma é baixado na primeira tradução)
+        import ctranslate2
+        import sentencepiece
+        from . import traducao, artigos
+        assert traducao.detect("The results of this study show that the animals were kept in poor conditions for a long time.") == "en"
+        assert artigos.Article("Título", ["Maria da Silva"], 2020, "Revista").abnt().startswith("SILVA, Maria da.")
+        print_(f"tradução ok (ctranslate2 {ctranslate2.__version__})")
+
         # conversões e operações
         ops.to_docx(data, os.path.join(tmp, "x.docx"))
         ops.to_xlsx(pymupdf.open("pdf", data), os.path.join(tmp, "x.xlsx"))

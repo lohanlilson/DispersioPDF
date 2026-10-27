@@ -75,6 +75,9 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var paymentsHidden by mutableStateOf(false)
     /** páginas de lado ou de cabeça para baixo: página → rotação certa */
     var orientFixes by mutableStateOf<Map<Int, Int>>(emptyMap())
+    /** idioma do documento (para oferecer tradução) */
+    var language by mutableStateOf<String?>(null)
+    var translateHidden by mutableStateOf(false)
     var canUndo by mutableStateOf(false)
     var canRedo by mutableStateOf(false)
     var fields by mutableStateOf<List<Pair<FormField, FracRect>>>(emptyList())
@@ -912,6 +915,11 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------ boletos, Pix e notas; páginas de lado
     private fun analyze(d: ViewerDoc) = viewModelScope.launch {
         val pdf = d.pdf
+        if (prefs.offerTranslation) {
+            val sb = StringBuilder()
+            for (p in 0 until minOf(d.pageCount, 3)) sb.append(runCatching { engine.pageText(pdf, p) }.getOrDefault("")).append(' ')
+            d.language = Traducao.detect(sb.toString().take(20000))
+        }
         if (prefs.detectPayments) {
             d.payments = runCatching { Pagamentos.scan(engine, pdf, d.pageCount) }.getOrDefault(emptyList())
         }
@@ -995,6 +1003,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     var toast by mutableStateOf<String?>(null)
     var confirmClose by mutableStateOf(false)
     var showSettings by mutableStateOf(false)
+    var showArticles by mutableStateOf(false)
     var progress by mutableStateOf<String?>(null)
     var compare by mutableStateOf<CompareState?>(null)
     var closeAfterSave = false

@@ -76,6 +76,13 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Toggle("Mostrar boletos, Pix e notas fiscais encontrados", p.detectPayments) { p.detectPayments = it }
                 Toggle("Avisar quando houver páginas de lado ou de cabeça para baixo", p.detectOrientation) { p.detectOrientation = it }
+                Toggle("Oferecer tradução quando o documento estiver em outro idioma", p.offerTranslation) { p.offerTranslation = it }
+                Text("Traduzir para", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
+                listOf("" to "Idioma do celular (${Traducao.NAMES[Traducao.deviceLanguage()]})", "pt" to "Português", "en" to "Inglês", "es" to "Espanhol").forEach { (k, l) ->
+                    Row(Modifier.fillMaxWidth().clickable { p.translateTo = k }, verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(p.translateTo == k, { p.translateTo = k }); Text(l)
+                    }
+                }
                 Toggle("Verificar atualizações automaticamente", p.autoUpdate) { p.autoUpdate = it }
 
                 Section("Formulários")

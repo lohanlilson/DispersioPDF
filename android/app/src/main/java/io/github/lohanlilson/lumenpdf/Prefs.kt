@@ -60,6 +60,21 @@ class Prefs(ctx: Context) {
         get() = _orient.value
         set(v) { _orient.value = v; sp.edit().putBoolean("posicao_paginas", v).apply() }
 
+    private val _offerTr = mutableStateOf(sp.getBoolean("oferecer_traducao", true))
+    var offerTranslation: Boolean
+        get() = _offerTr.value
+        set(v) { _offerTr.value = v; sp.edit().putBoolean("oferecer_traducao", v).apply() }
+
+    private val _trTo = mutableStateOf(sp.getString("traduzir_para", "") ?: "")
+    /** idioma da tradução; vazio = idioma do celular */
+    var translateTo: String
+        get() = _trTo.value
+        set(v) { _trTo.value = v; sp.edit().putString("traduzir_para", v).apply() }
+
+    var articlesEnglish: Boolean
+        get() = sp.getBoolean("artigos_ingles", true)
+        set(v) { sp.edit().putBoolean("artigos_ingles", v).apply() }
+
     var tsaDefault: Boolean
         get() = sp.getBoolean("sign_tsa", true)
         set(v) { sp.edit().putBoolean("sign_tsa", v).apply() }

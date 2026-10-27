@@ -53,6 +53,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -177,6 +178,8 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var reading by remember { mutableStateOf(false) }
     var showComments by remember { mutableStateOf(false) }
     var payList by remember { mutableStateOf(false) }
+    var translating by remember { mutableStateOf(false) }
+    var pickLang by remember { mutableStateOf(false) }
     var replaceDlg by remember { mutableStateOf(false) }
     val fdfOut = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.fdf")) { u -> if (u != null) vm.exportComments(d, u) }
     val fdfIn = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.importComments(d, u) }
@@ -302,6 +305,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     DropdownMenuItem(text = { Text("Localizar e substituir…") }, onClick = { menu = false; replaceDlg = true })
                                     DropdownMenuItem(text = { Text("Comentários…") }, onClick = { menu = false; showComments = true })
                                     DropdownMenuItem(text = { Text("Boletos, Pix e notas…") }, onClick = { menu = false; vm.paymentsNow(d); payList = true })
+                                    DropdownMenuItem(text = { Text("Traduzir…") }, onClick = { menu = false; if (d.language != null) translating = true else pickLang = true })
                                     DropdownMenuItem(text = { Text("Criar links de sites e e-mails") }, onClick = { menu = false; vm.autolink(d) })
                                     DropdownMenuItem(text = { Text("Exportar comentários (FDF)…") }, onClick = {
                                         menu = false; fdfOut.launch(d.name.removeSuffix(".pdf").removeSuffix(".PDF") + "_comentarios.fdf")
@@ -581,6 +585,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 if (bars || d.signatures.any { !it.ok }) SignatureBanner(d) { sigSheet = true }
                 if (bars || d.payments?.any { !it.ok } == true) PaymentsBanner(d, onCopied = { vm.toast = it }) { payList = true }
                 if (bars) OrientBanner(d) { vm.straighten(d, d.orientFixes) }
+                if (bars) TranslateBanner(d, Traducao.target(vm.prefs)) { translating = true }
             }
             // indicador de página
             Surface(
@@ -729,6 +734,22 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             dismissButton = { TextButton({ blankList = null }) { Text("Cancelar") } })
     }
     if (reading) ReadingMode(vm, d) { reading = false }
+    if (translating) {
+        val dst = Traducao.target(vm.prefs)
+        val src = d.language
+        if (src == null || src == dst || !Traducao.supported(src)) {
+            translating = false
+            if (src == dst) vm.toast = "O documento já está em ${Traducao.NAMES[dst]}." else pickLang = true
+        } else TranslatedReading(vm, d, src, dst) { translating = false; d.translateHidden = true }
+    }
+    if (pickLang) AlertDialog(onDismissRequest = { pickLang = false }, title = { Text("Em que idioma está o documento?") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Traducao.NAMES.filter { it.key != Traducao.target(vm.prefs) && Traducao.supported(it.key) }.forEach { (k, n) ->
+                    Text(n.replaceFirstChar { it.uppercase() }, Modifier.fillMaxWidth().clickable { pickLang = false; d.language = k; translating = true }.padding(vertical = 10.dp))
+                }
+            }
+        }, confirmButton = { TextButton({ pickLang = false }) { Text("Cancelar") } })
     if (payList && d.payments != null) PaymentsSheet(d, onGoto = { p -> payList = false; scope.launch { list.animateScrollToItem(p) } }) { payList = false }
     if (showComments) CommentsSheet(d, onDismiss = { showComments = false }) { a ->
         showComments = false

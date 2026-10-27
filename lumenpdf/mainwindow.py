@@ -23,7 +23,7 @@ APP = "Lumen PDF"
 MODE_TOOLS = {"note", "highlight", "underline", "strikeout", "freetext", "ink", "rect", "ellipse", "arrow",
               "line", "stamp", "edittext", "addtext", "image", "link", "redact", "crop", "signature",
               "field_text", "field_check", "field_combo", "certsign", "select", "hand"}
-NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch"}
+NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch", "articles"}
 
 
 class Worker(QThread):
@@ -1509,6 +1509,38 @@ class MainWindow(QMainWindow):
             tab.doc.delete_pages(pages)
             tab.changed(structure=True)
             self.statusBar().showMessage(f"{len(pages)} página(s) em branco removida(s).", 6000)
+
+    def tool_articles(self, tab=None, **kw):
+        from .artigos_ui import ArticlesDialog
+        ArticlesDialog(self).exec()
+
+    def tool_translate(self, tab, src=None, **kw):
+        from . import traducao
+        from .artigos_ui import TranslateWindow, ensure_models, route_or_warn
+        dst = cfg.get("translate_to") or traducao.system_language()
+        src = src or tab.doc_language()
+        if not src:
+            names = [n.capitalize() for k, n in traducao.NAMES.items() if k != dst]
+            from PySide6.QtWidgets import QInputDialog
+            n, ok = QInputDialog.getItem(self, "Traduzir", "Em que idioma está o documento?", names, 0, False)
+            if not ok:
+                return
+            src = next(k for k, v in traducao.NAMES.items() if v.capitalize() == n)
+        if src == dst:
+            QMessageBox.information(self, APP, f"O documento já está em {traducao.NAMES.get(dst, dst)}. "
+                                    "Dá para mudar o idioma da tradução em Preferências › Geral.")
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            path = route_or_warn(self, src, dst)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if path is None or not ensure_models(self, path):
+            return
+        tab.translate_bar.hide()
+        w = TranslateWindow(self, tab, src, dst, path)
+        w.setAttribute(Qt.WA_DeleteOnClose)
+        w.show()
 
     def tool_payments(self, tab, **kw):
         from . import pagamentos

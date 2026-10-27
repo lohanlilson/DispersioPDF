@@ -112,6 +112,15 @@ class SettingsDialog(QDialog):
         f.addRow(self.w["autosave"])
         self.w["detect_payments"] = _check("Mostrar boletos, Pix e notas fiscais encontrados no documento", "detect_payments")
         f.addRow(self.w["detect_payments"])
+        from . import traducao
+        self.w["offer_translation"] = _check("Oferecer tradução quando o documento estiver em outro idioma", "offer_translation")
+        f.addRow(self.w["offer_translation"])
+        self.w["translate_to"] = _combo([(f"Idioma do sistema ({traducao.NAMES[traducao.system_language()]})", "")] +
+                                        [(n.capitalize(), k) for k, n in traducao.NAMES.items()], cfg.get("translate_to"))
+        f.addRow("Traduzir para:", self.w["translate_to"])
+        self.w["openalex_key"] = QLineEdit(cfg.get("openalex_key"))
+        self.w["openalex_key"].setPlaceholderText("opcional — chave gratuita do openalex.org para mais pesquisas por dia")
+        f.addRow("Pesquisa de artigos:", self.w["openalex_key"])
         self.w["detect_orientation"] = _check("Avisar quando houver páginas de lado ou de cabeça para baixo", "detect_orientation")
         f.addRow(self.w["detect_orientation"])
         self.w["confirm_delete_pages"] = _check("Pedir confirmação antes de excluir páginas", "confirm_delete_pages")

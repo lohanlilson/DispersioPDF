@@ -88,6 +88,7 @@ jobs:
           python tests/autosalvar_test.py
           python tests/pagamentos_test.py
           python tests/orientacao_test.py
+          python tests/artigos_test.py
 
       - name: Gerar executável, instalador e patch
         if: steps.versao.outputs.publicar == 'sim'

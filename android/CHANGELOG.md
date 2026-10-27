@@ -1,5 +1,10 @@
 # Novidades do Lumen PDF para Android
 
+## 0.9.0
+
+- **Pesquisar artigos científicos** (tela inicial › Artigos científicos): artigos de acesso aberto com PDF gratuito, opção de procurar também em inglês, abrir com um toque e copiar a referência ABNT.
+- **Tradução no próprio celular, gratuita e sem internet**: documento em outro idioma mostra a faixa "Traduzir" (ou ⋮ › Traduzir…). A leitura traduzida vem página por página, com o original a um toque. O pacote do idioma (~30 MB) é baixado uma vez; o idioma segue o do celular.
+
 ## 0.8.0
 
 - **Boletos, Pix e notas fiscais com um toque**: o app encontra a linha digitável (inclusive contas de consumo e tributos), o Pix copia e cola ou QR Code e a chave de acesso da NF-e/CT-e, mostra valor, vencimento e recebedor, confere os dígitos e copia com um toque. Lista completa em ⋮ › Boletos, Pix e notas.

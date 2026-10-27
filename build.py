@@ -68,6 +68,7 @@ def pyinstaller(ver):
            "--add-data", f"assets{sep}assets",
            "--distpath", "dist", "--workpath", os.path.join("build", "pyi"), "--specpath", "build",
            "--collect-all", "pdf2docx", "--collect-all", "pyhanko", "--collect-all", "pyhanko_certvalidator",
+           "--collect-all", "ctranslate2", "--collect-all", "sentencepiece", "--collect-binaries", "zxingcpp",
            "--exclude-module", "PySide6.QtWebEngineCore", "--exclude-module", "PySide6.QtWebEngineWidgets",
            "--exclude-module", "tkinter", "--exclude-module", "matplotlib", "--exclude-module", "pandas",
            "--exclude-module", "scipy", "--exclude-module", "onnxruntime", "--exclude-module", "IPython", os.path.join(ROOT, "main.py")]

@@ -27,6 +27,7 @@ TOOLS = [
     ("protect", "lock", "Proteger", "Senhas e permissões", "#ef4444"),
     ("redact", "redact", "Ocultar", "Tarje dados sigilosos", "#ef4444"),
     ("print", "print", "Imprimir", "Livreto, várias por folha…", "#64748b"),
+    ("articles", "search", "Artigos científicos", "Pesquise, baixe e traduza", "#f59e0b"),
 ]
 
 

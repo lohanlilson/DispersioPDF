@@ -13,7 +13,11 @@ DEFAULTS = {
     "confirm_delete_pages": True,
     "autosave": True,
     "detect_payments": True,
-    "detect_orientation": True,          # avisa quando há páginas de lado ou de cabeça para baixo             # faixa com boleto, Pix e chave de NF-e encontrados no documento                    # salva sozinho alguns segundos depois de cada alteração e ao fechar
+    "detect_orientation": True,
+    "offer_translation": True,           # faixa "Traduzir" quando o documento está em outro idioma
+    "translate_to": "",                  # vazio = idioma do sistema
+    "articles_english": True,            # pesquisa de artigos: procurar também em inglês
+    "openalex_key": "",                  # chave gratuita opcional do OpenAlex (mais pesquisas por dia)          # avisa quando há páginas de lado ou de cabeça para baixo             # faixa com boleto, Pix e chave de NF-e encontrados no documento                    # salva sozinho alguns segundos depois de cada alteração e ao fechar
     "default_asked": False,
     # Aparência
     "theme": "light",                    # light | dark | system

@@ -161,6 +161,38 @@ class OrientBar(QFrame):
         self.hide()
 
 
+class TranslateBar(QFrame):
+    """Documento em outro idioma: oferece traduzir (offline e gratuito)."""
+
+    def __init__(self, tab):
+        super().__init__()
+        self.tab = tab
+        self.setObjectName("TrBar")
+        self.setStyleSheet("QFrame#TrBar{background:#f1ecfe; border:1px solid #7c3aed; border-radius:8px;}"
+                           "QFrame#TrBar QLabel{color:#222; background:transparent;}")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 6, 8, 6)
+        ic = QLabel("<span style='font-size:17px; color:#7c3aed'>文A</span>")
+        self.text = QLabel()
+        self.btn = QPushButton()
+        self.btn.clicked.connect(lambda: self.tab.window().run_tool("translate"))
+        close = QPushButton("×")
+        close.setFlat(True)
+        close.setFixedWidth(30)
+        close.setStyleSheet("font-size:18px; color:#555; border:none;")
+        close.clicked.connect(self.hide)
+        for w in (ic, self.text, self.btn, close):
+            lay.addWidget(w, 1 if w is self.text else 0)
+        self.hide()
+
+    def offer(self, src, dst):
+        from . import traducao
+        self.text.setText(f"Este documento está em <b>{traducao.NAMES.get(src, src)}</b>.")
+        self.btn.setText(f"Traduzir para o {traducao.NAMES.get(dst, dst)}" if dst in ("pt", "es") else
+                         f"Traduzir para {traducao.NAMES.get(dst, dst)}")
+        self.show()
+
+
 class PaymentsBar(QFrame):
     """Faixa com o boleto, Pix ou chave de NF-e encontrado: resumo, conferência e botão de copiar."""
 
@@ -334,6 +366,8 @@ class DocTab(QWidget):
         view_col.addWidget(self.pay_bar)
         self.orient_bar = OrientBar(self)
         view_col.addWidget(self.orient_bar)
+        self.translate_bar = TranslateBar(self)
+        view_col.addWidget(self.translate_bar)
         self.pay_items = None        # None = ainda não procurou
         from PySide6.QtWidgets import QSplitter
         self.splitter = QSplitter(Qt.Horizontal)
@@ -365,6 +399,7 @@ class DocTab(QWidget):
         self.validate_signatures()
         self.scan_payments()
         self.check_orientation()
+        self.check_language()
 
     # ------------------------------------------------------------ boletos, Pix e notas
     def scan_payments(self):
@@ -395,6 +430,24 @@ class DocTab(QWidget):
         fixes = {p: r for p, r in fixes.items() if p < self.doc.page_count and self.doc[p].rotation != r}
         if cfg.get("detect_orientation"):
             self.orient_bar.show_fixes(fixes)
+
+    def doc_language(self, pages=6):
+        from . import traducao
+        txt = " ".join(self.doc[p].get_text("text") for p in range(min(pages, self.doc.page_count)))
+        return traducao.detect(txt[:20000])
+
+    def check_language(self):
+        self.translate_bar.hide()
+        if not cfg.get("offer_translation"):
+            return
+        from . import traducao
+        try:
+            src = self.doc_language(3)
+        except Exception:
+            src = None
+        dst = cfg.get("translate_to") or traducao.system_language()
+        if src and src != dst:
+            self.translate_bar.offer(src, dst)
 
     def goto_rect(self, page, rect=None):
         frac = 0.0
