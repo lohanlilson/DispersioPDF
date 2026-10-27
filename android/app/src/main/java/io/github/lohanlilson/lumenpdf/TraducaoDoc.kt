@@ -111,29 +111,46 @@ object DocAnalysis {
                 // número de citação pequeno/elevado — às vezes vem grudado na palavra ("common³")
                 fun tiny(p: TextPosition) = (big > 0 && p.fontSizeInPt < big * 0.78f) || (bigH > 0 && p.heightDir < bigH * 0.72f) ||
                     (bigH > 0 && p.yDirAdj < base - bigH * 0.25f)
-                fun citeChar(p: TextPosition) = (p.unicode ?: "").all { it.isDigit() || it in ",;-–*†‡§" }
-                val words = ln.flatMap { w ->
-                    var k = w.size
-                    while (k > 0 && citeChar(w[k - 1]) && tiny(w[k - 1])) k--
-                    val tail = w.subList(k, w.size)
-                    if (k in 1 until w.size && tail.any { (it.unicode ?: "").any(Char::isDigit) }) listOf(w.subList(0, k), tail) else listOf(w)
-                }.map { w ->
-                    val s = w.joinToString("") { it.unicode ?: "" }
-                    val small = w.all { tiny(it) }
-                    if (small && Regex("[\\d,;\\-–*†‡§]{1,15}").matches(s.trim()) && s.any { it.isDigit() }) "${Citacoes.SUP}${s.trim()}${Citacoes.SUP_END}"
-                    else {
-                        for (p in w) {
-                            l = minOf(l, p.xDirAdj); r = maxOf(r, p.xDirAdj + p.widthDirAdj)
-                            t = minOf(t, p.yDirAdj - p.heightDir * 1.15f); b = maxOf(b, p.yDirAdj + p.heightDir * 0.25f)
-                            maxSize = maxOf(maxSize, p.fontSizeInPt)
-                            chars++
-                            if (p.font?.name?.contains("Bold", true) == true) boldChars++
+                fun citeChar(p: TextPosition) = (p.unicode ?: "").let { u -> u.isNotEmpty() && u.all { it.isDigit() || it in ",;-–*†‡§" } }
+                fun sup(p: TextPosition) = citeChar(p) && tiny(p)
+                // alguns geradores (Skia/Chrome/Android) gravam o número elevado fora de ordem, no fim da linha:
+                // reordena pela posição e remonta os espaços pelo vão entre letras
+                val pos = all.sortedBy { it.xDirAdj }
+                val sb = StringBuilder()
+                var prev: TextPosition? = null
+                var i = 0
+                while (i < pos.size) {
+                    val p = pos[i]
+                    if (sup(p)) {
+                        var j = i
+                        while (j < pos.size && sup(pos[j])) j++
+                        val run = pos.subList(i, j).joinToString("") { it.unicode ?: "" }.trim()
+                        if (run.any { it.isDigit() }) {
+                            while (sb.endsWith(" ")) sb.setLength(sb.length - 1)
+                            sb.append(Citacoes.SUP).append(run).append(Citacoes.SUP_END)
+                            if ((pos.getOrNull(j)?.unicode ?: "").firstOrNull()?.isLetterOrDigit() == true) sb.append(' ')
+                            prev = pos[j - 1]; i = j; continue
                         }
-                        s
                     }
+                    val u = p.unicode ?: ""
+                    val q = prev
+                    if (q != null && u.isNotBlank() && sb.isNotEmpty() && !sb.endsWith(" ")) {
+                        val gap = p.xDirAdj - (q.xDirAdj + q.widthDirAdj)
+                        val sp = if (q.widthOfSpace > 0f && !q.widthOfSpace.isNaN()) q.widthOfSpace else q.fontSizeInPt * 0.25f
+                        if (gap > sp * 0.45f) sb.append(' ')
+                    }
+                    if (u.isBlank()) { if (sb.isNotEmpty() && !sb.endsWith(" ")) sb.append(' ') }
+                    else {
+                        sb.append(u)
+                        l = minOf(l, p.xDirAdj); r = maxOf(r, p.xDirAdj + p.widthDirAdj)
+                        t = minOf(t, p.yDirAdj - p.heightDir * 1.15f); b = maxOf(b, p.yDirAdj + p.heightDir * 0.25f)
+                        maxSize = maxOf(maxSize, p.fontSizeInPt)
+                        chars++
+                        if (p.font?.name?.contains("Bold", true) == true) boldChars++
+                    }
+                    prev = p; i++
                 }
-                var lineText = ""
-                for (w in words) lineText = if (lineText.isEmpty() || w.firstOrNull() == Citacoes.SUP) lineText + w else "$lineText $w"
+                var lineText = sb.toString()
                 lineText = lineText.trim()
                 if (lineText.isEmpty()) continue
                 txt = if (txt.endsWith("-") && lineText.first().isLowerCase()) txt.dropLast(1) + lineText
