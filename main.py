@@ -57,7 +57,7 @@ def send_to_running(msg, wait_ms=400):
         sock.waitForBytesWritten(3000)
     reply = bytearray()
     t0 = time.time()
-    while time.time() - t0 < 20:  # a instância principal pode estar ocupada imprimindo
+    while time.time() - t0 < 45:  # a instância principal pode estar abrindo ou ocupada imprimindo
         if sock.bytesAvailable() or sock.waitForReadyRead(300):
             reply.extend(bytes(sock.readAll()))
             if b"ok" in reply:
@@ -76,7 +76,7 @@ def become_server_or_forward(msg):
     from PySide6.QtCore import QLockFile, QDir
     lock = QLockFile(os.path.join(QDir.tempPath(), SERVER + ".lock"))
     lock.setStaleLockTime(0)
-    deadline = time.time() + 15
+    deadline = time.time() + 60
     while True:
         if send_to_running(msg):
             return None
@@ -152,15 +152,18 @@ def main():
     if main._lock is None:
         return 0
 
-    from lumenpdf.mainwindow import MainWindow
-    win = MainWindow()
-    from lumenpdf import errors
-    errors.install(win)
-
+    # escuta já, antes de montar a janela (que demora): pedidos de outros processos ficam na fila
     server = QLocalServer()
     QLocalServer.removeServer(SERVER)
     server.listen(SERVER)
-    state = {"shown": False}
+    early = []
+    ready = {"win": False}
+
+    def dispatch(msg):
+        if ready["win"]:
+            handle(msg)
+        else:
+            early.append(msg)
 
     def show_window():
         if state["shown"]:
@@ -196,12 +199,24 @@ def main():
                     msg = json.loads(line.decode("utf-8") or "{}")
                 except ValueError:
                     return
-                QTimer.singleShot(0, lambda m=msg: handle(m))
+                QTimer.singleShot(0, lambda m=msg: dispatch(m))
             conn.readyRead.connect(read)
             conn.disconnected.connect(conn.deleteLater)
             if conn.bytesAvailable():
                 read()
     server.newConnection.connect(incoming)
+
+    from lumenpdf.mainwindow import MainWindow
+    win = MainWindow()
+    from lumenpdf import errors
+    errors.install(win)
+    state = {"shown": False}
+    ready["win"] = True
+
+    def flush_early():
+        while early:
+            handle(early.pop(0))
+    QTimer.singleShot(0, flush_early)
 
     if headless:
         # só imprime: sem janela; encerra sozinho quando a fila acabar (a menos que o usuário abra um PDF)

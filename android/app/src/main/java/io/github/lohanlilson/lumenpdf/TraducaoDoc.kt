@@ -104,10 +104,22 @@ object DocAnalysis {
             var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -1f; var b = -1f
             var maxSize = 0f; var boldChars = 0; var chars = 0
             for (ln in para) {
-                val big = ln.flatten().maxOfOrNull { it.fontSizeInPt } ?: 0f
-                val words = ln.map { w ->
+                val all = ln.flatten()
+                val big = all.maxOfOrNull { it.fontSizeInPt } ?: 0f
+                val bigH = all.maxOfOrNull { it.heightDir } ?: 0f
+                val base = all.map { it.yDirAdj }.sorted().let { if (it.isEmpty()) 0f else it[it.size / 2] }
+                // número de citação pequeno/elevado — às vezes vem grudado na palavra ("common³")
+                fun tiny(p: TextPosition) = (big > 0 && p.fontSizeInPt < big * 0.78f) || (bigH > 0 && p.heightDir < bigH * 0.72f) ||
+                    (bigH > 0 && p.yDirAdj < base - bigH * 0.25f)
+                fun citeChar(p: TextPosition) = (p.unicode ?: "").all { it.isDigit() || it in ",;-–*†‡§" }
+                val words = ln.flatMap { w ->
+                    var k = w.size
+                    while (k > 0 && citeChar(w[k - 1]) && tiny(w[k - 1])) k--
+                    val tail = w.subList(k, w.size)
+                    if (k in 1 until w.size && tail.any { (it.unicode ?: "").any(Char::isDigit) }) listOf(w.subList(0, k), tail) else listOf(w)
+                }.map { w ->
                     val s = w.joinToString("") { it.unicode ?: "" }
-                    val small = w.all { it.fontSizeInPt < big * 0.78f }
+                    val small = w.all { tiny(it) }
                     if (small && Regex("[\\d,;\\-–*†‡§]{1,15}").matches(s.trim()) && s.any { it.isDigit() }) "${Citacoes.SUP}${s.trim()}${Citacoes.SUP_END}"
                     else {
                         for (p in w) {

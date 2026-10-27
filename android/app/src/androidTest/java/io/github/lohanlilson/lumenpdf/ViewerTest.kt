@@ -97,7 +97,7 @@ class ViewerTest {
         val dir = File(ctx.getExternalFilesDir(null), "capturas").apply { mkdirs() }
         File(dir, "motor_pagina1.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         val text = engine.pageText(pdf, 1)
-        val hits1 = engine.search(pdf, "Lumen")
+        val hits1 = engine.search(pdf, "Dispersio")
         val hits2 = engine.search(pdf, "Goiânia")
         Log.i("LumenTest", "pixels=$ink texto='${text.take(120)}' Lumen=${hits1.size} Goiania=${hits2.size} tamanho=${pdf.sizes}")
         engine.close(pdf)
