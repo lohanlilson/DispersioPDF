@@ -103,18 +103,23 @@ def app_icon():
     return icon
 
 
+def _orient_scan():
+    """Processo auxiliar (sem janela): posição das páginas por OCR. Função própria para não criar nomes locais em main()."""
+    import json as _json
+    from lumenpdf import ops
+    i = sys.argv.index("--orient-scan")
+    src, out = sys.argv[i + 1], sys.argv[i + 2]
+    pwd = sys.stdin.readline().rstrip("\n") or None
+    with open(src, "rb") as f:
+        fixes = ops.orientation_fixes_bytes(f.read(), pwd, int(sys.argv[i + 3]), sys.argv[i + 4])
+    with open(out, "w") as f:
+        _json.dump({str(k): v for k, v in fixes.items()}, f)
+    return 0
+
+
 def main():
     if "--orient-scan" in sys.argv:  # processo auxiliar: posição das páginas por OCR (sem janela)
-        import json
-        from lumenpdf import ops
-        i = sys.argv.index("--orient-scan")
-        src, out = sys.argv[i + 1], sys.argv[i + 2]
-        pwd = sys.stdin.readline().rstrip("\n") or None
-        with open(src, "rb") as f:
-            fixes = ops.orientation_fixes_bytes(f.read(), pwd, int(sys.argv[i + 3]), sys.argv[i + 4])
-        with open(out, "w") as f:
-            json.dump({str(k): v for k, v in fixes.items()}, f)
-        return 0
+        return _orient_scan()
     if "--run-update" in sys.argv:  # auxiliar da atualização automática (sem janela, sem trava de instância)
         from lumenpdf.updater import run_update_helper
         return run_update_helper(sys.argv)
