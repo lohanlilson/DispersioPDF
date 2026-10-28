@@ -23,7 +23,7 @@ APP = "Dispersio PDF"
 MODE_TOOLS = {"note", "highlight", "underline", "strikeout", "freetext", "ink", "rect", "ellipse", "arrow",
               "line", "stamp", "edittext", "addtext", "image", "link", "redact", "crop", "signature",
               "field_text", "field_check", "field_combo", "certsign", "select", "hand"}
-NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch", "articles"}
+NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch", "articles", "printer_queue"}
 
 
 class Worker(QThread):
@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
         act(m, "Proteger com senha…", lambda: self.run_tool("protect"), None, "lock")
         act(m, "Propriedades…", lambda: self.run_tool("properties"), "Ctrl+D", "info")
         act(m, "Imprimir…", lambda: self.run_tool("print"), "Ctrl+P", "print")
+        act(m, "Imprimir todas as abas abertas…", lambda: self.run_tool("print_all"), "Ctrl+Shift+P", "print")
         m.addSeparator()
         act(m, "Fechar aba", lambda: self.close_tab(self.tabbar.currentIndex()), "Ctrl+W")
         act(m, "Sair", self.close, "Ctrl+Q")
@@ -679,6 +680,55 @@ class MainWindow(QMainWindow):
             errors.write_log(errors.build_report(f"Impressão rápida de {name}: {e}", str(e), "Impressão rápida"))
             self._notify(APP, f"Não foi possível imprimir “{name}”: {e}", error=True)
         QTimer.singleShot(50, self._print_next)
+
+    # ------------------------------------------------------------ impressora Dispersio PDF
+    def printer_startup(self):
+        """Liga o agente da impressora; para quem atualizou de uma versão sem ela, pergunta uma vez se quer instalar."""
+        from . import impressora
+        if not impressora.IS_WINDOWS:
+            return
+        try:
+            if impressora.is_installed():
+                impressora.start_agent()
+                return
+            if cfg.get("printer_offered") or self._installer_asked_printer() or not getattr(sys, "frozen", False):
+                return
+            from .impressora_ui import offer_install
+            offer_install(self)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _installer_asked_printer():
+        """O instalador completo já perguntou (opção "Adicionar a impressora Dispersio PDF")."""
+        try:
+            import winreg
+            for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\DispersioPDF", 0,
+                                        winreg.KEY_READ | view) as k:
+                        winreg.QueryValueEx(k, "PrinterOffered")
+                        return True
+                except OSError:
+                    pass
+        except ImportError:
+            pass
+        return False
+
+    def tool_printer_queue(self, tab=None, select=None, **kw):
+        from .impressora_ui import PrinterQueueDialog
+        dlg = getattr(self, "_printer_dlg", None)
+        if dlg is None:
+            dlg = self._printer_dlg = PrinterQueueDialog(self)
+        dlg.refresh(select)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def receive_printed(self, files):
+        """Chegou um documento pela impressora Dispersio PDF: mostra a fila com ele selecionado."""
+        self.bring_to_front()
+        self.tool_printer_queue(select=[os.path.abspath(f) for f in files])
 
     def check_default_app(self, force=False):
         """Pergunta (no primeiro uso) se o Dispersio PDF deve ser o leitor padrão de PDF."""
@@ -1663,11 +1713,28 @@ class MainWindow(QMainWindow):
         except Exception as e:
             errors.report(self, f"Não foi possível comparar os arquivos: {e}", e, "Comparar arquivos")
 
-    def tool_print(self, tab, **kw):
+    def _tab_name(self, i):
+        t = self.tab_widgets[i]
+        return os.path.basename(t.path) if t.path else self.tabbar.tabText(i).lstrip("● ")
+
+    def open_tab_sources(self):
+        """Uma fonte de impressão por aba aberta, na ordem em que as abas aparecem."""
+        from .print_manager import Source
+        out = []
+        for i in range(1, self.tabbar.count()):
+            t = self.tab_widgets[i] if i < len(self.tab_widgets) else None
+            if t is not None and getattr(t, "doc", None) is not None and t.doc.page_count:
+                out.append(Source(self._tab_name(i), t.doc, t.view.current_page(), t.side.thumbs.selected_pages()))
+        return out
+
+    def tool_print(self, tab, all_tabs=False, **kw):
         from .print_manager import PrintManager, Source
-        name = os.path.basename(tab.path) if tab.path else self.tabbar.tabText(self.tabbar.currentIndex()).lstrip("● ")
-        src = Source(name, tab.doc, tab.view.current_page(), tab.side.thumbs.selected_pages())
-        PrintManager(self, [src]).exec()
+        src = Source(self._tab_name(self.tabbar.currentIndex()), tab.doc, tab.view.current_page(),
+                     tab.side.thumbs.selected_pages())
+        PrintManager(self, [src], all_sources=self.open_tab_sources(), start_all=all_tabs).exec()
+
+    def tool_print_all(self, tab, **kw):
+        self.tool_print(tab, all_tabs=True)
 
     def tool_print_batch(self, tab=None, **kw):
         from .print_manager import PrintManager, Source

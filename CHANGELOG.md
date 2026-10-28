@@ -2,6 +2,11 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.14.0
+
+- **Impressora Dispersio PDF** (como a do PDF24): aparece em todos os programas (Word, Excel, navegador…) e transforma o que você imprime em PDF. Cada documento entra numa **fila**, onde dá para mudar a ordem, **juntar tudo num PDF só**, salvar, abrir no Dispersio, imprimir numa impressora de verdade de uma vez ou enviar por e-mail. Na instalação há a opção "Adicionar a impressora"; quem atualizar recebe a pergunta uma vez; e dá para instalar ou remover depois em Preferências › Impressora Dispersio PDF.
+- **Imprimir todas as abas abertas**: na janela de impressão, escolha "Todas as abas abertas" (ou Arquivo › Imprimir todas as abas abertas, Ctrl+Shift+P) para imprimir tudo de uma vez, na ordem das abas e com as mesmas configurações.
+
 ## 1.13.0
 
 - **Novo carimbo de assinatura** com a cara do Dispersio: cartão índigo com o prisma colorido, "Assinado digitalmente", nome em destaque, data e motivo/local. O CPF aparece mascarado (***.456.789-**), como nos documentos do governo; o CNPJ sai completo. Continua em vetor, nítido e com texto pesquisável.

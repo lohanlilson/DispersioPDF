@@ -2,6 +2,7 @@
 Garante que o instalador leva tudo o que é necessário: assinatura, OCR, conversões e operações."""
 import datetime
 import os
+import sys
 import tempfile
 import traceback
 
@@ -79,6 +80,12 @@ def run(log_path=None):
         assert traducao.detect("The results of this study show that the animals were kept in poor conditions for a long time.") == "en"
         assert artigos.Article("Título", ["Maria da Silva"], 2020, "Revista").abnt().startswith("SILVA, Maria da.")
         print_(f"tradução ok (ctranslate2 {ctranslate2.__version__})")
+
+        # impressora virtual: módulos do Windows usados pelo agente e pela fila
+        from . import impressora, impressora_ui  # noqa: F401
+        if sys.platform == "win32":
+            import win32pipe, win32file, win32security, win32print  # noqa: F401,E401
+        print_("impressora virtual ok")
 
         # conversões e operações
         ops.to_docx(data, os.path.join(tmp, "x.docx"))

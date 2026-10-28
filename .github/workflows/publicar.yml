@@ -75,7 +75,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           PYTHONIOENCODING: utf-8
         run: |
-          for t in smoke_test features_test autoscroll_test sharpness_test split_test novidades_test desfazer_test ferramentas_test versoes_test novas_ferramentas_test medir_test autosalvar_test pagamentos_test orientacao_test artigos_test traducao_doc_test; do
+          for t in smoke_test features_test autoscroll_test sharpness_test split_test novidades_test desfazer_test ferramentas_test versoes_test novas_ferramentas_test medir_test autosalvar_test pagamentos_test orientacao_test artigos_test traducao_doc_test impressora_test; do
             echo "::group::$t"
             c=0; python -X faulthandler tests/$t.py || c=$?
             echo "::endgroup::"
@@ -125,6 +125,35 @@ jobs:
           Get-ChildItem $out
           if ((Get-ChildItem $out -Filter *.pdf).Count -ne 3) { throw "A impressão rápida não gerou os 3 arquivos" }
           Get-Process DispersioPDF -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Teste da impressora Dispersio PDF (instalar, imprimir de outro programa, remover)
+        if: steps.versao.outputs.publicar == 'sim'
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Resolve-Path "dist\DispersioPDF\DispersioPDF.exe"
+          $out = Join-Path $PWD "fila_teste"; New-Item -ItemType Directory -Force $out | Out-Null
+          $env:DISPERSIO_PRINTER_TEST_DIR = $out
+          $p = Start-Process $exe -ArgumentList "--install-printer","--no-agent" -PassThru; $p.WaitForExit()
+          Get-Content (Join-Path $out "impressora.log") -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "Falha ao instalar a impressora ($($p.ExitCode))" }
+          Get-Printer -Name "Dispersio PDF" | Format-List Name,DriverName,PortName
+          (Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run")."DispersioPDF-Impressora"
+          Start-Process $exe -ArgumentList "--printer-agent" | Out-Null
+          Start-Sleep 6
+          "Primeiro documento impresso no Dispersio" | Out-Printer -Name "Dispersio PDF"
+          "Segundo documento impresso no Dispersio" | Out-Printer -Name "Dispersio PDF"
+          $files = @()
+          for ($i = 0; $i -lt 60 -and $files.Count -lt 2; $i++) { Start-Sleep 1; $files = @(Get-ChildItem $out -Filter *.pdf) }
+          Get-Content (Join-Path $out "impressora.log")
+          $files | Format-Table Name, Length
+          if ($files.Count -ne 2) { throw "Esperava 2 PDFs na fila, encontrei $($files.Count)" }
+          python -c "import pymupdf,glob,sys; t=[pymupdf.open(f)[0].get_text() for f in sorted(glob.glob(sys.argv[1]+'/*.pdf'))]; print(t); assert 'Primeiro' in t[0] and 'Segundo' in t[1]" $out
+          $p = Start-Process $exe -ArgumentList "--uninstall-printer" -PassThru; $p.WaitForExit()
+          Start-Sleep 2
+          if (Get-Printer -Name "Dispersio PDF" -ErrorAction SilentlyContinue) { throw "A impressora não foi removida" }
+          if (Get-Process DispersioPDF -ErrorAction SilentlyContinue) { Get-Process DispersioPDF | Format-Table Id,StartTime; throw "O agente não encerrou" }
 
       - name: Teste de atualização (instala a versão anterior e aplica o patch)
         if: steps.versao.outputs.publicar == 'sim' && env.ANTERIOR != ''

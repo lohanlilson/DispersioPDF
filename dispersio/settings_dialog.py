@@ -49,7 +49,9 @@ class SettingsDialog(QDialog):
         for title, ic, builder in [("Geral", "home", self._general), ("Aparência", "moon", self._appearance),
                                    ("Documentos", "fit_page", self._documents), ("Comentários", "comments", self._comments),
                                    ("Assinatura", "certificate", self._signature),
-                                   ("Impressão", "print", self._printing), ("OCR e conversão", "ocr", self._convert),
+                                   ("Impressão", "print", self._printing),
+                                   ("Impressora Dispersio PDF", "createpdf", self._virtual_printer),
+                                   ("OCR e conversão", "ocr", self._convert),
                                    ("Avançado", "gear", self._advanced)]:
             self.nav.addItem(QListWidgetItem(icons.icon(ic), title))
             page = QWidget()
@@ -259,6 +261,45 @@ class SettingsDialog(QDialog):
         f.addRow("Impressão rápida usa:", self.w["quick_print_mode"])
         self.w["quick_print_notify"] = _check("Mostrar aviso na área de notificação ao imprimir", "quick_print_notify")
         f.addRow(self.w["quick_print_notify"])
+
+    def _virtual_printer(self, f):
+        from . import impressora
+        info = QLabel("Uma impressora que aparece em todos os programas (Word, Excel, navegador…) e transforma o que "
+                      "você imprime em PDF. Cada documento entra numa fila, onde dá para <b>juntar tudo num PDF só</b>, "
+                      "salvar, editar no Dispersio, imprimir numa impressora de verdade ou enviar por e-mail.")
+        info.setWordWrap(True)
+        info.setObjectName("Muted")
+        f.addRow(info)
+        self.printer_status = QLabel()
+        f.addRow("Situação:", self.printer_status)
+        row = QHBoxLayout()
+        self.printer_btn = QPushButton()
+        self.printer_btn.clicked.connect(self._toggle_printer)
+        queue = QPushButton("Abrir a fila")
+        queue.clicked.connect(lambda: self.win.tool_printer_queue())
+        row.addWidget(self.printer_btn)
+        row.addWidget(queue)
+        row.addStretch()
+        f.addRow(row)
+        if not impressora.IS_WINDOWS:
+            self.printer_btn.setEnabled(False)
+        self._printer_refresh()
+
+    def _printer_refresh(self):
+        from . import impressora
+        on = impressora.is_installed()
+        self.printer_status.setText("<b>Instalada</b> — escolha “Dispersio PDF” na hora de imprimir." if on
+                                    else "Não instalada neste computador.")
+        self.printer_btn.setText("Remover impressora" if on else "Instalar impressora")
+        self.printer_btn.setToolTip("O Windows vai pedir permissão de administrador")
+
+    def _toggle_printer(self):
+        from . import impressora, impressora_ui
+        if impressora.is_installed():
+            impressora_ui.uninstall(self)
+        else:
+            impressora_ui.install(self)
+        self._printer_refresh()
 
     def _convert(self, f):
         langs = ops.ocr_languages() or ["por"]

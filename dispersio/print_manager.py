@@ -351,9 +351,12 @@ def printer_state_text(info):
 
 # ====================================================================== diálogo
 class PrintManager(QDialog):
-    def __init__(self, win, sources, title="Imprimir"):
+    def __init__(self, win, sources, title="Imprimir", all_sources=None, start_all=False):
         super().__init__(win)
         self.win, self.sources = win, sources
+        # "todas as abas abertas": as fontes de cada aba, na ordem das abas
+        self.single_sources = list(sources)
+        self.all_sources = all_sources if all_sources and len(all_sources) > 1 else None
         self.setWindowTitle(title)
         self.resize(1180, 760)
         self.sheet_idx = 0
@@ -363,6 +366,9 @@ class PrintManager(QDialog):
         self._timer = QTimer(self, singleShot=True, interval=120, timeout=self._rebuild)
         self._build()
         self._load(self._last_opts())
+        if self.all_sources and start_all:
+            self.scope_all.setChecked(True)
+            self._set_scope(True)
         self._rebuild()
 
     # ---------------------------------------------------------------- interface
@@ -426,6 +432,21 @@ class PrintManager(QDialog):
         pr.addWidget(dp)
         L.addLayout(pr)
 
+        # o que imprimir: este documento ou todas as abas abertas
+        if self.all_sources:
+            g = QGroupBox("O que imprimir")
+            gl = QVBoxLayout(g)
+            self.scope_one = QRadioButton(f"Este documento ({self.single_sources[0].name})")
+            self.scope_all = QRadioButton(f"Todas as abas abertas ({len(self.all_sources)} documentos)")
+            self.scope_one.setChecked(True)
+            names = QLabel("Na ordem das abas: " + ", ".join(s.name for s in self.all_sources))
+            names.setObjectName("Muted")
+            names.setWordWrap(True)
+            for w in (self.scope_one, self.scope_all, names):
+                gl.addWidget(w)
+            self.scope_all.toggled.connect(self._set_scope)
+            L.addWidget(g)
+
         # cópias / cor / frente e verso
         g = QGroupBox("Cópias e cor")
         gl = QGridLayout(g)
@@ -471,15 +492,10 @@ class PrintManager(QDialog):
         gl.addWidget(QLabel("Subconjunto:"), 3, 0)
         gl.addWidget(self.subset, 3, 1)
         gl.addWidget(self.reverse, 4, 0, 1, 2)
-        multi = len(self.sources) > 1
-        sel_ok = bool(self.sources and self.sources[0].selected) and not multi
-        self.pg_sel.setEnabled(sel_ok)
-        for w in (self.pg_cur, self.pg_rng, self.range):
-            w.setEnabled(not multi)
-        if multi:
-            note = QLabel(f"{len(self.sources)} arquivos serão impressos na sequência.")
-            note.setObjectName("Muted")
-            gl.addWidget(note, 5, 0, 1, 2)
+        self.multi_note = QLabel()
+        self.multi_note.setObjectName("Muted")
+        gl.addWidget(self.multi_note, 5, 0, 1, 2)
+        self._update_multi()
         L.addWidget(g)
 
         # dimensionamento
@@ -758,6 +774,25 @@ class PrintManager(QDialog):
             content=self.content.currentData(), quality=self.quality.currentData(),
             footer=self.footer.isChecked(), watermark=self.watermark.text().strip(),
             extra_margin=self.margin.value())
+
+    def _update_multi(self):
+        multi = len(self.sources) > 1
+        sel_ok = bool(self.sources and self.sources[0].selected) and not multi
+        self.pg_sel.setEnabled(sel_ok)
+        for w in (self.pg_cur, self.pg_rng, self.range):
+            w.setEnabled(not multi)
+        if multi and not self.pg_all.isChecked():
+            self.pg_all.setChecked(True)
+        self.multi_note.setText(f"{len(self.sources)} arquivos serão impressos na sequência, todas as páginas de cada um."
+                                if multi else "")
+        self.multi_note.setVisible(multi)
+
+    def _set_scope(self, all_tabs):
+        self.sources = list(self.all_sources) if all_tabs else list(self.single_sources)
+        self._layout_cache.clear()
+        self._update_multi()
+        self.setWindowTitle(f"Imprimir {len(self.sources)} documentos" if all_tabs else "Imprimir")
+        self._changed()
 
     def _changed(self, *_):
         if getattr(self, "_loading", False):

@@ -18,6 +18,7 @@ DEFAULTS = {
     "translate_to": "",                  # vazio = idioma do sistema
     "reading_mode": 0,                   # leitura traduzida: 0 tradução, 1 original, 2 lado a lado, 3 intercalado
     "articles_english": True,
+    "printer_offered": False,            # já perguntou se quer adicionar a impressora Dispersio PDF
     "articles_filters": "pdf",           # filtros ligados na pesquisa de artigos            # pesquisa de artigos: procurar também em inglês
     "openalex_key": "",                  # chave gratuita opcional do OpenAlex (mais pesquisas por dia)          # avisa quando há páginas de lado ou de cabeça para baixo             # faixa com boleto, Pix e chave de NF-e encontrados no documento                    # salva sozinho alguns segundos depois de cada alteração e ao fechar
     "default_asked": False,

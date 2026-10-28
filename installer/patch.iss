@@ -77,10 +77,31 @@ Root: HKA; Subkey: "Software\DispersioPDF"; ValueType: string; ValueName: "Versi
 #include "shellext.iss"
 
 [Run]
+Filename: "{app}\{#AppExe}"; Parameters: "--printer-agent"; Flags: nowait runasoriginaluser; Check: PrinterInstalled
 Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait
 Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [Code]
+function PrinterInstalled(): Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Control\Print\Printers\Dispersio PDF');
+end;
+
+procedure StopPrinterAgent();
+var
+  R: Integer;
+begin
+  { o agente da impressora usa o mesmo executável: pede para ele encerrar antes de trocar os arquivos
+    (só existe com a impressora instalada, a partir da 1.14; versões antigas não conhecem a opção) }
+  if PrinterInstalled() and FileExists(ExpandConstant('{app}\{#AppExe}')) then
+    Exec(ExpandConstant('{app}\{#AppExe}'), '--stop-printer-agent', '', SW_HIDE, ewWaitUntilTerminated, R);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopPrinterAgent();
+  Result := '';
+end;
 function OldProgIdExists(): Boolean;
 begin
   Result := RegKeyExists(HKLM, 'Software\Classes\{#OldProgId}') or RegKeyExists(HKCU, 'Software\Classes\{#OldProgId}');

@@ -27,6 +27,8 @@ def parse_args(argv):
         low = a.lower()
         if low in ("/p", "-p", "--print", "/print"):
             cmd = "print"
+        elif low == "--printed":  # o agente da impressora Dispersio PDF recebeu um documento
+            cmd = "printed"
         elif low in ("/pt", "-pt", "--printto", "/printto"):
             cmd = "print"
             rest = list(args[i + 1:])
@@ -123,6 +125,16 @@ def main():
     if "--run-update" in sys.argv:  # auxiliar da atualização automática (sem janela, sem trava de instância)
         from dispersio.updater import run_update_helper
         return run_update_helper(sys.argv)
+    if "--printer-agent" in sys.argv:  # agente da impressora virtual (sem janela, inicia com o Windows)
+        from dispersio import impressora
+        return impressora.agent_main(send_to_running)
+    if "--stop-printer-agent" in sys.argv:  # instalador: libera os arquivos antes de atualizar
+        from dispersio import impressora
+        impressora.stop_agent()
+        return 0
+    if "--install-printer" in sys.argv or "--uninstall-printer" in sys.argv:  # instalador / Preferências (admin)
+        from dispersio import impressora
+        return impressora.cli(sys.argv)
     if "--selftest" in sys.argv:  # usado pelo build para conferir o executável gerado
         from dispersio import selftest
         i = sys.argv.index("--selftest")
@@ -181,6 +193,9 @@ def main():
             win.enqueue_print(msg.get("files", []), msg.get("printer", ""))
             return
         show_window()
+        if msg.get("cmd") == "printed":
+            win.receive_printed(msg.get("files", []))
+            return
         for f in msg.get("files", []):
             win.open_path(f)
 
@@ -238,9 +253,13 @@ def main():
         for p in ([session] if isinstance(session, str) else session):
             if os.path.exists(p):
                 win.open_path(p)
-    for p in paths:
-        win.open_path(p)
+    if req["cmd"] == "printed":
+        QTimer.singleShot(300, lambda: win.receive_printed(paths))
+    else:
+        for p in paths:
+            win.open_path(p)
     QTimer.singleShot(1200, win.check_default_app)
+    QTimer.singleShot(2500, win.printer_startup)
     QTimer.singleShot(4000, win.updater.auto_check)
     return app.exec()
 
