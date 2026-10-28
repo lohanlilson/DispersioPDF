@@ -33,8 +33,12 @@ w.receive_printed([impressora.queue_files()[1]])
 dlg = w._printer_dlg
 assert dlg.list.count() == 3 and [it.isSelected() for it in (dlg.list.item(i) for i in range(3))] == [False, True, False]
 assert dlg.chosen() == [impressora.queue_files()[1]]
+assert dlg.parent() is None and dlg.isWindow(), "a fila é uma janela independente do leitor"
+assert dlg.paths("sel") == [impressora.queue_files()[1]] and len(dlg.paths("all")) == 3
+assert dlg.buttons[("sel", "save")].isEnabled() and dlg.buttons[("all", "save")].isEnabled()
+assert dlg.buttons[("sel", "save")].text() == "Salvar como…" and dlg.buttons[("all", "save")].text() == "Salvar num PDF só…"
 dlg.list.clearSelection()
-assert len(dlg.chosen()) == 3
+assert len(dlg.chosen()) == 3 and not dlg.buttons[("sel", "merge")].isEnabled() and dlg.buttons[("all", "merge")].isEnabled()
 
 # juntar tudo num PDF só, na ordem da lista
 out = os.path.join(tempfile.mkdtemp(), "junto.pdf")
@@ -55,6 +59,12 @@ QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
 dlg.list.item(0).setSelected(True)
 dlg.remove()
 assert dlg.list.count() == 2 and len(impressora.queue_files()) == 2
+
+# indicador de página no topo
+w.cur().view.goto(1); app.processEvents()
+assert w.page_box.isVisible() and w.page_edit.text() == "2" and w.page_total.text() == f"de {w.cur().doc.page_count}"
+w.page_edit.setText("4"); w.page_edit.returnPressed.emit(); app.processEvents()
+assert w.cur().view.current_page() == 3
 
 # imprimir todas as abas abertas: o diálogo oferece e usa todas as abas, na ordem
 dlg.open_each()

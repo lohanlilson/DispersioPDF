@@ -67,17 +67,23 @@ def send_mail(path, subject):
 
 
 class PrinterQueueDialog(QDialog):
+    """Janela própria (independente do leitor) com a fila da impressora Dispersio PDF."""
+
+    ACTIONS = [("merge", "Juntar num PDF e abrir", "merge"), ("open", "Abrir cada um no leitor", "open"),
+               ("save", "Salvar num PDF só…", "save"), ("print", "Imprimir…", "print"),
+               ("mail", "Enviar por e-mail…", "attach"), ("remove", "Tirar da fila", "trash")]
+
     def __init__(self, win):
-        super().__init__(win)
+        super().__init__(None)  # sem janela-mãe: aparece sozinha, com ícone próprio na barra de tarefas
         self.win = win
+        self.setWindowFlags(Qt.Window | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
         self.setWindowTitle("Impressora Dispersio PDF")
         self.setWindowIcon(QIcon(resource("assets", "logo.png")))
-        self.resize(760, 520)
-        self.setWindowFlag(Qt.WindowMinMaxButtonsHint, True)
+        self.resize(820, 540)
         root = QVBoxLayout(self)
         head = QLabel("<b>Documentos impressos na impressora “Dispersio PDF”</b><br>"
-                      "<span style='color:gray'>Arraste para mudar a ordem. As ações usam os selecionados — "
-                      "ou todos, se nenhum estiver selecionado.</span>")
+                      "<span style='color:gray'>Arraste para mudar a ordem. Clique com Ctrl ou Shift para "
+                      "selecionar vários.</span>")
         head.setWordWrap(True)
         root.addWidget(head)
         body = QHBoxLayout()
@@ -87,31 +93,29 @@ class PrinterQueueDialog(QDialog):
         self.list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list.setDragDropMode(QAbstractItemView.InternalMove)
         self.list.setSpacing(2)
-        self.list.itemDoubleClicked.connect(lambda it: self.win.open_path(it.data(Qt.UserRole)))
+        self.list.itemDoubleClicked.connect(lambda it: self._open([it.data(Qt.UserRole)]))
         self.list.itemSelectionChanged.connect(self._update)
         body.addWidget(self.list, 1)
         side = QVBoxLayout()
         body.addLayout(side)
-
-        def btn(text, icon, slot, tip=""):
-            b = QPushButton(icons.icon(icon), text)
-            b.setToolTip(tip)
-            b.clicked.connect(slot)
-            b.setMinimumWidth(220)
-            side.addWidget(b)
-            return b
-        self.b_merge = btn("Juntar num PDF e abrir", "merge", self.merge_open,
-                           "Junta os documentos na ordem da lista e abre no Dispersio para editar ou salvar")
-        self.b_open = btn("Abrir no Dispersio", "open", self.open_each, "Abre cada documento numa aba")
-        self.b_save = btn("Salvar como PDF…", "save", self.save, "Vários documentos são salvos juntos num PDF só")
-        self.b_print = btn("Imprimir…", "print", self.print_, "Manda para uma impressora de verdade, tudo de uma vez")
-        self.b_mail = btn("Enviar por e-mail…", "attach", self.mail,
-                          "Abre uma mensagem no seu programa de e-mail com o PDF anexado")
-        side.addSpacing(12)
-        self.b_remove = btn("Tirar da fila", "trash", self.remove)
+        from PySide6.QtWidgets import QGroupBox, QGridLayout
+        self.groups, self.buttons = {}, {}
+        for scope in ("all", "sel"):
+            g = QGroupBox()
+            gl = QGridLayout(g)
+            gl.setSpacing(6)
+            for k, (key, text, icon) in enumerate(self.ACTIONS):
+                bt = QPushButton(icons.icon(icon), text)
+                bt.setMinimumWidth(180)
+                bt.clicked.connect(lambda _=False, a=key, sc=scope: self.run(a, sc))
+                gl.addWidget(bt, k // 2, k % 2)
+                self.buttons[(scope, key)] = bt
+            self.groups[scope] = g
+            side.addWidget(g)
         side.addStretch(1)
-        self.b_folder = btn("Abrir pasta da fila", "open", lambda: QDesktopServices.openUrl(
-            QUrl.fromLocalFile(impressora.queue_dir())))
+        folder = QPushButton(icons.icon("open"), "Abrir a pasta da fila")
+        folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(impressora.queue_dir())))
+        side.addWidget(folder)
         self.empty = QLabel("A fila está vazia. Em qualquer programa, escolha <b>Imprimir</b> e a impressora "
                             "<b>Dispersio PDF</b>.")
         self.empty.setWordWrap(True)
@@ -137,27 +141,39 @@ class PrinterQueueDialog(QDialog):
         if select:
             self.list.clearSelection()
             for i in range(self.list.count()):
-                if self.list.item(i).data(Qt.UserRole) in select:
+                if os.path.normcase(self.list.item(i).data(Qt.UserRole)) in {os.path.normcase(x) for x in select}:
                     self.list.item(i).setSelected(True)
                     self.list.scrollToItem(self.list.item(i))
         self._update()
 
     def _update(self):
         n = self.list.count()
+        k = len(self.list.selectedItems())
         self.empty.setVisible(n == 0)
-        for b in (self.b_merge, self.b_open, self.b_save, self.b_print, self.b_mail, self.b_remove):
-            b.setEnabled(n > 0)
-        sel = len(self.list.selectedItems())
-        scope = f" ({sel})" if sel else (f" (todos: {n})" if n > 1 else "")
-        self.b_merge.setText("Juntar num PDF e abrir" + scope)
-        self.b_save.setText("Salvar como PDF…" + scope)
-        self.b_print.setText("Imprimir…" + scope)
+        self.groups["all"].setTitle(f"Com todos os documentos ({n})")
+        self.groups["sel"].setTitle(f"Só com os selecionados ({k})" if k else "Só com os selecionados (selecione na lista)")
+        for (scope, key), bt in self.buttons.items():
+            bt.setEnabled(bool(n if scope == "all" else k))
+        single = {"merge": "Abrir no leitor", "save": "Salvar como…"}
+        for scope, count in (("all", n), ("sel", k)):
+            for key, text, _ in self.ACTIONS:
+                self.buttons[(scope, key)].setText(single.get(key, text) if count == 1 else text)
+            self.buttons[(scope, "open")].setVisible(count != 1)  # com um só, "Abrir no leitor" já basta
 
-    def chosen(self):
-        """Selecionados, na ordem da lista; se nenhum, todos."""
+    def paths(self, scope):
+        """Na ordem da lista: todos, ou só os selecionados."""
         items = [self.list.item(i) for i in range(self.list.count())]
-        sel = [it for it in items if it.isSelected()]
-        return [it.data(Qt.UserRole) for it in (sel or items)]
+        if scope == "sel":
+            items = [it for it in items if it.isSelected()]
+        return [it.data(Qt.UserRole) for it in items]
+
+    def chosen(self):  # compatibilidade: selecionados, ou todos se nenhum
+        return self.paths("sel") or self.paths("all")
+
+    def run(self, action, scope):
+        paths = self.paths(scope)
+        if paths:
+            getattr(self, "do_" + action)(paths)
 
     def _name(self, paths):
         return impressora.title_of(paths[0]) if len(paths) == 1 else f"Documentos impressos {datetime.now():%d-%m-%Y %H%M}"
@@ -166,20 +182,22 @@ class PrinterQueueDialog(QDialog):
         out = os.path.join(tempfile.mkdtemp(prefix="dispersio-fila-"), self._name(paths) + ".pdf")
         return merge(paths, out)
 
-    # ------------------------------------------------------------------ ações
-    def merge_open(self):
-        paths = self.chosen()
-        if paths:
-            self.win.open_path(self._merged_temp(paths) if len(paths) > 1 else paths[0])
-
-    def open_each(self):
-        for p in self.chosen():
+    def _open(self, paths):
+        show = getattr(self.win, "show_main", None)
+        if show:
+            show()
+        for p in paths:
             self.win.open_path(p)
+        self.win.bring_to_front()
 
-    def save(self):
-        paths = self.chosen()
-        if not paths:
-            return
+    # ------------------------------------------------------------------ ações
+    def do_merge(self, paths):
+        self._open([self._merged_temp(paths) if len(paths) > 1 else paths[0]])
+
+    def do_open(self, paths):
+        self._open(paths)
+
+    def do_save(self, paths):
         start = os.path.join(self.win.settings.value("last_dir", "") or os.path.expanduser("~"), self._name(paths) + ".pdf")
         fn, _ = QFileDialog.getSaveFileName(self, "Salvar como PDF", start, "PDF (*.pdf)")
         if not fn:
@@ -193,30 +211,35 @@ class PrinterQueueDialog(QDialog):
         if QMessageBox.question(self, APP, f"Salvo em:\n{fn}\n\nTirar da fila o que foi salvo?") == QMessageBox.Yes:
             self._delete(paths)
 
-    def print_(self):
+    def do_print(self, paths):
         from .print_manager import PrintManager, Source
-        paths = self.chosen()
         sources = [Source(impressora.title_of(p) + ".pdf", pymupdf.open(p)) for p in paths]
-        if sources:
-            PrintManager(self, sources, "Imprimir" if len(sources) == 1 else f"Imprimir {len(sources)} documentos").exec()
+        PrintManager(self, sources, "Imprimir" if len(sources) == 1 else f"Imprimir {len(sources)} documentos").exec()
 
-    def mail(self):
-        paths = self.chosen()
-        if not paths:
-            return
+    def do_mail(self, paths):
         f = self._merged_temp(paths) if len(paths) > 1 else paths[0]
         if not send_mail(f, self._name(paths)):
             QMessageBox.information(self, APP, "Não encontrei um programa de e-mail configurado no Windows.\n"
                                                "Vou abrir a pasta com o arquivo para você anexar no e-mail.")
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(f)))
 
-    def remove(self):
-        paths = self.chosen()
-        if not paths:
-            return
-        what = "todos os documentos" if not self.list.selectedItems() and len(paths) > 1 else f"{len(paths)} documento(s)"
+    def do_remove(self, paths):
+        what = "todos os documentos" if len(paths) == self.list.count() and len(paths) > 1 else f"{len(paths)} documento(s)"
         if QMessageBox.question(self, APP, f"Tirar {what} da fila? Os arquivos serão apagados.") == QMessageBox.Yes:
             self._delete(paths)
+
+    # nomes antigos (testes e atalhos)
+    def save(self):
+        self.do_save(self.chosen())
+
+    def merge_open(self):
+        self.do_merge(self.chosen())
+
+    def open_each(self):
+        self.do_open(self.chosen())
+
+    def remove(self):
+        self.do_remove(self.chosen())
 
     def _delete(self, paths):
         for p in paths:

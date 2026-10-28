@@ -132,6 +132,22 @@ class MainWindow(QMainWindow):
             if key == "all":
                 b.setChecked(True)
         lay.addStretch()
+        # página atual / total de páginas do documento aberto
+        self.page_box = QWidget()
+        pl = QHBoxLayout(self.page_box)
+        pl.setContentsMargins(0, 0, 10, 0)
+        pl.setSpacing(5)
+        pl.addWidget(QLabel("Página"))
+        self.page_edit = QLineEdit()
+        self.page_edit.setFixedWidth(46)
+        self.page_edit.setAlignment(Qt.AlignCenter)
+        self.page_edit.setToolTip("Digite o número da página e tecle Enter para ir até ela")
+        self.page_edit.returnPressed.connect(self._page_typed)
+        self.page_total = QLabel("de 0")
+        pl.addWidget(self.page_edit)
+        pl.addWidget(self.page_total)
+        self.page_box.setVisible(False)
+        lay.addWidget(self.page_box)
         self.search = QLineEdit()
         self.search.setObjectName("Search")
         self.search.setPlaceholderText("Localizar texto  (Ctrl+F)")
@@ -292,6 +308,8 @@ class MainWindow(QMainWindow):
             self.tools.setVisible(not auto_hide)
 
     def _tab_changed(self, i):
+        if hasattr(self, "page_box"):
+            self.page_box.setVisible(0 < i < len(getattr(self, "tab_widgets", [])))
         if i <= 0 or i >= len(getattr(self, "tab_widgets", [])):
             self.stack.setCurrentWidget(self.home_scroll)
             self.home.refresh()
@@ -302,6 +320,7 @@ class MainWindow(QMainWindow):
         self.docs.setCurrentWidget(tab)
         self.setWindowTitle(f"{tab.title()} — {APP}")
         QTimer.singleShot(0, tab.nav.reposition)
+        self._show_page(tab)
 
     def _tab_moved(self, a, b):
         if a == 0 or b == 0:  # mantém Início na primeira posição
@@ -319,7 +338,24 @@ class MainWindow(QMainWindow):
         if self.cur() is tab:
             self.setWindowTitle(f"{tab.title()} — {APP}")
 
+    def _page_typed(self):
+        t = self.cur()
+        txt = self.page_edit.text().strip()
+        if t and txt.isdigit():
+            t.view.goto(max(1, min(int(txt), t.doc.page_count)) - 1)
+            t.view.setFocus()
+
+    def _show_page(self, tab, cur=None, total=None):
+        if tab is not self.cur():
+            return
+        cur = tab.view.current_page() if cur is None else cur
+        total = tab.doc.page_count if total is None else total
+        if not self.page_edit.hasFocus():
+            self.page_edit.setText(str(cur + 1))
+        self.page_total.setText(f"de {total}")
+
     def add_tab(self, tab):
+        tab.view.pageChanged.connect(lambda c, n, t=tab: self._show_page(t, c, n))
         tab.titleChanged.connect(lambda t=tab: self._retitle(t))
         tab.statusMsg.connect(lambda m: self.statusBar().showMessage(m, 6000))
         tab.view.request_tool = lambda name, **kw: self.run_tool(name, **kw)
@@ -726,8 +762,8 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
 
     def receive_printed(self, files):
-        """Chegou um documento pela impressora Dispersio PDF: mostra a fila com ele selecionado."""
-        self.bring_to_front()
+        """Chegou um documento pela impressora Dispersio PDF: mostra a fila (janela própria, sem abrir o leitor)
+        com ele selecionado."""
         self.tool_printer_queue(select=[os.path.abspath(f) for f in files])
 
     def check_default_app(self, force=False):

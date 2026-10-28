@@ -277,6 +277,13 @@ class NavPill(QWidget):
         self.view = view
         self.setObjectName("NavPill")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        from PySide6.QtGui import QColor as _QColor
+        sh = QGraphicsDropShadowEffect(self)  # destaca o controle sobre a página branca
+        sh.setBlurRadius(18)
+        sh.setOffset(0, 2)
+        sh.setColor(_QColor(0, 0, 0, 70))
+        self.setGraphicsEffect(sh)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 3, 8, 3)
         lay.setSpacing(2)

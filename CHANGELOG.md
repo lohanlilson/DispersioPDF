@@ -2,6 +2,12 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.15.0
+
+- **Fila da impressora em janela própria**: imprimir na "Dispersio PDF" abre só a fila, sem abrir o leitor. O leitor só abre quando você pede ("Abrir no leitor").
+- **Ações com todos ou só com os selecionados**: a fila tem dois grupos de botões, "Com todos os documentos" e "Só com os selecionados", para juntar, abrir, salvar, imprimir, enviar por e-mail ou tirar da fila — sem precisar selecionar tudo antes.
+- **Página atual e total de páginas** sempre visíveis no topo ("Página 5 de 12"): digite um número e tecle Enter para ir até a página. O controle do canto da página também ficou mais visível.
+
 ## 1.14.1
 
 - **Impressora Dispersio PDF corrigida**: quando a impressora era adicionada pelo programa, os documentos podiam ficar com "Erro" na fila de impressão do Windows e não chegar ao Dispersio.

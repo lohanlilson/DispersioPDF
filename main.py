@@ -192,10 +192,10 @@ def main():
         if msg.get("cmd") == "print":
             win.enqueue_print(msg.get("files", []), msg.get("printer", ""))
             return
-        show_window()
-        if msg.get("cmd") == "printed":
+        if msg.get("cmd") == "printed":  # impressora Dispersio PDF: só a janela da fila, sem abrir o leitor
             win.receive_printed(msg.get("files", []))
             return
+        show_window()
         for f in msg.get("files", []):
             win.open_path(f)
 
@@ -235,6 +235,12 @@ def main():
             handle(early.pop(0))
     QTimer.singleShot(0, flush_early)
 
+    win.show_main = show_window  # a fila da impressora abre o leitor só quando a pessoa pede
+    if req["cmd"] == "printed":
+        # aberto pelo agente da impressora: mostra só a fila; o programa fecha quando a fila e o leitor fecharem
+        QTimer.singleShot(0, lambda: win.receive_printed(paths))
+        return app.exec()
+
     if headless:
         # só imprime: sem janela; encerra sozinho quando a fila acabar (a menos que o usuário abra um PDF)
         def idle():
@@ -253,11 +259,8 @@ def main():
         for p in ([session] if isinstance(session, str) else session):
             if os.path.exists(p):
                 win.open_path(p)
-    if req["cmd"] == "printed":
-        QTimer.singleShot(300, lambda: win.receive_printed(paths))
-    else:
-        for p in paths:
-            win.open_path(p)
+    for p in paths:
+        win.open_path(p)
     QTimer.singleShot(1200, win.check_default_app)
     QTimer.singleShot(2500, win.printer_startup)
     QTimer.singleShot(4000, win.updater.auto_check)
