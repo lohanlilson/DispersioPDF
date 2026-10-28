@@ -150,8 +150,8 @@ def cli(argv):
     if "--install-printer" in argv:
         ok, msg = install()
         _log(f"instalar: {ok} {msg}")
-        if ok and "--no-agent" not in argv:
-            start_agent()
+        # o agente NÃO é iniciado aqui: este processo roda como administrador, e o agente precisa rodar com o
+        # nível normal do usuário (quem inicia é o programa, o instalador como usuário original ou o logon)
         return 0 if ok else 1
     ok, msg = uninstall()
     _log(f"remover: {ok} {msg}")
@@ -178,9 +178,18 @@ def agent_running():
     return False
 
 
+def _elevated():
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def start_agent():
-    """Inicia o agente (sem janela) se a impressora estiver instalada e ele ainda não estiver rodando."""
-    if not IS_WINDOWS or agent_running() or not is_installed():
+    """Inicia o agente (sem janela) se a impressora estiver instalada e ele ainda não estiver rodando.
+    Nunca como administrador: o spooler entrega o documento com o nível normal do usuário."""
+    if not IS_WINDOWS or agent_running() or not is_installed() or _elevated():
         return
     args = [exe_path(), "--printer-agent"] if getattr(sys, "frozen", False) else \
         [sys.executable, os.path.abspath(sys.argv[0]), "--printer-agent"]
@@ -265,9 +274,10 @@ def agent_main(send=None):
     except Exception:
         pass
     me = (os.environ.get("USERNAME") or "").lower()
-    # SYSTEM e administradores (spooler) e o próprio usuário podem escrever; os demais só leem
+    # SYSTEM, administradores e o usuário escrevem; o rótulo de integridade baixa (ML LW) permite a entrega mesmo
+    # se o agente estiver rodando como administrador (sem ele, o Windows bloqueia o spooler e a tarefa dá "Erro")
     sd = win32security.ConvertStringSecurityDescriptorToSecurityDescriptor(
-        "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GRGW;;;AU)", win32security.SDDL_REVISION_1)
+        "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GRGW;;;AU)S:(ML;;NW;;;LW)", win32security.SDDL_REVISION_1)
     sa = pywintypes.SECURITY_ATTRIBUTES()
     sa.SECURITY_DESCRIPTOR = sd
     _log("agente iniciado")

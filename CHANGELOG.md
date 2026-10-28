@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.14.1
+
+- **Impressora Dispersio PDF corrigida**: quando a impressora era adicionada pelo programa, os documentos podiam ficar com "Erro" na fila de impressão do Windows e não chegar ao Dispersio.
+
 ## 1.14.0
 
 - **Impressora Dispersio PDF** (como a do PDF24): aparece em todos os programas (Word, Excel, navegador…) e transforma o que você imprime em PDF. Cada documento entra numa **fila**, onde dá para mudar a ordem, **juntar tudo num PDF só**, salvar, abrir no Dispersio, imprimir numa impressora de verdade de uma vez ou enviar por e-mail. Na instalação há a opção "Adicionar a impressora"; quem atualizar recebe a pergunta uma vez; e dá para instalar ou remover depois em Preferências › Impressora Dispersio PDF.
