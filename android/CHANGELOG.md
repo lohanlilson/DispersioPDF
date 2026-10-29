@@ -1,5 +1,9 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.13.0
+
+- **Tradução no PDF mais fiel ao original**: a tradução não escreve mais por cima do parágrafo seguinte; o original é coberto com a cor do fundo; títulos ficam separados do texto; mesmo tamanho de letra no texto corrido; letra com serifa quando o original tem; títulos centralizados continuam centralizados; nomes de autores, e-mails, nome da revista e cabeçalhos não são mais traduzidos.
+
 ## 0.12.0
 
 - **Novo carimbo de assinatura**, igual ao do computador: cartão índigo com o prisma colorido, nome em destaque, data e motivo/local, com o CPF mascarado.

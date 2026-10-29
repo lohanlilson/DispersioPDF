@@ -14,6 +14,7 @@ import java.io.File
 data class TBlock(
     val page: Int, val rect: RectF, val text: String, val size: Float, val bold: Boolean,
     var keep: Boolean = false, var cont: Boolean = false, var why: String = "",
+    val serif: Boolean = false, val center: Boolean = false, val nlines: Int = 1,
 ) {
     val shown get() = Citacoes.plain(text)
 }
@@ -99,11 +100,13 @@ object DocAnalysis {
         c.startPage = page + 1; c.endPage = page + 1
         runCatching { c.getText(doc) }
         val out = ArrayList<TBlock>()
+        val pageW = doc.getPage(page).cropBox.width
         for (para in c.paras) {
-            var txt = ""
-            var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -1f; var b = -1f
-            var maxSize = 0f; var boldChars = 0; var chars = 0
+            val rows = ArrayList<LineInfo>()
             for (ln in para) {
+                var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -1f; var b = -1f
+                var maxSize = 0f; var boldChars = 0; var chars = 0; var serifChars = 0
+                var family = ""
                 val all = ln.flatten()
                 val big = all.maxOfOrNull { it.fontSizeInPt } ?: 0f
                 val bigH = all.maxOfOrNull { it.heightDir } ?: 0f
@@ -146,21 +149,56 @@ object DocAnalysis {
                         t = minOf(t, p.yDirAdj - p.heightDir * 1.15f); b = maxOf(b, p.yDirAdj + p.heightDir * 0.25f)
                         maxSize = maxOf(maxSize, p.fontSizeInPt)
                         chars++
-                        if (p.font?.name?.contains("Bold", true) == true) boldChars++
+                        val fn = p.font?.name.orEmpty()
+                        if (BOLD_FONT.containsMatchIn(fn)) boldChars++
+                        if (SERIF_FONT.containsMatchIn(fn)) serifChars++
+                        if (family.isEmpty()) family = fn.substringAfter('+').lowercase().split('-', ',', '.')[0].replace("bold", "")
                     }
                     prev = p; i++
                 }
-                var lineText = sb.toString()
-                lineText = lineText.trim()
-                if (lineText.isEmpty()) continue
-                txt = if (txt.endsWith("-") && lineText.first().isLowerCase()) txt.dropLast(1) + lineText
-                    else if (txt.isEmpty()) lineText else "$txt $lineText"
+                val lineText = sb.toString().trim()
+                if (lineText.isEmpty() || r < 0) continue
+                rows += LineInfo(lineText, RectF(l, t, r, b), if (maxSize > 0) maxSize else 10f, chars > 0 && boldChars > chars * 0.7f,
+                    serifChars > chars / 2, family)
             }
-            txt = txt.replace(Regex("[ \\t]+"), " ").trim()
-            if (txt.isEmpty() || r < 0) continue
-            out += TBlock(page, RectF(l, t, r, b), txt, if (maxSize > 0) maxSize else 10f, chars > 0 && boldChars > chars / 2)
+            // um parágrafo do PDFBox pode ter título + texto: separa pelas mudanças de tamanho, negrito e fonte
+            val groups = ArrayList<MutableList<LineInfo>>()
+            for (ln in rows) {
+                val g = groups.lastOrNull(); val pv = g?.lastOrNull()
+                val split = pv == null || kotlin.math.abs(ln.size - pv.size) > maxOf(ln.size, pv.size) * 0.15f || ln.bold != pv.bold ||
+                    (ln.family != pv.family && (g.size == 1 || ln.text.split(' ').size <= 8))
+                if (split) groups += mutableListOf(ln) else g!! += ln
+            }
+            for (g in groups) {
+                var txt = ""
+                for (ln in g) txt = if (txt.endsWith("-") && ln.text.first().isLowerCase()) txt.dropLast(1) + ln.text
+                    else if (txt.isEmpty()) ln.text else "$txt ${ln.text}"
+                txt = txt.replace(Regex("[ \\t]+"), " ").trim()
+                if (txt.isEmpty()) continue
+                val rect = RectF(g[0].rect); for (ln in g.drop(1)) rect.union(ln.rect)
+                val cx = (rect.left + rect.right) / 2
+                val center = if (g.size >= 2) g.all { kotlin.math.abs((it.rect.left + it.rect.right) / 2 - cx) < rect.width() * 0.03f } &&
+                    g.maxOf { it.rect.left } - g.minOf { it.rect.left } > rect.width() * 0.04f
+                    else kotlin.math.abs(cx - pageW / 2) < pageW * 0.02f && rect.width() < pageW * 0.8f
+                out += TBlock(page, rect, txt, g.maxOf { it.size }, g.count { it.bold } * 2 > g.size,
+                    serif = g.count { it.serif } * 2 > g.size, center = center, nlines = g.size)
+            }
         }
         return out
+    }
+
+    private class LineInfo(val text: String, val rect: RectF, val size: Float, val bold: Boolean, val serif: Boolean, val family: String)
+    private val BOLD_FONT = Regex("bold|black|heavy|semibold|demi|[.,-]b$|-bd|bd$|cmbx|medi", RegexOption.IGNORE_CASE)
+    private val SERIF_FONT = Regex("times|serif|roman|minion|georgia|cambria|garamond|palatino|charter|nimbusrom|cmr|lmroman|stix|" +
+        "utopia|baskerville|caslon|warnock|advtim", RegexOption.IGNORE_CASE)
+    private val EMAIL_URL = Regex("[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+|https?://\\S+|www\\.\\S+|doi\\.org/\\S+")
+
+    /** Linha de autores: nomes com iniciais maiúsculas, vírgulas e números de afiliação sobrescritos. */
+    private fun authors(text: String, words: List<String>): Boolean {
+        if (text.count { it == Citacoes.SUP } < 2 || ',' !in text || words.isEmpty()) return false
+        val particles = setOf("and", "e", "y", "de", "da", "do", "dos", "das", "van", "von")
+        return words.count { it[0].isUpperCase() || it.lowercase() in particles } >= words.size * 0.8 &&
+            !Regex("[.!?]\\s+[a-z]").containsMatchIn(Citacoes.plain(text))
     }
 
     fun readingOrder(blocks: List<TBlock>, width: Float, height: Float): List<TBlock> {
@@ -199,6 +237,19 @@ object DocAnalysis {
                 PAGE_NO.matches(t) -> { b.keep = true; b.why = "número da página" }
                 edge(b) && pages.size >= 2 && (cnt[key(b)] ?: 0) >= rep -> { b.keep = true; b.why = "cabeçalho/rodapé" }
                 Citacoes.KEEP.matches(t) || t.count { it.isLetter() } < 3 -> { b.keep = true; b.why = "números" }
+                else -> {
+                    val h = heights[b.page]!!
+                    val words = Regex("[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*").findAll(t).map { it.value }.toList()
+                    when {
+                        words.none { it.length >= 3 } -> { b.keep = true; b.why = "números" }
+                        (b.rect.bottom < h * 0.075f || b.rect.top > h * 0.94f) && words.size <= 20 -> { b.keep = true; b.why = "cabeçalho/rodapé" }
+                        authors(b.text, words) -> { b.keep = true; b.why = "autores" }
+                        EMAIL_URL.containsMatchIn(t) && EMAIL_URL.replace(t, " ").trim().split(Regex("\\s+")).size <= 6 ->
+                            { b.keep = true; b.why = "e-mail/endereço" }
+                        (Citacoes.SUP in b.text || Regex("[∗*†‡§]").containsMatchIn(t)) && words.size in 2..5 && words.all { it[0].isUpperCase() } ->
+                            { b.keep = true; b.why = "nome" }
+                    }
+                }
             }
         }
         var inRefs = false
@@ -240,11 +291,13 @@ object DocAnalysis {
 
 /** Escreve a tradução por cima do texto original (imagens e desenhos ficam): cópia do PDF só para leitura. */
 object TranslatedPdf {
-    private fun font(doc: PDDocument, ctx: Context, bold: Boolean): PDFont =
-        ctx.assets.open(if (bold) "fontes/LiberationSans-Bold.ttf" else "fontes/LiberationSans-Regular.ttf").use { PDType0Font.load(doc, it) }
+    private fun font(doc: PDDocument, ctx: Context, serif: Boolean, bold: Boolean): PDFont {
+        val fam = if (serif) "LiberationSerif" else "LiberationSans"
+        return ctx.assets.open("fontes/$fam-${if (bold) "Bold" else "Regular"}.ttf").use { PDType0Font.load(doc, it) }
+    }
 
     private fun clean(f: PDFont, s: String): String = buildString {
-        for (ch in s) append(if (runCatching { f.getStringWidth(ch.toString()) }.isSuccess) ch else '?')
+        for (ch in s.replace('∗', '*')) append(if (runCatching { f.getStringWidth(ch.toString()) }.isSuccess) ch else '?')
     }
 
     private fun wrap(f: PDFont, text: String, size: Float, width: Float): List<String> {
@@ -257,40 +310,97 @@ object TranslatedPdf {
         return out
     }
 
+    /** Cor de fundo de cada bloco (a mais comum entre os pixels da página renderizada), para cobrir o original. */
+    private fun backgrounds(doc: PDDocument, page: Int, rects: List<RectF>): List<FloatArray> {
+        val white = rects.map { floatArrayOf(1f, 1f, 1f) }
+        return runCatching {
+            val bmp = com.tom_roush.pdfbox.rendering.PDFRenderer(doc).renderImage(page, 1f)
+            try {
+                rects.map { r ->
+                    val counts = HashMap<Int, Int>()
+                    val x0 = r.left.toInt().coerceIn(0, bmp.width - 1); val x1 = r.right.toInt().coerceIn(0, bmp.width - 1)
+                    val y0 = r.top.toInt().coerceIn(0, bmp.height - 1); val y1 = r.bottom.toInt().coerceIn(0, bmp.height - 1)
+                    val step = maxOf(1, minOf(x1 - x0, y1 - y0) / 12)
+                    var y = y0
+                    while (y <= y1) { var x = x0; while (x <= x1) {
+                        val c = bmp.getPixel(x, y)
+                        val q = (minOf(255, ((c shr 16 and 255) + 4) / 8 * 8) shl 16) or (minOf(255, ((c shr 8 and 255) + 4) / 8 * 8) shl 8) or
+                            minOf(255, ((c and 255) + 4) / 8 * 8)
+                        counts[q] = (counts[q] ?: 0) + 1; x += step }; y += step }
+                    val q = counts.maxByOrNull { it.value }?.key ?: 0xFFFFFF
+                    floatArrayOf((q shr 16 and 255) / 255f, (q shr 8 and 255) / 255f, (q and 255) / 255f)
+                }
+            } finally { bmp.recycle() }
+        }.getOrDefault(white)
+    }
+
+    private class Plan(val b: TBlock, val text: String, val f: PDFont, val left: Float, val width: Float, val height: Float,
+                       val bg: FloatArray, var size: Float)
+
     fun build(ctx: Context, src: File, password: String?, out: File, pages: Map<Int, List<Pair<TBlock, String?>>>) {
         PDDocument.load(src, password ?: "").use { doc ->
             doc.isAllSecurityToBeRemoved = true
-            val regular = font(doc, ctx, false); val bold = font(doc, ctx, true)
+            val fonts = HashMap<String, PDFont>()
+            fun f(serif: Boolean, bold: Boolean) = fonts.getOrPut("$serif$bold") { font(doc, ctx, serif, bold) }
             for ((p, items) in pages) {
                 val page = doc.getPage(p)
                 if (page.rotation % 360 != 0) continue
                 val box = page.cropBox
                 val todo = items.filter { (b, t) -> t != null && !b.keep }
                 if (todo.isEmpty()) continue
+                val bgs = backgrounds(doc, p, todo.map { it.first.rect })
+                val others = items.map { it.first.rect }
+                val bottom = box.height * 0.94f
+                val plans = todo.mapIndexed { k, (b, t0) ->
+                    val font = f(b.serif, b.bold)
+                    val t = clean(font, t0!!)
+                    var left = b.rect.left; var w = b.rect.width()
+                    if (b.nlines <= 1 && b.center) {          // título centralizado: cresce igual para os dois lados
+                        val grow = minOf(b.rect.left - 36, box.width - 36 - b.rect.right).coerceAtLeast(0f)
+                        left -= grow; w += grow * 2
+                    } else if (b.nlines <= 1) {               // título de uma linha: pode crescer até a margem
+                        val limit = box.width - 36 - b.rect.left
+                        val blocker = others.filter { it !== b.rect && it.left > b.rect.right && it.top < b.rect.bottom && it.bottom > b.rect.top }
+                        w = maxOf(w, (blocker.minOfOrNull { it.left - 4 - b.rect.left } ?: limit))
+                    }
+                    // e para baixo, até o próximo bloco (o português costuma ser ~20% mais longo)
+                    val below = others.filter { it !== b.rect && it.top >= b.rect.bottom - 1 && it.left < left + w - 2 && it.right > left + 2 }
+                        .minOfOrNull { it.top } ?: bottom
+                    val h = (maxOf(b.rect.height(), minOf(below, bottom) - 2 - b.rect.top))
+                        .coerceAtMost(b.rect.height() + maxOf(b.rect.height() * 0.6f, b.size * 3))
+                    // maior tamanho de letra em que o texto cabe
+                    var size = b.size
+                    while (size > b.size * 0.3f && wrap(font, t, size, w).size * size * 1.15f > h + size * 0.2f) size *= 0.96f
+                    Plan(b, t, font, left, w, h, bgs[k], size / b.size)
+                }
+                // mesmo tamanho de letra para o texto corrido da página
+                val body = plans.filter { !it.b.bold && it.b.nlines >= 2 }
+                if (body.isNotEmpty()) {
+                    val ref = body.map { it.b.size }.sorted()[body.size / 2]
+                    val similar = body.filter { kotlin.math.abs(it.b.size - ref) <= ref * 0.12f }
+                    if (similar.isNotEmpty()) {
+                        val common = similar.map { it.size }.sorted()[similar.size / 5]
+                        for (pl in similar) pl.size = minOf(pl.size, common)
+                    }
+                }
                 PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
-                    for ((b, _) in todo) {
-                        cs.setNonStrokingColor(1f, 1f, 1f)
-                        cs.addRect(box.lowerLeftX + b.rect.left - 1, box.upperRightY - b.rect.bottom - 1, b.rect.width() + 2, b.rect.height() + 2)
+                    for (pl in plans) {                        // primeiro cobre todos os originais, depois escreve
+                        cs.setNonStrokingColor(pl.bg[0], pl.bg[1], pl.bg[2])
+                        cs.addRect(box.lowerLeftX + pl.b.rect.left - 1, box.upperRightY - pl.b.rect.bottom - 0.8f, pl.b.rect.width() + 2, pl.b.rect.height() + 1.6f)
                         cs.fill()
                     }
-                    cs.setNonStrokingColor(0.08f, 0.08f, 0.08f)
-                    for ((b, t0) in todo) {
-                        val f = if (b.bold) bold else regular
-                        val t = clean(f, t0!!)
-                        var w = b.rect.width()
-                        if (b.rect.height() < b.size * 2) {     // título de uma linha: pode crescer até a margem
-                            val limit = box.width - 36 - b.rect.left
-                            val blocker = items.map { it.first.rect }.filter { it !== b.rect && it.left > b.rect.right && it.top < b.rect.bottom && it.bottom > b.rect.top }
-                            w = maxOf(w, (blocker.minOfOrNull { it.left - 4 - b.rect.left } ?: limit))
-                        }
-                        var size = b.size * 0.95f
-                        var lines = wrap(f, t, size, w)
-                        while (size > b.size * 0.45f && lines.size * size * 1.15f > b.rect.height() + size * 0.3f) {
-                            size *= 0.94f; lines = wrap(f, t, size, w)
-                        }
-                        var y = box.upperRightY - b.rect.top - size
-                        for (ln in lines) {
-                            cs.beginText(); cs.setFont(f, size); cs.newLineAtOffset(box.lowerLeftX + b.rect.left, y); cs.showText(ln); cs.endText()
+                    for (pl in plans) {
+                        val lum = 0.299f * pl.bg[0] + 0.587f * pl.bg[1] + 0.114f * pl.bg[2]
+                        if (lum > 0.5f) cs.setNonStrokingColor(0.08f, 0.08f, 0.08f) else cs.setNonStrokingColor(1f, 1f, 1f)
+                        val size = pl.b.size * pl.size
+                        val lines = wrap(pl.f, pl.text, size, pl.width)
+                        val maxLines = maxOf(1, ((pl.height + size * 0.2f) / (size * 1.15f)).toInt())
+                        var y = box.upperRightY - pl.b.rect.top - size
+                        for ((k, ln) in lines.withIndex()) {
+                            if (k >= maxLines) break           // nunca escreve por cima do bloco seguinte
+                            val lw = runCatching { pl.f.getStringWidth(ln) / 1000f * size }.getOrDefault(0f)
+                            val x = if (pl.b.center) pl.left + (pl.width - lw) / 2 else pl.left
+                            cs.beginText(); cs.setFont(pl.f, size); cs.newLineAtOffset(box.lowerLeftX + x, y); cs.showText(ln); cs.endText()
                             y -= size * 1.15f
                         }
                     }

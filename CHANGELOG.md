@@ -2,6 +2,17 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.16.0
+
+- **Tradução no PDF bem mais fiel ao original**:
+  - o texto original não aparece mais por baixo da tradução (mesmo em PDFs que não deixam apagar o texto, ele é coberto com a cor do fundo da página);
+  - títulos e rótulos ("Background", "Results", "3.1 …") ficam separados do parágrafo, e o texto corrido da página usa o mesmo tamanho de letra;
+  - mantém a cor (texto branco em faixa colorida continua branco), a serifa, o alinhamento justificado ou centralizado;
+  - quando o português fica mais longo, o texto usa o espaço livre logo abaixo em vez de diminuir demais;
+  - tabelas traduzidas célula por célula, sem misturar as colunas; nomes científicos em itálico ficam como estão;
+  - nomes de autores, e-mails, endereços, nome da revista e selos ("Check for updates") não são mais traduzidos;
+  - símbolos como ≠ ≈ √ ∑ θ µ ∗ °C não somem nem viram outra coisa, e números que o tradutor deixava cair voltam para o lugar.
+
 ## 1.15.0
 
 - **Fila da impressora em janela própria**: imprimir na "Dispersio PDF" abre só a fila, sem abrir o leitor. O leitor só abre quando você pede ("Abrir no leitor").

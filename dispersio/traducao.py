@@ -263,6 +263,70 @@ def plain(text):
     return _SUP_RE.sub(lambda m: m.group(1).strip().translate(_SUPER), text)
 
 
+# Símbolos que o tradutor perde ou troca por outra coisa (≠ virava "7,6%", √ virava "?"): saem da frase como um
+# código que ele copia sem mexer (ZQX1, ZQX2…) e voltam depois.
+_SAFE_SYMBOLS = set("†‡§¶•→←↔≤≥±×°αβγδελπσωμ′“”‘’–—…%")
+_PH = re.compile(r"ZQX(\d+)")
+
+
+def _unsafe(ch):
+    import unicodedata
+    if ch in _SAFE_SYMBOLS or ch.isspace():
+        return False
+    cat = unicodedata.category(ch)
+    return cat in ("Sm", "So", "Sk", "Co") or "\u0370" <= ch <= "\u03ff" or ch in "∗µ℃‰″÷"
+
+
+def _lost_numbers(src, out):
+    from collections import Counter
+    a = Counter(re.findall(r"\d+", src))
+    b = Counter(re.findall(r"\d+", out))
+    return any(b[k] < v for k, v in a.items())
+
+
+def _protect(text, numbers=False):
+    """Troca os símbolos frágeis por códigos. Guarda se o símbolo estava grudado no texto seguinte ("µm", "∗Equal").
+    Com numbers=True, também os números (usado só quando o tradutor perdeu algum)."""
+    kept = []
+
+    def sub(m):
+        nxt = text[m.end():m.end() + 1]
+        kept.append((m.group(0), bool(nxt) and not nxt.isspace()))
+        return f" ZQX{len(kept)} "
+    if numbers:
+        def num(m):
+            v = m.group(0)
+            if re.fullmatch(r"\d+\.\d+", v):
+                v = v.replace(".", ",")  # decimal no padrão brasileiro
+            nxt = text[m.end():m.end() + 1]
+            kept.append((v, bool(nxt) and not nxt.isspace() and nxt not in ",.;:)"))
+            return f" ZQX{len(kept)} "
+        text = re.sub(r"\d+(?:[.,]\d+)*", num, text)
+    out = re.sub(r"[^\sA-Za-z0-9À-ÖØ-öø-ÿ.,;:!?()\[\]'\"/-](?:\s?[^\sA-Za-z0-9À-ÖØ-öø-ÿ.,;:!?()\[\]'\"/-])*",
+                 lambda m: sub(m) if any(_unsafe(c) for c in m.group(0)) else m.group(0), text)
+    return re.sub(r" {2,}", " ", out).strip(), kept
+
+
+def _unprotect(text, kept):
+    if not kept:
+        return text
+    used = set()
+
+    def back(m):
+        k = int(m.group(1))
+        used.add(k)
+        if not 0 < k <= len(kept):
+            return ""
+        sym, glued = kept[k - 1]
+        return sym + ("\x00" if glued else "")
+    out = _PH.sub(back, text)
+    out = re.sub(r"\x00\s*", "", out)
+    missing = [kept[k - 1][0] for k in range(1, len(kept) + 1) if k not in used]
+    if missing:  # o tradutor descartou o código: devolve o símbolo no fim da frase, para não sumir
+        out = out.rstrip() + " " + " ".join(missing)
+    return re.sub(r"\s+([.,;:!?)])", r"\1", out)
+
+
 def translate_paragraphs(paras, path, dst=None, glossary=None):
     """Traduz parágrafos seguindo a rota de pacotes. Citações e números sobrescritos ficam fora da tradução e voltam
     no fim de cada frase; números, fórmulas e referências curtas ficam iguais."""
@@ -275,10 +339,23 @@ def translate_paragraphs(paras, path, dst=None, glossary=None):
         todo = [i for i, (c, _) in enumerate(pieces) if len(re.findall(r"[A-Za-zÀ-ÿ]", c)) >= 2]
         done = {}
         if todo:
-            sents = [pieces[i][0] for i in todo]
+            protected = [_protect(pieces[i][0]) for i in todo]
+            sents = [p for p, _ in protected]
             for pair in path:
                 sents = _engine(pair).run(sents)
-            done = dict(zip(todo, sents))
+            done = {i: _unprotect(t, kept) for i, t, (_p, kept) in zip(todo, sents, protected)}
+            # o tradutor às vezes some com um número ("n = 4, 0.27%" → "n = , 0,27%"): refaz essas frases com os
+            # números protegidos
+            redo = [i for i in todo if _lost_numbers(pieces[i][0], done[i])]
+            if redo:
+                prot = [_protect(pieces[i][0], numbers=True) for i in redo]
+                ss = [p for p, _ in prot]
+                for pair in path:
+                    ss = _engine(pair).run(ss)
+                for i, t, (_p, kept) in zip(redo, ss, prot):
+                    t = _unprotect(t, kept)
+                    if not _lost_numbers(pieces[i][0], t):
+                        done[i] = t
         res = []
         for i, (clean, cites) in enumerate(pieces):
             res.append(join_citations(done.get(i, clean), cites))
@@ -305,6 +382,12 @@ class Block:
     keep: bool = False      # não traduzir (referências, cabeçalho/rodapé, números)
     cont: bool = False      # continua o parágrafo anterior (outra coluna ou página)
     why: str = ""
+    color: int = 0          # cor do texto original (0xRRGGBB)
+    serif: bool = False     # letra com serifa (Times, Minion…)
+    justify: bool = False   # parágrafo justificado
+    center: bool = False    # linhas centralizadas (título, legenda)
+    cell: bool = False      # célula de tabela (não cresce para os lados)
+    nlines: int = 1
 
     @property
     def shown(self):
@@ -319,46 +402,240 @@ _AFTER_REFS = re.compile(r"^\s*(?:\d+\.?\s*)?(?:appendix|appendices|ap[êe]ndice
 _PAGE_NO = re.compile(r"^\s*(?:p(?:age|ágina|ag)?\.?\s*)?\d{1,4}(?:\s*(?:of|de|/)\s*\d{1,4})?\s*$", re.I)
 
 
+_SERIF = re.compile(r"times|serif|roman|minion|georgia|cambria|garamond|palatino|book|charter|nimbusrom|cmr|lmroman|"
+                    r"stix|mathpazo|utopia|baskerville|caslon|liberationserif|dejavuserif|warnock|adv[a-z]*tim", re.I)
+
+
+# negrito pelo nome da fonte (muitos PDFs de revista não marcam o negrito: "…AdvTT.B", "Arial,Bold", "CMBX10")
+_BOLD_FONT = re.compile(r"bold|black|heavy|semibold|demi|[.,-]b$|-bd|bd$|cmbx|medi", re.I)
+
+
+_SERIF_CACHE = {}
+
+
+def _font_is_serif(page, name):
+    """Serifa pelo nome; se o nome for embaralhado (comum em revistas: "TvjcpxAdvTT86d…"), pelo desenho da letra "l":
+    com serifa, a base é bem mais larga que a haste."""
+    if _SERIF.search(name):
+        return True
+    if re.search(r"sans|helvet|arial|myriad|frutiger|calibri|verdana|segoe|roboto|open|lato|source|gothic|univers|"
+                 r"futura|gill|tahoma|liberationsans|dejavusans|cmss", name, re.I):
+        return False
+    key = (id(page.parent), name)
+    if key in _SERIF_CACHE:
+        return _SERIF_CACHE[key]
+    res = False
+    try:
+        import pymupdf
+        xref = next((f[0] for f in page.get_fonts() if f[3].split("+")[-1] == name or f[3] == name), None)
+        if xref:
+            _n, _e, _t, buf = page.parent.extract_font(xref)
+            if buf:
+                font = pymupdf.Font(fontbuffer=buf)
+                for ch in "lI":
+                    if not font.has_glyph(ord(ch)):
+                        continue
+                    tmp = pymupdf.open()
+                    pg = tmp.new_page(width=120, height=140)
+                    tw = pymupdf.TextWriter(pg.rect)
+                    tw.append((20, 110), ch, font=font, fontsize=100)
+                    tw.write_text(pg)
+                    pix = pg.get_pixmap(alpha=False)
+                    rows = []
+                    for y in range(pix.height):
+                        n = sum(1 for x in range(pix.width) if pix.pixel(x, y)[0] < 128)
+                        if n:
+                            rows.append(n)
+                    if len(rows) > 20:
+                        stem = sorted(rows)[len(rows) // 2]
+                        res = max(rows[-4:]) > stem * 1.8
+                    break
+    except Exception:
+        res = False
+    _SERIF_CACHE[key] = res
+    return res
+
+
+def _family(spans):
+    """Família da fonte da linha, sem prefixo de subconjunto nem estilo ("ABCDEF+MinionPro-Bold" → "minionpro")."""
+    if not spans:
+        return ""
+    name = spans[0]["font"].split("+")[-1].lower()
+    return re.split(r"[-,.]", name)[0].replace("bold", "").replace("italic", "")
+
+
+def _line_info(ln):
+    """(texto com marcas de sobrescrito, tamanho, negrito?, spans de texto normal) de uma linha do PyMuPDF."""
+    spans = [sp for sp in ln["spans"] if sp["text"]]
+    if not spans:
+        return None
+    big = max(sp["size"] for sp in spans)
+    parts, normal = [], []
+    for sp in spans:
+        t = sp["text"].replace("\u02da", "°")  # anel sobrescrito usado como grau (50.5˚C)
+        sup = (sp["flags"] & 1 or sp["size"] < big * 0.78) and re.fullmatch(r"\s*[\d,;\-–*†‡§]{1,15}\s*", t) \
+            and re.search(r"\d", t)
+        if sup:
+            parts.append(_SUP + t.strip() + _SUP_END)
+        else:
+            parts.append(t)
+            normal.append(sp)
+    text = "".join(parts).strip()
+    if not text or not normal:
+        return None
+    chars = sum(len(sp["text"].strip()) for sp in normal) or 1
+    bold = sum(len(sp["text"].strip()) for sp in normal
+               if sp["flags"] & 16 or _BOLD_FONT.search(sp["font"])) > chars * 0.7
+    size = max(sp["size"] for sp in normal)
+    return text, size, bold, normal
+
+
+def _centered(g, rect, page_w):
+    """Linhas centralizadas: com várias linhas, os centros coincidem e as margens esquerdas variam; com uma linha só,
+    o texto está no meio da página."""
+    rs = [r for _li, r in g]
+    cx = (rect.x0 + rect.x1) / 2
+    if len(rs) >= 2:
+        return all(abs((r.x0 + r.x1) / 2 - cx) < rect.width * 0.03 for r in rs) and \
+            max(r.x0 for r in rs) - min(r.x0 for r in rs) > rect.width * 0.04
+    return abs(cx - page_w / 2) < page_w * 0.02 and rect.width < page_w * 0.8
+
+
 def _raw_blocks(page, pno):
+    """Parágrafos da página. Um bloco do PyMuPDF pode ter título + texto, ou vários parágrafos: separa pelas mudanças
+    de tamanho/negrito da letra, pelo espaço entre linhas e pela linha curta que termina a frase."""
     import pymupdf
+    from collections import Counter
     out = []
     d = page.get_text("dict", flags=pymupdf.TEXT_DEHYPHENATE)
-    for b in d["blocks"]:
-        if b.get("type") != 0:
+    # tabelas: cada célula vira um bloco próprio (sem isso, a linha inteira da tabela vira um parágrafo só)
+    trects = []
+    try:
+        # pelas linhas da tabela (sem falso positivo em texto corrido); a busca pelo texto completa a área
+        # quando a tabela só tem linhas horizontais (estilo de revista)
+        ruled = [pymupdf.Rect(t.bbox) for t in page.find_tables().tables if t.row_count >= 2 and t.col_count >= 2]
+        if ruled:
+            textual = [pymupdf.Rect(t.bbox) for t in page.find_tables(strategy="text").tables]
+            for r in ruled:
+                for x in textual:
+                    if (r & x).get_area() > r.get_area() * 0.5:
+                        r |= x
+                trects.append(r)
+    except Exception:
+        trects = []
+
+    def in_table(r):
+        c = pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
+        return any(c in tr for tr in trects)
+    # dentro da tabela, cada pedaço de texto separado por um vão largo é uma célula
+    allspans = [sp for blk in d["blocks"] if blk.get("type") == 0 for ln in blk["lines"] for sp in ln["spans"]
+                if sp["text"].strip()]
+    for tr in trects:
+        words = page.get_text("words", clip=tr)
+        rows = {}
+        for w in words:
+            rows.setdefault((w[5], w[6]), []).append(w)
+        for ws in rows.values():
+            ws.sort(key=lambda w: w[0])
+            seg = [ws[0]]
+            segs = []
+            for w in ws[1:]:
+                if w[0] - seg[-1][2] > (w[3] - w[1]) * 0.5:
+                    segs.append(seg)
+                    seg = []
+                seg.append(w)
+            segs.append(seg)
+            for k, sg in enumerate(segs):
+                r = pymupdf.Rect(sg[0][:4])
+                for w in sg[1:]:
+                    r |= pymupdf.Rect(w[:4])
+                # a célula vai até a próxima coluna (o português é mais comprido)
+                r.x1 = max(r.x1, (segs[k + 1][0][0] - 4) if k + 1 < len(segs) else tr.x1)
+                inner = pymupdf.Rect(sg[0][:4])
+                for w in sg[1:]:
+                    inner |= pymupdf.Rect(w[:4])
+                sps = [sp for sp in allspans if pymupdf.Point((sp["bbox"][0] + sp["bbox"][2]) / 2,
+                                                             (sp["bbox"][1] + sp["bbox"][3]) / 2) in inner + (-1, -1, 1, 1)]
+                if not sps:
+                    continue
+                txt = " ".join(w[4] for w in sg)
+                n_all = sum(len(sp["text"].strip()) for sp in sps) or 1
+                italic = sum(len(sp["text"].strip()) for sp in sps
+                             if sp["flags"] & 2 or re.search(r"italic|oblique|\.i$|-it$", sp["font"], re.I)) >= n_all * 0.7
+                bold = all(sp["flags"] & 16 or _BOLD_FONT.search(sp["font"]) for sp in sps)
+                blk = Block(pno, r, txt, max(sp["size"] for sp in sps), bold, color=sps[0]["color"],
+                            serif=_font_is_serif(page, sps[0]["font"]), nlines=1, cell=True)
+                if italic:
+                    blk.keep, blk.why = True, "nome científico"   # itálico na tabela: espécie, gênero
+                out.append(blk)
+    for blk in d["blocks"]:
+        if blk.get("type") != 0:
             continue
         lines = []
-        spans_all = []
-        for ln in b["lines"]:
-            spans = [sp for sp in ln["spans"] if sp["text"]]
-            if not spans:
+        for ln in blk["lines"]:
+            if ln.get("dir", (1, 0))[0] < 0.9:  # texto vertical/inclinado (marca d'água, rótulo de eixo) fica
                 continue
-            big = max(sp["size"] for sp in spans)
-            parts = []
-            for sp in spans:
-                t = sp["text"]
-                sup = (sp["flags"] & 1 or sp["size"] < big * 0.78) and re.fullmatch(r"\s*[\d,;\-–*†‡§]{1,15}\s*", t) \
-                    and re.search(r"\d", t)
-                if sup:
-                    parts.append(_SUP + t.strip() + _SUP_END)
-                else:
-                    parts.append(t)
-                    spans_all.append(sp)
-            s = "".join(parts).strip()
-            if s:
-                lines.append(s)
+            if trects and in_table(pymupdf.Rect(ln["bbox"])):
+                continue
+            li = _line_info(ln)
+            if li:
+                lines.append((li, pymupdf.Rect(ln["bbox"])))
         if not lines:
             continue
-        txt = ""
-        for ln in lines:
-            if txt.endswith("-") and ln[:1].islower():
-                txt = txt[:-1] + ln
-            else:
-                txt = (txt + " " + ln) if txt else ln
-        txt = re.sub(r"[ \t]+", " ", txt).strip()
-        size = max((sp["size"] for sp in spans_all), default=10)
-        chars = sum(len(sp["text"]) for sp in spans_all) or 1
-        bold = sum(len(sp["text"]) for sp in spans_all if sp["flags"] & 16 or "bold" in sp["font"].lower()) > chars / 2
-        out.append(Block(pno, pymupdf.Rect(b["bbox"]), txt, size, bold))
+        width = max(r.x1 for _, r in lines) - min(r.x0 for _, r in lines)
+        # distância normal entre linhas deste bloco (o espaço entre parágrafos é medido contra ela)
+        pitches = sorted(b2.y0 - b1.y0 for (_l1, b1), (_l2, b2) in zip(lines, lines[1:]) if b2.y0 - b1.y0 > b1.height * 0.5)
+        pitch = pitches[len(pitches) // 2] if pitches else None
+        groups, cur = [], []
+        for (li, r) in lines:
+            if cur:
+                (pt, psz, pbold, _), pr = cur[-1]
+                text, size, bold, _ = li
+                lh = max(pr.height, 1)
+                same_row = r.y0 < pr.y1 - lh * 0.5  # spans lado a lado na mesma linha
+                new = False
+                if not same_row:
+                    if abs(size - psz) > max(psz, size) * 0.15 or bold != pbold:
+                        new = True                                       # título / rótulo × texto
+                    elif _family(li[3]) != _family(cur[-1][0][3]) and (len(cur) == 1 or len(plain(text).split()) <= 8):
+                        new = True                                       # outra fonte (título "3. Results" × "3.1 …")
+                    elif pitch and r.y0 - pr.y0 > pitch + lh * 0.45:
+                        new = True                                       # espaço entre parágrafos
+                    elif re.search(r"[.!?:]\s*$", plain(pt)) and pr.width < width * 0.72 and text[:1].isupper():
+                        new = True                                       # linha curta no fim da frase
+                    elif len(cur) == 1 and pr.width < width * 0.45 and len(plain(pt).split()) <= 6 \
+                            and not re.search(r"[.,;:]\s*$", plain(pt)) and pt[:1].isupper():
+                        new = True                                       # título curto numa linha só
+                if new:
+                    groups.append(cur)
+                    cur = []
+            cur.append((li, r))
+        groups.append(cur)
+        for g in groups:
+            txt = ""
+            for (t, *_), _r in g:
+                if txt.endswith("-") and t[:1].islower():
+                    txt = txt[:-1] + t
+                else:
+                    txt = (txt + " " + t) if txt else t
+            txt = re.sub(r"[ \t]+", " ", txt).strip()
+            spans = [sp for (li, _r) in g for sp in li[3]]
+            rect = pymupdf.Rect(g[0][1])
+            for _li, r in g[1:]:
+                rect |= r
+            size = max(li[1] for li, _r in g)
+            bold = sum(li[2] for li, _r in g) > len(g) / 2
+            colors = Counter()
+            fonts = Counter()
+            for sp in spans:
+                colors[sp["color"]] += len(sp["text"])
+                fonts[_font_is_serif(page, sp["font"])] += len(sp["text"])
+            rows = sorted({round(r.y0) for _li, r in g})
+            full = sum(1 for _li, r in g[:-1] if r.width > rect.width * 0.92)
+            out.append(Block(pno, rect, txt, size, bold, color=colors.most_common(1)[0][0] if colors else 0,
+                             serif=fonts[True] > fonts[False], justify=len(rows) >= 3 and full >= (len(g) - 1) * 0.6,
+                             center=_centered(g, rect, page.rect.width),
+                             nlines=len(rows)))
     return out
 
 
@@ -393,8 +670,21 @@ def _reading_order(blocks, width, height=None):
     return out
 
 
+_EMAIL_URL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+|https?://\S+|www\.\S+|doi\.org/\S+")
+
+
+def _authors(text, words):
+    """Linha de autores: nomes com iniciais maiúsculas, vírgulas e números de afiliação sobrescritos."""
+    sups = text.count(_SUP)
+    if sups < 2 or "," not in text or not words:
+        return False
+    caps = sum(1 for w in words if w[0].isupper() or w.lower() in ("and", "e", "y", "de", "da", "do", "dos", "das", "van", "von"))
+    return caps >= len(words) * 0.8 and not re.search(r"[.!?]\s+[a-z]", plain(text))
+
+
 def analyze(doc, pages=None):
     """{página: [Block]} na ordem de leitura, marcando o que não se traduz e o que continua o parágrafo anterior."""
+    import pymupdf
     pages = list(pages) if pages is not None else list(range(doc.page_count))
     per = {}
     for p in pages:
@@ -406,15 +696,33 @@ def analyze(doc, pages=None):
     edge = lambda b: b.rect.y1 < doc[b.page].rect.height * 0.085 or b.rect.y0 > doc[b.page].rect.height * 0.915  # noqa: E731
     cnt = Counter(key(b) for bl in per.values() for b in bl if edge(b))
     rep = max(2, int(len(pages) * 0.3 + 0.5))
+    images = {}
+    for p in per:
+        try:
+            images[p] = [pymupdf.Rect(i["bbox"]) for i in doc[p].get_image_info()]
+        except Exception:
+            images[p] = []
     for bl in per.values():
         for b in bl:
             t = plain(b.text)
+            h = doc[b.page].rect.height
+            words = re.findall(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*", t)
             if _PAGE_NO.match(t):
                 b.keep, b.why = True, "número da página"
             elif edge(b) and len(pages) >= 2 and cnt[key(b)] >= rep:
                 b.keep, b.why = True, "cabeçalho/rodapé"
-            elif _KEEP.match(t) or len(re.findall(r"[A-Za-zÀ-ÿ]", t)) < 3:
+            elif _KEEP.match(t) or len(re.findall(r"[A-Za-zÀ-ÿ]", t)) < 3 or not any(len(w) >= 3 for w in words):
                 b.keep, b.why = True, "números"
+            elif (b.rect.y1 < h * 0.075 or b.rect.y0 > h * 0.94) and len(words) <= 20:
+                b.keep, b.why = True, "cabeçalho/rodapé"          # nome da revista, logotipo, DOI
+            elif any((b.rect & r).get_area() > b.rect.get_area() * 0.5 for r in images.get(b.page, [])):
+                b.keep, b.why = True, "dentro de imagem"          # selos e logotipos ("Check for updates")
+            elif _authors(b.text, words):
+                b.keep, b.why = True, "autores"
+            elif len(_EMAIL_URL.sub(" ", t).split()) <= 6 and _EMAIL_URL.search(t):
+                b.keep, b.why = True, "e-mail/endereço"            # o tradutor inventa endereços
+            elif (_SUP in b.text or re.search(r"[∗*†‡§]", t)) and 1 < len(words) <= 5 and all(w[0].isupper() for w in words):
+                b.keep, b.why = True, "nome"                       # "Llion Jones*", "Illia Polosukhin* ‡"
     # lista de referências: do título "References" em diante (até um apêndice)
     in_refs = False
     for p in pages:
@@ -511,32 +819,117 @@ def translate_document(doc, path, dst, on_page, pages=None, cancel=lambda: False
         flush()
 
 
-def overlay_page(page, items):
-    """Escreve a tradução por cima do texto original da página (imagens e desenhos ficam). items: [(Block, tradução)]."""
+def _bg_colors(page, rects):
+    """Cor de fundo de cada retângulo (a mais comum entre os pixels), para cobrir o original mesmo quando o PDF não
+    deixa apagar o texto (texto dentro de formulários XObject, por exemplo)."""
     import pymupdf
+    from collections import Counter
+    z = 1.0
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(z, z), alpha=False, colorspace=pymupdf.csRGB)
+    out = []
+    for r in rects:
+        x0, y0 = max(0, int(r.x0 * z)), max(0, int(r.y0 * z))
+        x1, y1 = min(pix.width - 1, int(r.x1 * z)), min(pix.height - 1, int(r.y1 * z))
+        c = Counter()
+        step = max(1, int(min(x1 - x0, y1 - y0) / 12) or 1)
+        for yy in range(y0, y1 + 1, step):
+            for xx in range(x0, x1 + 1, step):
+                px = pix.pixel(xx, yy)
+                c[tuple(min(255, (v + 4) // 8 * 8) for v in px[:3])] += 1
+        rgb = c.most_common(1)[0][0] if c else (255, 255, 255)
+        out.append(tuple(v / 255 for v in rgb))
+    return out
+
+
+def _hex(rgb):
+    return "#%02x%02x%02x" % tuple(int(v * 255) for v in rgb)
+
+
+def _fit_scale(rect, html, css):
+    """Maior escala (≤ 1) em que o texto cabe no retângulo."""
+    import pymupdf
+    try:
+        st = pymupdf.Story(html, user_css=css)
+        # fit_scale aumenta o retângulo até caber: a letra precisa diminuir na mesma proporção
+        res = st.fit_scale(rect, scale_min=1.0, scale_max=4.0)
+        return max(0.25, 1.0 / res.parameter) if res.big_enough else 0.25
+    except Exception:
+        return 1.0
+
+
+def overlay_page(page, items):
+    """Escreve a tradução no lugar do texto original (imagens e desenhos ficam). items: [(Block, tradução)].
+    O original é apagado e, onde o PDF não deixa apagar, coberto com a cor de fundo da própria página; a letra segue
+    o tamanho, a cor, a serifa e o alinhamento do original, com o mesmo tamanho para o texto corrido da página."""
+    import pymupdf
+    from statistics import median
     todo = [(b, t) for b, t in items if t and not b.keep]
     if not todo:
         return
+    bgs = _bg_colors(page, [b.rect for b, _ in todo])
     for b, _t in todo:
         page.add_redact_annot(b.rect, fill=None)
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+    try:
+        obstacles = [pymupdf.Rect(i["bbox"]) for i in page.get_image_info()]
+    except Exception:
+        obstacles = []
     others = [b.rect for b, _ in items]
-    for b, t in todo:
+    bottom = page.rect.height * 0.94
+    plans = []
+    for (b, t), bg in zip(todo, bgs):
         r = pymupdf.Rect(b.rect)
-        if r.height < b.size * 2:      # uma linha só (título): pode crescer para a direita até a margem ou o próximo bloco
+        if b.cell:
+            pass                 # célula de tabela: fica dentro dela
+        elif b.nlines <= 1 and b.center:  # título centralizado: cresce igual para os dois lados
+            grow = min(r.x0 - 36, page.rect.width - 36 - r.x1)
+            if grow > 0:
+                r.x0 -= grow
+                r.x1 += grow
+        elif b.nlines <= 1:    # uma linha só (título): pode crescer para a direita até a margem ou o próximo bloco
             limit = page.rect.width - 36
             for o in others:
                 if o is not b.rect and o.x0 > r.x1 and o.y0 < r.y1 and o.y1 > r.y0:
                     limit = min(limit, o.x0 - 4)
             r.x1 = max(r.x1, limit)
+        # e para baixo, até o próximo bloco/imagem (o português costuma ser ~20% mais longo)
+        below = [o.y0 for o in others + obstacles if o is not b.rect and o.y0 >= b.rect.y1 - 1
+                 and o.x0 < r.x1 - 2 and o.x1 > r.x0 + 2]
+        if not b.cell:
+            r.y1 = max(r.y1, min(below + [bottom]) - 2) if b.rect.y1 < bottom else r.y1
+        r.y1 = min(r.y1, b.rect.y1 + max(b.rect.height * 0.6, b.size * 3))
+        lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]
+        col = ((b.color >> 16) & 255, (b.color >> 8) & 255, b.color & 255)
+        col = tuple(v / 255 for v in col)
+        clum = 0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]
+        if abs(clum - lum) < 0.35:                         # pouco contraste: preto ou branco conforme o fundo
+            col = (0.0, 0.0, 0.0) if lum > 0.5 else (1.0, 1.0, 1.0)
+        t = t.replace("∗", "*")  # o asterisco matemático não existe nas fontes comuns
         html = "<p>" + (t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")) + "</p>"
-        css = ("body, p {margin: 0; padding: 0;} "
-               f"p {{font-family: sans-serif; font-size: {max(5.0, b.size * 0.95):.1f}px; line-height: 1.15;"
-               f"{' font-weight: bold;' if b.bold else ''}}}")
+        fam = "serif" if b.serif else "sans-serif"
+        css0 = (f"body, p {{margin: 0; padding: 0;}} p {{font-family: {fam}; font-size: {b.size:.2f}px; "
+                f"line-height: 1.12;{' font-weight: bold;' if b.bold else ''}"
+                f"{' text-align: justify;' if b.justify else ' text-align: center;' if b.center else ''}}}")
+        plans.append([b, t, r, bg, col, html, fam, _fit_scale(r, html, css0)])
+    # mesmo tamanho de letra para o texto corrido da página (o menor necessário entre os parágrafos parecidos)
+    body = [pl for pl in plans if not pl[0].bold and pl[0].nlines >= 2]
+    if body:
+        ref = median(pl[0].size for pl in body)
+        similar = [pl for pl in body if abs(pl[0].size - ref) <= ref * 0.12]
+        if similar:
+            common = sorted(pl[7] for pl in similar)[max(0, len(similar) // 5)]   # tolera 1 em 5 mais apertado
+            for pl in similar:
+                pl[7] = min(pl[7], common)
+    for b, t, r, bg, col, html, fam, sc in plans:  # primeiro cobre todos os originais, depois escreve
+        page.draw_rect(b.rect + (-1, -0.8, 1, 0.8), color=None, fill=bg, overlay=True)
+    for b, t, r, bg, col, html, fam, sc in plans:
+        css = (f"body, p {{margin: 0; padding: 0;}} p {{font-family: {fam}; font-size: {b.size * sc:.2f}px; "
+               f"line-height: 1.12; color: {_hex(col)};{' font-weight: bold;' if b.bold else ''}"
+               f"{' text-align: justify;' if b.justify else ' text-align: center;' if b.center else ''}}}")
         try:
-            page.insert_htmlbox(r, html, css=css, scale_low=0.4)
+            page.insert_htmlbox(r, html, css=css, scale_low=0.25)
         except Exception:
-            page.insert_textbox(r, t, fontsize=max(5.0, b.size * 0.85))
+            page.insert_textbox(r, t, fontsize=max(4.0, b.size * sc * 0.9), color=col)
 
 
 def page_paragraphs(page):

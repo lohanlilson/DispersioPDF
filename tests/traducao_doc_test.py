@@ -115,3 +115,28 @@ while pop.out.toPlainText() == "Traduzindo…" and time.time() < end:
 print(pop.out.toPlainText())
 assert "mortalidade" in pop.out.toPlainText()
 print("tradução de artigo ok")
+
+# --- símbolos que o tradutor perde (≠, √, ∗) e números protegidos
+p, kept = T._protect("We assume θ ≠ 0, so the error ≈ 2.5 µm.")
+assert "≠" not in p and "µ" not in p and "ZQX" in p
+assert T._unprotect(p.replace("We assume", "Supomos"), kept).endswith("2.5 µm.")
+p, kept = T._protect("Amblyomma variegatum (n = 4, 0.27%)", numbers=True)
+assert "4" not in p and T._unprotect(p, kept) == "Amblyomma variegatum (n = 4, 0,27%)", T._unprotect(p, kept)
+assert T._lost_numbers("n = 4, 0.27%", "n = , 0,27%") and not T._lost_numbers("n = 4, 0.27%", "n = 4, 0,27%")
+assert T._authors("Ana Souza1, João Lima2 and Rui Melo1",
+                  ["Ana", "Souza", "João", "Lima", "and", "Rui", "Melo"])
+
+# --- texto dentro de um XObject (o PDF não deixa apagar): a tradução cobre o original com a cor do fundo
+src = pymupdf.open(); sp = src.new_page(width=400, height=300)
+sp.draw_rect(sp.rect, color=None, fill=(1, 1, 0.85))
+sp.insert_textbox(pymupdf.Rect(40, 60, 360, 200), "Animal cruelty is a significant indicator of interpersonal "
+                  "violence and must be documented by veterinarians in every case.", fontsize=12)
+x = pymupdf.open(); xp = x.new_page(width=400, height=300); xp.show_pdf_page(xp.rect, src, 0)
+blocks = T._raw_blocks(xp, 0)
+assert blocks, "texto dentro do XObject é lido"
+T.overlay_page(xp, [(b, "A crueldade animal é um indicador importante de violência interpessoal e deve ser "
+                        "documentada pelos veterinários em todos os casos.") for b in blocks])
+pix = xp.get_pixmap(dpi=72)
+fills = [d for d in xp.get_drawings() if d.get("fill") and abs(d["fill"][2] - 0.85) < 0.05 and d["rect"].width < 380]
+assert fills, "o original foi coberto com a cor do fundo (amarelo-claro), não com branco"
+print("cobertura de XObject e símbolos ok")
