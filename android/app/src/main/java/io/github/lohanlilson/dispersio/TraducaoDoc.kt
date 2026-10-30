@@ -187,6 +187,9 @@ object DocAnalysis {
         return out
     }
 
+    private val EN_STOP = setOf("the", "of", "and", "to", "in", "is", "are", "for", "with", "that", "this", "we", "as", "by", "on",
+        "be", "from", "an", "which", "our", "it", "at", "was", "were", "has", "have", "can", "not", "or", "where", "when", "if", "then")
+
     private class LineInfo(val text: String, val rect: RectF, val size: Float, val bold: Boolean, val serif: Boolean, val family: String)
     private val BOLD_FONT = Regex("bold|black|heavy|semibold|demi|[.,-]b$|-bd|bd$|cmbx|medi", RegexOption.IGNORE_CASE)
     private val SERIF_FONT = Regex("times|serif|roman|minion|georgia|cambria|garamond|palatino|charter|nimbusrom|cmr|lmroman|stix|" +
@@ -248,6 +251,8 @@ object DocAnalysis {
                             { b.keep = true; b.why = "e-mail/endereço" }
                         (Citacoes.SUP in b.text || Regex("[∗*†‡§]").containsMatchIn(t)) && words.size in 2..5 && words.all { it[0].isUpperCase() } ->
                             { b.keep = true; b.why = "nome" }
+                        Regex("[=∗×|^]").containsMatchIn(t) && words.size <= 14 && words.none { it.lowercase() in EN_STOP } ->
+                            { b.keep = true; b.why = "fórmula" }
                     }
                 }
             }
@@ -259,12 +264,31 @@ object DocAnalysis {
             if (inRefs && t.length < 80 && AFTER_REFS.containsMatchIn(t)) { inRefs = false; continue }
             if (inRefs && !b.keep) { b.keep = true; b.why = "referências" }
         }
+        // primeira página: nomes e instituições entre o título e o "Abstract" ficam como estão
+        per[pages.firstOrNull() ?: -1]?.takeIf { pages.first() == 0 }?.let { bl ->
+            val head = bl.firstOrNull { Regex("^\\s*(abstract|resumo|summary)\\b", RegexOption.IGNORE_CASE).containsMatchIn(it.shown) }?.rect?.top
+            val title = bl.filter { !it.keep }.maxByOrNull { it.size }
+            if (head != null) for (b in bl) {
+                if (b.keep || b === title || b.rect.bottom > head) continue
+                val ws = Regex("[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’.-]*").findAll(b.shown).map { it.value }.toList()
+                if (ws.isNotEmpty() && ws.size <= 12 && ws.all { it[0].isUpperCase() } && !Regex("[.!?]\\s*$").containsMatchIn(b.shown) &&
+                    !Regex("\\b(article|research|review|access|original|letter|report|paper|study|case)\\b", RegexOption.IGNORE_CASE).containsMatchIn(b.shown)) {
+                    b.keep = true; b.why = "nomes"
+                }
+            }
+        }
+        // parágrafo que continua na outra coluna/página: o anterior é o último bloco do corpo do texto, pulando notas,
+        // legendas e figuras que ficam no meio
+        val sizes = per.values.flatten().filter { !it.keep && !it.bold && it.nlines >= 2 }.map { it.size }.sorted()
+        val body = sizes.getOrNull(sizes.size / 2)
+        val caption = Regex("^\\s*(fig(?:ure|ura)?s?|tab(?:le|ela)?|chart|gr[áa]fico|quadro|scheme)\\.?\\s*[A-Z]?\\d+", RegexOption.IGNORE_CASE)
         var prev: TBlock? = null
         for (p in pages) for (b in per[p]!!) {
             if (b.keep) continue
+            if (b.bold) { prev = null; continue }
+            if ((body != null && kotlin.math.abs(b.size - body) >= 1.5f) || caption.containsMatchIn(b.shown)) continue
             val pv = prev
-            if (pv != null && !Regex("[.!?:”\"»)]\\s*$").containsMatchIn(pv.shown) && b.shown.firstOrNull()?.isLowerCase() == true &&
-                kotlin.math.abs(pv.size - b.size) < 1.5f && !pv.bold) b.cont = true
+            if (pv != null && !Regex("[.!?:”\"»)]\\s*$").containsMatchIn(pv.shown) && b.shown.firstOrNull()?.isLowerCase() == true) b.cont = true
             prev = b
         }
         return per

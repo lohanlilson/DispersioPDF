@@ -1,5 +1,9 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.14.0
+
+- **Tradução de artigos em duas colunas mais fiel**: o parágrafo que continua na outra coluna é traduzido inteiro mesmo com legenda ou nota no meio; fórmulas e nomes de autores/instituições da primeira página ficam como no original.
+
 ## 0.13.0
 
 - **Tradução no PDF mais fiel ao original**: a tradução não escreve mais por cima do parágrafo seguinte; o original é coberto com a cor do fundo; títulos ficam separados do texto; mesmo tamanho de letra no texto corrido; letra com serifa quando o original tem; títulos centralizados continuam centralizados; nomes de autores, e-mails, nome da revista e cabeçalhos não são mais traduzidos.

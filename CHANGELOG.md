@@ -2,6 +2,18 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.17.0
+
+- **Tradução de artigos em duas colunas bem mais fiel** (testada com artigos da PLOS, BMC, Frontiers, arXiv/IEEE/CVPR):
+  - texto justificado: as linhas que o PDF guarda "picotadas" (espaço largo entre as palavras) voltam a ser uma linha só; o hífen de fim de linha some, mas o de palavra composta fica ("person-to-person");
+  - o parágrafo que termina numa coluna e continua na outra é traduzido inteiro, mesmo com nota de rodapé, legenda ou figura no meio;
+  - citações ([12], (Silva et al., 2020), números sobrescritos) ficam no mesmo lugar da frase, não mais no fim;
+  - nomes científicos e termos em itálico (Vulpes vulpes, in vitro) não são traduzidos e continuam em itálico;
+  - títulos em negrito no começo do parágrafo ("Normalization.", "Background:") continuam em negrito;
+  - fórmulas, rótulos de gráficos, nomes de autores e instituições ficam como no original;
+  - tabelas lidas linha a linha, sem misturar colunas; sequências de DNA ficam intactas;
+  - português do Brasil: "patogênico", "anatômico", "eletrônico" (e não "patogénico", "anatómico", "electrónico").
+
 ## 1.16.0
 
 - **Tradução no PDF bem mais fiel ao original**:
