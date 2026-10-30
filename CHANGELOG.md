@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.17.1
+
+- **Fila da impressora**: depois de fechar o leitor com a fila aberta, "Abrir no leitor" não abria mais nada. Agora o leitor volta a aparecer com o documento.
+
 ## 1.17.0
 
 - **Tradução de artigos em duas colunas bem mais fiel** (testada com artigos da PLOS, BMC, Frontiers, arXiv/IEEE/CVPR):

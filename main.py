@@ -180,9 +180,10 @@ def main():
             early.append(msg)
 
     def show_window():
-        if state["shown"]:
+        if state["shown"] and win.isVisible():
             win.bring_to_front()
             return
+        # primeira vez, ou o leitor foi fechado enquanto a fila da impressora continuava aberta: mostra de novo
         state["shown"] = True
         _show(win, app)
 

@@ -86,4 +86,9 @@ captured.clear()
 w.run_tool("print_all")
 assert len(captured["one"]) == n_tabs, captured  # já abre com todas as abas
 print_manager.PrintManager.exec = orig_exec
+# fechar o leitor com a fila aberta e depois abrir um documento da fila: o leitor volta a aparecer
+dlg.show(); w.close(); app.processEvents()
+assert not w.isVisible() and dlg.isVisible()
+dlg._open([impressora.queue_files()[0]]); app.processEvents()
+assert w.isVisible() and w.cur() is not None and w.cur().path == impressora.queue_files()[0], "o leitor reabriu com o arquivo"
 print("impressora ok", captured["summary"])

@@ -650,6 +650,8 @@ class MainWindow(QMainWindow):
         box.exec()
 
     def bring_to_front(self):
+        if not self.isVisible():   # a janela foi fechada (ex.: com a fila da impressora aberta): reabre
+            self.showMaximized() if cfg.qs.value("was_maximized", "true") == "true" else self.show()
         if self.isMinimized():
             self.showNormal()
         self.raise_()
