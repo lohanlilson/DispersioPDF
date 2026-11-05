@@ -2,7 +2,7 @@
 import os
 import sys
 
-__version__ = "1.17.2"
+__version__ = "1.17.3"
 APP_NAME = "Dispersio PDF"
 APP_ID = "DispersioPDF"
 PROG_ID = "DispersioPDF.Document"

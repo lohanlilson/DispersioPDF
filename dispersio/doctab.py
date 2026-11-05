@@ -723,7 +723,8 @@ class DocTab(QWidget):
 
     # ------------------------------------------------------------ estado
     def title(self):
-        name = os.path.basename(self.path) if self.path else "Sem título.pdf"
+        sug = getattr(self, "_suggested", None)
+        name = os.path.basename(self.path or sug or "Sem título.pdf")
         return ("● " if self.modified else "") + name
 
     def _detect_signatures(self):
@@ -958,7 +959,7 @@ class DocTab(QWidget):
         return True
 
     def save_as(self):
-        start = self.path or os.path.join(os.path.expanduser("~"), "Documento.pdf")
+        start = self.path or getattr(self, "_suggested", None) or os.path.join(os.path.expanduser("~"), "Documento.pdf")
         fn, _ = QFileDialog.getSaveFileName(self, "Salvar como", start, "PDF (*.pdf)")
         if not fn:
             return False

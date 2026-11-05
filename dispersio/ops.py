@@ -65,6 +65,45 @@ def open_bytes(data, password=None):
 
 # ---------------------------------------------------------------- organizar
 
+def _page_ok(doc, i):
+    try:
+        doc.load_page(i).get_pixmap(dpi=4)
+        return True
+    except Exception:
+        return False
+
+
+def broken_pages(doc):
+    """Páginas que não carregam (arquivo baixado pela metade, danificado). Só olha documentos que o MuPDF teve de consertar."""
+    if not doc.is_repaired:
+        return []
+    return [i for i in range(doc.page_count) if not _page_ok(doc, i)]
+
+
+def recover(doc, dpi=150):
+    """Cópia só com o que dá para ler de um PDF danificado: primeiro tenta regravar (mantém o texto);
+    se ainda faltar página, as páginas boas viram imagem e as perdidas ficam em branco com um aviso.
+    Devolve (bytes, páginas recuperadas)."""
+    good = [i for i in range(doc.page_count) if _page_ok(doc, i)]
+    try:
+        again = pymupdf.open(stream=doc.tobytes(garbage=3, clean=True), filetype="pdf")
+        if again.page_count == doc.page_count and all(_page_ok(again, i) for i in range(again.page_count)):
+            return again.tobytes(), again.page_count
+    except Exception:
+        pass
+    out = pymupdf.open()
+    for i in range(doc.page_count):
+        if i in good:
+            pg = doc.load_page(i)
+            np_ = out.new_page(width=pg.rect.width, height=pg.rect.height)
+            np_.insert_image(np_.rect, pixmap=pg.get_pixmap(dpi=dpi))
+        else:
+            np_ = out.new_page()
+            np_.insert_text((72, 100), f"Página {i + 1}: não foi possível ler (arquivo danificado ou incompleto).",
+                            fontsize=11, color=(0.5, 0.5, 0.5))
+    return out.tobytes(garbage=1, deflate=True), len(good)
+
+
 def merge(paths, out_path=None):
     out = pymupdf.open()
     toc = []

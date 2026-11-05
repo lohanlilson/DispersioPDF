@@ -66,7 +66,7 @@ CATALOG = [
         ("organize", "organize", "Organizar páginas"), ("rotate", "rotate_cw", "Girar páginas"),
         ("delete_pages", "trash", "Excluir páginas"), ("insert_blank", "insertpage", "Inserir página em branco"),
         ("insert_file", "createpdf", "Inserir de arquivo"), ("extract", "extract", "Extrair páginas"),
-        ("split", "split", "Dividir documento"), ("merge", "merge", "Combinar arquivos"),
+        ("split", "scissors", "Dividir documento"), ("merge", "merge", "Combinar arquivos"),
         ("remove_blank", "trash", "Remover páginas em branco"), ("deskew", "rotate_cw", "Endireitar páginas (de lado, invertidas ou tortas)"),
     ]),
     ("Converter e exportar", [
@@ -777,7 +777,7 @@ class OrganizeDialog(QDialog):
                 ("insertpage", "Página em branco", lambda: self._do(lambda p: tab.insert_blank((p[-1] + 1) if p else tab.doc.page_count), need=False)),
                 ("createpdf", "Inserir arquivo", lambda: self._do(lambda p: tab.insert_file_dialog((p[-1] + 1) if p else tab.doc.page_count), need=False)),
                 ("extract", "Extrair", lambda: self._do(tab.extract_dialog, refresh=False)),
-                ("split", "Dividir", lambda: tab.window().run_tool("split"))]
+                ("scissors", "Dividir", lambda: tab.window().run_tool("split"))]
         for ic, label, fn in acts:
             b = tool_button(ic, label, text=label, size=18)
             b.clicked.connect(fn)

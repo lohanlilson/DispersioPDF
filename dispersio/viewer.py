@@ -207,8 +207,12 @@ class PdfView(QGraphicsView):
         r = self._page(i).rect
         return r.width, r.height
 
+    def _doc_ok(self):
+        d = self.doc
+        return d is not None and not d.is_closed and d.page_count > 0
+
     def relayout(self):
-        if not self.doc:
+        if not self._doc_ok():
             return
         fit = self.zoom_mode in ("fit_width", "fit_page")
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff if fit else Qt.ScrollBarAsNeeded)
@@ -284,7 +288,7 @@ class PdfView(QGraphicsView):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        if self.doc and self.zoom_mode != "custom":
+        if self._doc_ok() and self.zoom_mode != "custom":
             page, frac = self.position()
             self.relayout()
             self.goto(page, frac)
@@ -937,7 +941,7 @@ class PdfView(QGraphicsView):
                 self._as_moved = True
             e.accept()
             return
-        if not self.doc:
+        if not self._doc_ok():
             return super().mouseMoveEvent(e)
         i, pt = self.hit(e.position().toPoint())
         if self.mode == "select" and not self._press and i is not None:
@@ -1388,7 +1392,7 @@ class PdfView(QGraphicsView):
             super().keyPressEvent(e)
 
     def contextMenuEvent(self, e):
-        if not self.doc:
+        if not self._doc_ok():
             return
         i, pt = self.hit(e.pos())
         menu = QMenu(self)

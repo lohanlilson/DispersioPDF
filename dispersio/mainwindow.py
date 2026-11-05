@@ -466,11 +466,35 @@ class MainWindow(QMainWindow):
                     if probe.authenticate(pwd):
                         break
                     QMessageBox.warning(self, APP, "Senha incorreta.")
-            probe.close()
+            suggested = os.path.splitext(path)[0] + ".pdf"
+            if probe.page_count == 0:
+                probe.close()
+                QMessageBox.warning(self, APP, f"Não foi possível ler nenhuma página de \"{os.path.basename(path)}\".\n\n"
+                                    "O arquivo parece incompleto ou danificado. Se veio da internet ou de um e-mail, baixe de novo.")
+                return
+            bad = ops.broken_pages(probe)
+            if bad:
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+                try:
+                    data, n_ok = ops.recover(probe)
+                finally:
+                    QApplication.restoreOverrideCursor()
+                total = probe.page_count
+                probe.close()
+                if not n_ok:
+                    QMessageBox.warning(self, APP, f"\"{os.path.basename(path)}\" está danificado e nenhuma página pôde ser lida.\n\n"
+                                        "Se veio da internet ou de um e-mail, baixe de novo.")
+                    return
+                QMessageBox.warning(self, APP, f"\"{os.path.basename(path)}\" está danificado ou incompleto.\n\n"
+                                    f"Abri uma cópia recuperada com {n_ok} de {total} páginas. O arquivo original não foi alterado.")
+                save_path, pwd = None, None
+                suggested = os.path.splitext(path)[0] + " (recuperado).pdf"
+            else:
+                probe.close()
             tab = DocTab(data, save_path, pwd, self.settings)
             if save_path is None:
                 tab.modified = True
-                tab._suggested = os.path.splitext(path)[0] + ".pdf"
+                tab._suggested = suggested
             self.add_tab(tab)
             if save_path:
                 self._add_recent(path)

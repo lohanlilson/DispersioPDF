@@ -2,6 +2,13 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.17.3
+
+- **PDF danificado ou baixado pela metade**: antes abria uma aba vazia ou dava erro. Agora avisa quando não há nada legível e, se só parte das páginas estiver estragada, abre uma cópia recuperada com as páginas boas (o original não é alterado).
+- Fechar um documento logo depois de traduzir podia mostrar uma mensagem de erro.
+- O ícone de "Dividir documento" aparecia igual ao de "Tela dividida"; agora é uma tesoura.
+- Arquivos convertidos ao abrir (Word, imagens…) mostram o nome deles na aba em vez de "Sem título".
+
 ## 1.17.2
 
 - **Modo de leitura**: não dava para sair dele (nem pelo Ctrl+H). Agora há um botão flutuante "Sair do modo de leitura", com desfazer e refazer ao lado, e a tecla Esc também sai.

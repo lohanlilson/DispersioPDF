@@ -35,7 +35,7 @@ _P = {
     "image": '<rect x="3" y="4" width="18" height="16" rx="1"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-6-6-8 9"/>',
     "link": '<path d="M10 14a4 4 0 006 0l3-3a4 4 0 00-6-6l-1 1"/><path d="M14 10a4 4 0 00-6 0l-3 3a4 4 0 006 6l1-1"/>',
     "merge": '<path d="M4 3h7v8H4zM13 13h7v8h-7z"/><path d="M11 7h5v4M16 11l-2-2M16 11l2-2"/>',
-    "split": '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8L20 18M8.5 16L20 6"/>',
+    "scissors": '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8L20 18M8.5 16L20 6"/>',
     "rotate_cw": '<path d="M20 12a8 8 0 11-2.4-5.7"/><path d="M20 4v5h-5"/>',
     "rotate_ccw": '<path d="M4 12a8 8 0 102.4-5.7"/><path d="M4 4v5h5"/>',
     "trash": '<path d="M4 7h16M10 7V4h4v3"/><path d="M6 7l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>',
