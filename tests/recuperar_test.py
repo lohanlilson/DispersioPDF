@@ -69,4 +69,7 @@ assert any("4 de 5" in m for m in msgs), msgs
 assert "não foi possível ler" in t.doc[2].get_text() and t.doc.page_count == 5
 assert not t.doc[0].get_text().strip()          # as boas viram imagem
 print("recuperação ok")
+while len(w.tab_widgets) > 1:          # espera as tarefas de fundo (boletos etc.) antes de sair
+    w.close_tab(len(w.tab_widgets) - 1)
+app.processEvents()
 os._exit(0)
