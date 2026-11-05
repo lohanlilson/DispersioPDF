@@ -72,4 +72,4 @@ print("recuperação ok")
 while len(w.tab_widgets) > 1:          # espera as tarefas de fundo (boletos etc.) antes de sair
     w.close_tab(len(w.tab_widgets) - 1)
 app.processEvents()
-os._exit(0)
+sys.stdout.flush()
