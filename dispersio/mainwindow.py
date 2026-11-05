@@ -171,7 +171,7 @@ class MainWindow(QMainWindow):
                             ("save", "Salvar (Ctrl+S)", self.save), ("print", "Imprimir (Ctrl+P)", lambda: self.run_tool("print")),
                             ("speaker", "Ler em voz alta", lambda: self.run_tool("read_aloud")),
                             ("split", "Dividir tela (Ctrl+\\)", lambda: self.cur() and self.cur().toggle_split()),
-                            ("readmode", "Modo de leitura (Ctrl+H)", self.toggle_read_mode),
+                            ("readmode", "Modo de leitura (Ctrl+H)", lambda: self.toggle_read_mode()),
                             ("moon", "Tema claro/escuro", self.toggle_dark),
                             ("gear", "Preferências (Ctrl+K)", lambda: self.preferences())]:
             b = tool_button(ic, tip)
@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         act(m, "Dividir tela", lambda: self.cur() and self.cur().toggle_split(), "Ctrl+\\", "split")
         m.addSeparator()
-        act(m, "Modo de leitura", self.toggle_read_mode, "Ctrl+H", "readmode")
+        act(m, "Modo de leitura", lambda: self.toggle_read_mode(), "Ctrl+H", "readmode")
         act(m, "Tela cheia", self.toggle_fullscreen, "F11", "fullscreen")
         act(m, "Tema escuro", self.toggle_dark, "Ctrl+Shift+D", "moon")
         act(m, "Inverter cores das páginas", self.toggle_invert)
@@ -296,6 +296,7 @@ class MainWindow(QMainWindow):
         """Layout responsivo: permite encaixar a janela em meia tela (Windows Snap)."""
         if e is not None:
             super().resizeEvent(e)
+        self._place_reading_bar()
         w = self.width()
         self.home.reflow(w)
         for b in self._compact_hide:
@@ -305,7 +306,7 @@ class MainWindow(QMainWindow):
         auto_hide = w < 1100 or not cfg.get("show_tools_panel")
         if auto_hide != getattr(self, "_tools_auto_hidden", False):
             self._tools_auto_hidden = auto_hide
-            self.tools.setVisible(not auto_hide)
+            self.tools.setVisible(not auto_hide and not getattr(self, "_reading", False))
 
     def _tab_changed(self, i):
         if hasattr(self, "page_box"):
@@ -586,14 +587,61 @@ class MainWindow(QMainWindow):
             t.view.invert = not t.view.invert
             t.view.refresh()
 
-    def toggle_read_mode(self):
-        hide = self.tools.isVisible() or self.menuBar().isVisible()
-        self.tools.setVisible(not hide)
+    def toggle_read_mode(self, on=None):
+        """Modo de leitura: esconde barras e painéis. Sai pelo botão flutuante, por Esc ou por Ctrl+H."""
+        hide = (not getattr(self, "_reading", False)) if on is None else bool(on)
+        self._reading = hide
+        if hide:
+            self._tools_before_reading = self.tools.isVisible()
+        self.tools.setVisible(False if hide else getattr(self, "_tools_before_reading", True) and not
+                              getattr(self, "_tools_auto_hidden", False))
         self.doc_area.layout().itemAt(0).widget().setVisible(not hide)
         for t in self.tab_widgets[1:]:
             t.rail.setVisible(not hide)
             t.side.setVisible(not hide)
-        self.statusBar().showMessage("Modo de leitura: Ctrl+H para sair" if hide else "", 4000)
+        esc = getattr(self, "_reading_esc", None)
+        if esc is None:
+            esc = self._reading_esc = QAction(self)
+            esc.setShortcut(QKeySequence("Esc"))
+            esc.setShortcutContext(Qt.WindowShortcut)
+            esc.triggered.connect(lambda: self.toggle_read_mode(False))
+            self.addAction(esc)
+        esc.setEnabled(hide)  # Esc só sai do modo de leitura enquanto ele está ligado
+        bar = getattr(self, "_reading_bar", None)
+        if bar is None and hide:
+            bar = self._reading_bar = self._make_reading_bar()
+        if bar is not None:
+            bar.setVisible(hide)
+            if hide:
+                self._place_reading_bar()
+                bar.raise_()
+        self.statusBar().showMessage("Modo de leitura: Esc para sair" if hide else "", 4000)
+
+    def _make_reading_bar(self):
+        """Barrinha flutuante no modo de leitura: desfazer, refazer e sair."""
+        from PySide6.QtWidgets import QFrame
+        bar = QFrame(self.doc_area)
+        bar.setObjectName("NavPill")
+        bar.setAttribute(Qt.WA_StyledBackground, True)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(8, 3, 8, 3)
+        lay.setSpacing(2)
+        for ic, tip, fn in (("undo", "Desfazer (Ctrl+Z)", self.undo), ("redo", "Refazer (Ctrl+Y)", self.redo)):
+            b = tool_button(ic, tip, size=16)
+            b.clicked.connect(fn)
+            lay.addWidget(b)
+        out = QPushButton(icons.icon("readmode"), "Sair do modo de leitura")
+        out.setToolTip("Esc ou Ctrl+H")
+        out.clicked.connect(lambda: self.toggle_read_mode(False))
+        lay.addWidget(out)
+        bar.adjustSize()
+        return bar
+
+    def _place_reading_bar(self):
+        bar = getattr(self, "_reading_bar", None)
+        if bar is not None and bar.isVisible():
+            bar.adjustSize()
+            bar.move(self.doc_area.width() - bar.width() - 24, 10)
 
     def toggle_fullscreen(self):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()

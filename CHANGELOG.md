@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.17.2
+
+- **Modo de leitura**: não dava para sair dele (nem pelo Ctrl+H). Agora há um botão flutuante "Sair do modo de leitura", com desfazer e refazer ao lado, e a tecla Esc também sai.
+
 ## 1.17.1
 
 - **Fila da impressora**: depois de fechar o leitor com a fila aberta, "Abrir no leitor" não abria mais nada. Agora o leitor volta a aparecer com o documento.
