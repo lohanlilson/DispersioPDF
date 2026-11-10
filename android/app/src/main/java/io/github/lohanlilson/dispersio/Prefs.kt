@@ -54,6 +54,24 @@ class Prefs(ctx: Context) {
         get() = _pay.value
         set(v) { _pay.value = v; sp.edit().putBoolean("boletos", v).apply() }
 
+    private val _threats = mutableStateOf(sp.getBoolean("avisar_golpes", true))
+    /** avisa sobre documentos com cara de golpe (JavaScript, anexos de programa, links falsos) */
+    var detectThreats: Boolean
+        get() = _threats.value
+        set(v) { _threats.value = v; sp.edit().putBoolean("avisar_golpes", v).apply() }
+
+    private val _confirmLinks = mutableStateOf(sp.getBoolean("confirmar_links", true))
+    /** pergunta antes de abrir sites a partir do documento (links suspeitos sempre perguntam) */
+    var confirmLinks: Boolean
+        get() = _confirmLinks.value
+        set(v) { _confirmLinks.value = v; sp.edit().putBoolean("confirmar_links", v).apply() }
+
+    private val _trusted = mutableStateOf(sp.getStringSet("sites_confiaveis", emptySet())!!.toSet())
+    /** sites que o usuário mandou abrir sem perguntar */
+    var trustedSites: Set<String>
+        get() = _trusted.value
+        set(v) { _trusted.value = v; sp.edit().putStringSet("sites_confiaveis", v).apply() }
+
     private val _orient = mutableStateOf(sp.getBoolean("posicao_paginas", true))
     /** avisa quando há páginas de lado ou de cabeça para baixo */
     var detectOrientation: Boolean

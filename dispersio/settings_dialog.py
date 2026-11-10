@@ -114,6 +114,14 @@ class SettingsDialog(QDialog):
         f.addRow(self.w["autosave"])
         self.w["detect_payments"] = _check("Mostrar boletos, Pix e notas fiscais encontrados no documento", "detect_payments")
         f.addRow(self.w["detect_payments"])
+        self.w["detect_threats"] = _check("Avisar sobre documentos com cara de golpe (JavaScript, anexos de programa, links falsos)", "detect_threats")
+        f.addRow(self.w["detect_threats"])
+        self.w["confirm_links"] = _check("Perguntar antes de abrir sites a partir do documento (links suspeitos sempre perguntam)", "confirm_links")
+        f.addRow(self.w["confirm_links"])
+        if cfg.get("trusted_link_sites"):
+            forget = QPushButton("Esquecer os sites que abrem sem perguntar")
+            forget.clicked.connect(lambda: (cfg.set("trusted_link_sites", ""), forget.setEnabled(False)))
+            f.addRow(forget)
         from . import traducao
         self.w["offer_translation"] = _check("Oferecer tradução quando o documento estiver em outro idioma", "offer_translation")
         f.addRow(self.w["offer_translation"])

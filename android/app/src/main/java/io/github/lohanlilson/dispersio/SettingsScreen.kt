@@ -75,6 +75,9 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
                     "⋮ › Versões anteriores. Documentos assinados continuam pedindo para salvar.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Toggle("Mostrar boletos, Pix e notas fiscais encontrados", p.detectPayments) { p.detectPayments = it }
+                Toggle("Avisar sobre documentos com cara de golpe", p.detectThreats) { p.detectThreats = it }
+                Toggle("Perguntar antes de abrir sites do documento", p.confirmLinks) { p.confirmLinks = it }
+                if (p.trustedSites.isNotEmpty()) TextButton({ p.trustedSites = emptySet() }) { Text("Esquecer os sites que abrem sem perguntar (${p.trustedSites.size})") }
                 Toggle("Avisar quando houver páginas de lado ou de cabeça para baixo", p.detectOrientation) { p.detectOrientation = it }
                 Toggle("Oferecer tradução quando o documento estiver em outro idioma", p.offerTranslation) { p.offerTranslation = it }
                 Text("Traduzir para", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))

@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 private val OK = Color(0xFF2D9D78)
 private val BAD = Color(0xFFD7373F)
 private val INFO = Color(0xFF1473E6)
+private val WARN = Color(0xFFC77700)
 
 fun copyText(ctx: Context, label: String, text: String) {
     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(label, text))
@@ -57,15 +58,17 @@ fun PaymentsBanner(d: ViewerDoc, onCopied: (String) -> Unit, onOpen: () -> Unit)
     val items = d.payments ?: return
     if (items.isEmpty() || d.paymentsHidden) return
     val ctx = LocalContext.current
-    val main = items.firstOrNull { !it.ok } ?: items.first()
+    val main = items.firstOrNull { !it.ok } ?: items.firstOrNull { it.alert.isNotEmpty() } ?: items.first()
     val bad = !main.ok
-    Surface(color = if (bad) Color(0xFFFDE8E9) else Color(0xFFEEF3FC), modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+    val warn = !bad && main.alert.isNotEmpty()
+    Surface(color = if (bad) Color(0xFFFDE8E9) else if (warn) Color(0xFFFFF4E0) else Color(0xFFEEF3FC), modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Row(Modifier.padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(if (bad) Icons.Filled.Warning else Icons.Filled.QrCode2, null, tint = if (bad) BAD else INFO)
+            Icon(if (bad || warn) Icons.Filled.Warning else Icons.Filled.QrCode2, null, tint = if (bad) BAD else if (warn) WARN else INFO)
             Column(Modifier.padding(start = 8.dp).weight(1f)) {
                 Text(main.title + (if (main.summary.isNotEmpty()) " · " + main.summary else ""), color = Color(0xFF222222),
                     style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 2)
                 if (bad) Text(main.problem, color = Color(0xFFB0262E), style = MaterialTheme.typography.bodySmall)
+                else if (warn) Text("⚠ " + main.alert, color = Color(0xFF8A5300), style = MaterialTheme.typography.bodySmall)
                 else if (main.source == "texto e código") Text(if (main.kind == "pix") "✔ confere com o QR Code" else "✔ confere com o código de barras",
                     color = OK, style = MaterialTheme.typography.bodySmall)
                 if (items.size > 1) Text("Ver todos (${items.size})", color = INFO, style = MaterialTheme.typography.labelMedium)
@@ -109,6 +112,7 @@ private fun PaymentCard(it: PayItem, onCopy: () -> Unit, onGoto: () -> Unit) {
                 Text("pág. ${it.page + 1}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
             }
             if (!it.ok) Text(it.problem, color = BAD, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+            else if (it.alert.isNotEmpty()) Text("⚠ " + it.alert, color = WARN, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
             else if (it.source == "texto e código") Text("Texto impresso confere com o " + (if (it.kind == "pix") "QR Code" else "código de barras"),
                 color = OK, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
             SelectionContainer {

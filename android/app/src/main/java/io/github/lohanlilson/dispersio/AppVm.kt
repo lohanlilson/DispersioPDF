@@ -73,6 +73,8 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     /** boletos, Pix e chaves de NF-e encontrados (null = ainda procurando) */
     var payments by mutableStateOf<List<PayItem>?>(null)
     var paymentsHidden by mutableStateOf(false)
+    var threats by mutableStateOf<List<Seguranca.Threat>>(emptyList())
+    var threatsHidden by mutableStateOf(false)
     /** páginas de lado ou de cabeça para baixo: página → rotação certa */
     var orientFixes by mutableStateOf<Map<Int, Int>>(emptyMap())
     /** idioma do documento (para oferecer tradução) */
@@ -934,6 +936,11 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             for (p in 0 until minOf(d.pageCount, 3)) sb.append(runCatching { engine.pageText(pdf, p) }.getOrDefault("")).append(' ')
             d.language = Traducao.detect(sb.toString().take(20000))
         }
+        if (prefs.detectThreats) {
+            val t = runCatching { withReadDoc(d) { Seguranca.scanDoc(it) } }.getOrDefault(emptyList()) +
+                runCatching { Seguranca.scanLinks(engine, pdf, d.pageCount) }.getOrDefault(emptyList())
+            if (doc === d) d.threats = t.sortedByDescending { it.level }
+        }
         if (prefs.detectPayments) {
             d.payments = runCatching { Pagamentos.scan(engine, pdf, d.pageCount) }.getOrDefault(emptyList())
         }
@@ -943,6 +950,13 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             }.getOrDefault(emptyMap())
             if (doc === d && d.pdf === pdf) d.orientFixes = f
         }
+    }
+
+    /** Tira JavaScript, ações automáticas e anexos (dá para desfazer). */
+    fun removeDanger(d: ViewerDoc) = viewModelScope.launch {
+        pages(d, "remover o conteúdo perigoso") { doc, _ -> Seguranca.removeActiveContent(doc) }.join()
+        d.threats = d.threats.filter { it.title.startsWith("Link suspeito") || it.title.startsWith("Página com") || it.title.startsWith("O formulário") }
+        toast = "JavaScript, ações automáticas e anexos removidos"
     }
 
     /** Lista completa (menu ⋮): procura agora se ainda não procurou. */

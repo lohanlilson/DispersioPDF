@@ -14,6 +14,9 @@ DEFAULTS = {
     "autosave": True,
     "detect_payments": True,
     "detect_orientation": True,
+    "detect_threats": True,              # avisa sobre JavaScript, anexos executáveis, links suspeitos (golpes)
+    "confirm_links": True,               # pergunta antes de abrir um site a partir do documento
+    "trusted_link_sites": "",            # sites que o usuário mandou abrir sem perguntar (separados por vírgula)
     "offer_translation": True,           # faixa "Traduzir" quando o documento está em outro idioma
     "translate_to": "",                  # vazio = idioma do sistema
     "reading_mode": 0,                   # leitura traduzida: 0 tradução, 1 original, 2 lado a lado, 3 intercalado

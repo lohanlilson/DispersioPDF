@@ -788,6 +788,46 @@ def sanitize(doc):
               reset_fields=False, reset_responses=True, thumbnails=True, xml_metadata=True)
 
 
+def remove_active_content(doc):
+    """Tira o que um PDF de golpe usa para agir sozinho: JavaScript, ações automáticas (ao abrir, ao passar o mouse),
+    abrir programas/arquivos, importar dados e anexos. Mantém texto, imagens, comentários, campos e links."""
+    for name in list(doc.embfile_names()):
+        try:
+            doc.embfile_del(name)
+        except Exception:
+            pass
+    bad = re.compile(r"/S\s*/(JavaScript|Launch|ImportData|GoToE|SubmitForm)\b")
+    cat = doc.pdf_catalog()
+    t, oa = doc.xref_get_key(cat, "OpenAction")
+    if t != "null":
+        body = doc.xref_object(int(oa.split()[0])) if t == "xref" else oa
+        if not re.search(r"/S\s*/GoTo\b", body) and not body.strip().startswith("["):
+            doc.xref_set_key(cat, "OpenAction", "null")
+    for key in ("AA", "Names/JavaScript", "Names/EmbeddedFiles"):
+        if doc.xref_get_key(cat, key)[0] != "null":
+            doc.xref_set_key(cat, key, "null")
+    for x in range(1, doc.xref_length()):
+        try:
+            if doc.xref_is_stream(x):
+                continue
+            obj = doc.xref_object(x, compressed=True)
+        except Exception:
+            continue
+        if doc.xref_get_key(x, "AA")[0] != "null":
+            doc.xref_set_key(x, "AA", "null")
+        if not bad.search(obj):
+            continue
+        if re.search(r"/Type\s*/Annot\b", obj) or "/Subtype" in obj:
+            for key in ("A", "AA"):
+                if doc.xref_get_key(x, key)[0] != "null":
+                    doc.xref_set_key(x, key, "null")
+        else:
+            doc.update_object(x, "<<>>")
+    doc.scrub(attached_files=True, clean_pages=False, embedded_files=True, hidden_text=False, javascript=True,
+              metadata=False, redactions=False, remove_links=False, reset_fields=False, reset_responses=False,
+              thumbnails=False, xml_metadata=False)
+
+
 PERM_LABELS = {
     "print": ("Imprimir", pymupdf.PDF_PERM_PRINT),
     "modify": ("Alterar o documento", pymupdf.PDF_PERM_MODIFY),

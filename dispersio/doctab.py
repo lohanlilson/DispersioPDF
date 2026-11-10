@@ -75,6 +75,26 @@ class _PayThread(QThread):
             self.done.emit([])
 
 
+class _SecThread(QThread):
+    done = Signal(object)
+
+    def __init__(self, data, password):
+        super().__init__()
+        self.data, self.password = data, password
+
+    def run(self):
+        try:
+            import pymupdf
+            from . import seguranca
+            d = pymupdf.open(stream=self.data, filetype="pdf")
+            if d.needs_pass and self.password:
+                d.authenticate(self.password)
+            self.done.emit(seguranca.scan(d, cancel=self.isInterruptionRequested))
+            d.close()
+        except Exception:
+            self.done.emit([])
+
+
 class _OrientThread(QThread):
     done = Signal(object)
     MAX_PAGES = 40
@@ -287,12 +307,12 @@ class PaymentsBar(QFrame):
         if not items:
             self.hide()
             return
-        main = next((i for i in items if not i.ok), items[0])
+        main = next((i for i in items if not i.ok), None) or next((i for i in items if i.alert), items[0])
         bad = not main.ok
-        bg, fg = ("#fde8e9", "#d7373f") if bad else ("#eef3fc", "#1473e6")
+        bg, fg = ("#fde8e9", "#d7373f") if bad else ("#fff4e0", "#c77700") if main.alert else ("#eef3fc", "#1473e6")
         self.setStyleSheet(f"QFrame#PayBar{{background:{bg}; border:1px solid {fg}; border-radius:8px;}}"
                            f"QFrame#PayBar QLabel{{color:#222; background:transparent;}}")
-        self.icon.setText(f"<span style='font-size:18px; color:{fg}'>{'⚠' if bad else '▥'}</span>")
+        self.icon.setText(f"<span style='font-size:18px; color:{fg}'>{'⚠' if bad or main.alert else '▥'}</span>")
         html = f"<b>{main.title}</b>"
         if main.summary:
             html += " · " + main.summary
@@ -301,6 +321,8 @@ class PaymentsBar(QFrame):
                 else " · <span style='color:#2d9d78'>✔ confere com o QR Code</span>"
         if bad:
             html += f"<br><span style='color:#b0262e'>{main.problem}</span>"
+        elif main.alert:
+            html += f"<br><span style='color:#8a5300'>⚠ {main.alert}</span>"
         self.text.setText(html)
         self.main = main
         self.copy_btn.setText(main.copy_label)
@@ -423,6 +445,9 @@ class DocTab(QWidget):
         self.view = PdfView()
         view_col = QVBoxLayout()
         view_col.setSpacing(6)
+        from .seguranca_ui import SecurityBar
+        self.sec_bar = SecurityBar(self)
+        view_col.addWidget(self.sec_bar)
         self.sig_bar = SignatureBar(self)
         view_col.addWidget(self.sig_bar)
         self.pay_bar = PaymentsBar(self)
@@ -463,9 +488,26 @@ class DocTab(QWidget):
         if panel is not None:
             self.side.show_panel(panel)
         self.validate_signatures()
+        self.scan_threats()
         self.scan_payments()
         self.check_orientation()
         self.check_language()
+
+    # ------------------------------------------------------------ golpes
+    def scan_threats(self):
+        """Procura em segundo plano o que é típico de PDF de golpe (no arquivo como foi aberto)."""
+        self.sec_bar.hide()
+        self.threats = None
+        if not cfg.get("detect_threats"):
+            return
+        self._sec_thread = _track(_SecThread(self.original_bytes, self.password))
+        self._sec_thread.done.connect(self._sec_done)
+        self._sec_thread.start()
+
+    def _sec_done(self, threats):
+        self.threats = threats
+        if cfg.get("detect_threats"):
+            self.sec_bar.show_threats(threats)
 
     # ------------------------------------------------------------ boletos, Pix e notas
     def scan_payments(self):
@@ -849,7 +891,7 @@ class DocTab(QWidget):
 
     def cleanup(self):
         self._autosave_timer.stop()
-        for name in ("_pay_thread", "_orient_thread", "_tr_job"):
+        for name in ("_pay_thread", "_sec_thread", "_orient_thread", "_tr_job"):
             th = getattr(self, name, None)
             if th is not None and th.isRunning():
                 th.requestInterruption()

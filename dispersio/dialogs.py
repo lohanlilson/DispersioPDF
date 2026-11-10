@@ -994,6 +994,12 @@ class PaymentsDialog(QDialog):
                 pr.setStyleSheet("color:#d7373f")
                 g.addWidget(pr, r, 0, 1, 2)
                 r += 1
+            if it.ok and getattr(it, "alert", ""):
+                al = QLabel("⚠ " + it.alert)
+                al.setWordWrap(True)
+                al.setStyleSheet("color:#c77700")
+                g.addWidget(al, r, 0, 1, 2)
+                r += 1
             elif it.source == "texto e código":
                 g.addWidget(QLabel("<span style='color:#2d9d78'>Texto impresso confere com o "
                                    + ("QR Code" if it.kind == "pix" else "código de barras") + "</span>"), r, 0, 1, 2)

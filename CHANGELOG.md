@@ -2,6 +2,15 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.18.0
+
+- **Proteção contra golpes**
+  - Ao abrir, uma faixa avisa quando o PDF tem cara de golpe: JavaScript escondido, ação que roda sozinha, tentativa de abrir programa, programa anexado (.exe etc.), formulário que envia dados para a internet, página inteira que é um "botão" para um site e links suspeitos. O botão "Remover o perigo" tira tudo isso (dá para desfazer).
+  - Antes de abrir um site a partir do documento, o programa mostra o endereço real e avisa em vermelho quando o texto mostra um site e o link vai para outro, quando o nome de um banco aparece num site que não é dele, quando é um link encurtado, um endereço só de números ou um download de programa. Passar o mouse sobre o link mostra o endereço verdadeiro.
+  - Pix: avisa quando o recebedor não aparece em nenhum lugar do documento. Boleto: avisa quando o banco do código de barras é diferente do banco impresso.
+  - Dá para desligar em Preferências › Geral.
+- Pix copia e cola quebrado em duas linhas era acusado como "alterado" sem estar.
+
 ## 1.17.3
 
 - **PDF danificado ou baixado pela metade**: antes abria uma aba vazia ou dava erro. Agora avisa quando não há nada legível e, se só parte das páginas estiver estragada, abre uma cópia recuperada com as páginas boas (o original não é alterado).

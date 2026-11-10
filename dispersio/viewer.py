@@ -890,7 +890,7 @@ class PdfView(QGraphicsView):
             # link?
             for ln in self.links(i):
                 if ln["from"].contains(pt) and not (e.modifiers() & Qt.ShiftModifier):
-                    self._follow_link(ln)
+                    self._follow_link(ln, i)
                     self._press = None
                     return
             xref = self.annot_at(i, pt)
@@ -946,8 +946,12 @@ class PdfView(QGraphicsView):
         i, pt = self.hit(e.position().toPoint())
         if self.mode == "select" and not self._press and i is not None:
             over_sig = self.sig_at(i, pt)
-            self.viewport().setToolTip("Clique para ver a validação desta assinatura" if over_sig else "")
-            over_link = over_sig or any(ln["from"].contains(pt) for ln in self.links(i))
+            hl = None if over_sig else next((ln for ln in self.links(i) if ln["from"].contains(pt)), None)
+            tip = "Clique para ver a validação desta assinatura" if over_sig else ""
+            if hl is not None and hl.get("kind") == pymupdf.LINK_URI:
+                tip = "Abre: " + (hl.get("uri") or "")[:150]      # o endereço real, não o texto mostrado
+            self.viewport().setToolTip(tip)
+            over_link = over_sig or hl is not None
             self.viewport().setCursor(Qt.PointingHandCursor if over_link else (
                 Qt.SizeAllCursor if self.annot_at(i, pt) else Qt.IBeamCursor))
         if self.mode == "measure_area" and self._poly and i == self._poly[0]:
@@ -1265,10 +1269,19 @@ class PdfView(QGraphicsView):
                 self.set_selection(i, same[0], same[-1])
         super().mouseDoubleClickEvent(e)
 
-    def _follow_link(self, ln):
+    def _follow_link(self, ln, i=None):
         kind = ln.get("kind")
         if kind == pymupdf.LINK_URI:
-            QDesktopServices.openUrl(QUrl(ln["uri"]))
+            shown = ""
+            if i is not None:
+                try:
+                    from .seguranca import shown_text
+                    shown = shown_text(self._page(i).get_text("words"), ln["from"])
+                except Exception:
+                    pass
+            from .seguranca_ui import confirm_link
+            if confirm_link(self, ln["uri"], shown):
+                QDesktopServices.openUrl(QUrl(ln["uri"]))
         elif kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED) and ln.get("page", -1) >= 0:
             self.goto(ln["page"])
 

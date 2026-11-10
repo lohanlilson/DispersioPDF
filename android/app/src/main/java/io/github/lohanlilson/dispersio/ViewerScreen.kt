@@ -176,6 +176,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var dlg by remember { mutableStateOf("") }
     var splitReq by remember { mutableStateOf<Pair<String, String>?>(null) }
     var reading by remember { mutableStateOf(false) }
+    var linkAsk by remember { mutableStateOf<Seguranca.LinkCheck?>(null) }
     var showComments by remember { mutableStateOf(false) }
     var payList by remember { mutableStateOf(false) }
     var translating by remember { mutableStateOf(false) }
@@ -457,7 +458,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                         field != null && field.kind == FormField.Kind.SIGNATURE ->
                             if (field.value.isEmpty()) certSign = Triple(field.page, field.rect, field.name) else sigSheet = true
                         field != null -> editField = field
-                        handleLinkTap(ctx, vm, d, pg, fx, fy, list) -> Unit
+                        handleLinkTap(ctx, vm, d, pg, fx, fy, list) { linkAsk = it } -> Unit
                         d.selection != null -> d.selection = null
                         else -> bars = !bars
                     }
@@ -592,8 +593,9 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             }
             if (d.busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             Column(Modifier.align(Alignment.TopCenter)) {
+                SecurityBanner(vm, d)
                 if (bars || d.signatures.any { !it.ok }) SignatureBanner(d) { sigSheet = true }
-                if (bars || d.payments?.any { !it.ok } == true) PaymentsBanner(d, onCopied = { vm.toast = it }) { payList = true }
+                if (bars || d.payments?.any { !it.ok || it.alert.isNotEmpty() } == true) PaymentsBanner(d, onCopied = { vm.toast = it }) { payList = true }
                 if (bars) OrientBanner(d) { vm.straighten(d, d.orientFixes) }
                 if (bars || vm.tr?.let { it.original === d || it.translated === d } == true)
                     TranslateBanner(vm, d, Traducao.target(vm.prefs), onTranslate = { translating = true }, onReading = { readingTr = true })
@@ -745,6 +747,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             dismissButton = { TextButton({ blankList = null }) { Text("Cancelar") } })
     }
     if (reading) ReadingMode(vm, d) { reading = false }
+    linkAsk?.let { chk -> LinkDialog(vm, chk, onOpen = { linkAsk = null; openLink(ctx, chk.url) }, onDismiss = { linkAsk = null }) }
     if (translating) {
         val dst = Traducao.target(vm.prefs)
         val src = d.language
@@ -1271,17 +1274,26 @@ private fun pageAt(d: ViewerDoc, g: ViewerGeom, p: Offset): Triple<Int, Float, F
 }
 
 /** Toque num link: vai para a página de destino ou abre o endereço. */
-private suspend fun handleLinkTap(ctx: Context, vm: AppVm, d: ViewerDoc, page: Int, x: Float, y: Float, list: LazyListState): Boolean {
+private suspend fun handleLinkTap(ctx: Context, vm: AppVm, d: ViewerDoc, page: Int, x: Float, y: Float, list: LazyListState,
+                                  ask: (Seguranca.LinkCheck) -> Unit): Boolean {
     val link = vm.engine.links(d.pdf, page).firstOrNull { x in it.area.l..it.area.r && y in it.area.t..it.area.b } ?: return false
     val target = link.page
     val uri = link.uri
     when {
         target != null && target >= 0 -> list.animateScrollToItem(target)
-        !uri.isNullOrBlank() -> runCatching {
-            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure { Toast.makeText(ctx, "Não foi possível abrir o link", Toast.LENGTH_SHORT).show() }
+        !uri.isNullOrBlank() -> {
+            val shown = runCatching { Seguranca.shownText(vm.engine.pageChars(d.pdf, page), link.area) }.getOrDefault("")
+            val chk = Seguranca.linkRisk(uri, shown)
+            if (linkOpensDirectly(vm.prefs, chk)) openLink(ctx, uri) else ask(chk)
+        }
     }
     return true
+}
+
+fun openLink(ctx: Context, uri: String) {
+    runCatching {
+        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure { Toast.makeText(ctx, "Não foi possível abrir o link", Toast.LENGTH_SHORT).show() }
 }
 
 @Composable

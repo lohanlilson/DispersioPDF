@@ -83,6 +83,7 @@ class Item:
     source: str = "texto"        # texto | código | texto e código
     key: str = ""                # identidade para juntar texto e código (código de barras de 44 dígitos, chave...)
     rect: tuple | None = None    # área na página (pontos do PDF), quando conhecida
+    alert: str = ""              # algo estranho, mas não necessariamente errado (ex.: recebedor do Pix não aparece no documento)
 
     @property
     def copy_label(self):
@@ -354,12 +355,21 @@ def find_in_text(text: str, page: int = 0, today=None) -> list[Item]:
             if chave_ok(run[a:a + 44]):
                 add(chave_item(page, run[a:a + 44]))
     # Pix copia e cola (pode estar quebrado em várias linhas)
-    flat = re.sub(r"\s*\n\s*", "", text)
-    for src in (flat, text):
+    # a quebra de linha pode ter caído num espaço do código (nome do recebedor) ou no meio de uma palavra
+    flat = re.sub(r"[ \t]*\n[ \t]*", "", text)
+    spaced = re.sub(r"[ \t]*\n[ \t]*", " ", text)
+    pix_ok, pix_bad = [], []
+    for src in (flat, spaced, text):
         for m in PIX_RE.finditer(src):
             code = pix_extract(src[m.start():])
-            if code:
-                add(pix_item(page, code))
+            it = pix_item(page, code) if code else None
+            if it:
+                (pix_ok if it.ok else pix_bad).append(it)
+    for it in pix_ok:
+        add(it)
+    for it in pix_bad:        # alterado de verdade: não é só a versão quebrada de um código que conferiu
+        if not any(re.sub(r"\s", "", o.copy)[:50] == re.sub(r"\s", "", it.copy)[:50] for o in pix_ok):
+            add(it)
     return items
 
 
@@ -402,6 +412,7 @@ IMAGE_PAGES = 10   # código de barras / QR: só nas primeiras páginas (é o qu
 def scan(doc, today=None, images=True, cancel=lambda: False) -> list[Item]:
     """Tudo o que foi encontrado no documento, por página."""
     found: list[Item] = []
+    texts = []
     for pno in range(doc.page_count):
         if cancel():
             break
@@ -429,8 +440,55 @@ def scan(doc, today=None, images=True, cancel=lambda: False) -> list[Item]:
         for it in items:
             if it.rect is None:
                 it.rect = _locate(page, it)
+            if it.kind == "boleto":
+                _check_bank(it, text)
         found.extend(items)
+        texts.append(text)
+    _check_pix_payee(found, texts)
     return found
+
+
+_STOP_NAME = {"ltda", "me", "mei", "epp", "eireli", "sa", "s/a", "da", "de", "do", "das", "dos", "e", "cia", "comercio",
+              "servicos", "brasil", "pagamentos", "ip", "inst", "instituicao"}
+
+
+def _norm(s):
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "")
+    return "".join(c for c in s if not unicodedata.combining(c)).lower()
+
+
+def _check_pix_payee(items, texts):
+    """Pix cujo recebedor não aparece em lugar nenhum do documento: típico de boleto/cobrança com QR trocado."""
+    full = "\n".join(texts)
+    for it in items:
+        if it.kind == "pix":
+            full = full.replace(it.copy, " ")
+    full = re.sub(r"0002\s*01[\s\S]{0,600}?6\s*3\s*0\s*4[\s0-9A-Fa-f]{4,8}", " ", full)   # o próprio código (quebrado em linhas)
+    plain = re.sub(r"\s+", " ", _norm(full))
+    if len(plain) < 200:          # documento quase sem texto: não tem com o que comparar
+        return
+    for it in items:
+        if it.kind != "pix" or not it.ok:
+            continue
+        name = dict(it.details).get("Recebedor", "")
+        words = [w for w in re.findall(r"[a-z0-9]{3,}", _norm(name)) if w not in _STOP_NAME]
+        if words and not any(re.search(r"\b" + re.escape(w) + r"\b", plain) for w in words):
+            it.alert = (f"O Pix vai para “{name}”, nome que não aparece em nenhum lugar do documento. "
+                        "Confira se é mesmo quem está cobrando antes de pagar.")
+
+
+_BANK_HEADER = re.compile(r"(?<![\d.,/-])(\d{3})\s?-\s?[\dxX](?![\d])")
+
+
+def _check_bank(it, text):
+    """Banco do código de barras diferente do banco impresso no cabeçalho do boleto (ex.: “237-2”)."""
+    printed = {m.group(1) for m in _BANK_HEADER.finditer(text) if m.group(1) in BANCOS}
+    code = it.copy[:3]
+    if printed and code not in printed and it.ok:
+        other = sorted(printed)[0]
+        it.alert = (f"O código de barras é do {BANCOS.get(code, 'banco ' + code)} ({code}), mas o boleto mostra "
+                    f"{BANCOS[other]} ({other}). Golpistas trocam o código e mantêm a aparência do boleto: confirme com quem emitiu.")
 
 
 def _locate(page, it: Item):

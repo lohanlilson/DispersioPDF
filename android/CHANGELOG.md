@@ -1,5 +1,14 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.15.0
+
+- **Proteção contra golpes**
+  - Faixa de alerta quando o PDF tem JavaScript escondido, ação automática, programa anexado, página que é um "botão" para um site ou links suspeitos. "Remover o perigo" tira tudo isso (dá para desfazer).
+  - Antes de abrir um site do documento, mostra o endereço real e avisa quando o link engana (texto mostra um site e vai para outro, nome de banco em site que não é dele, link encurtado, endereço só de números, download de programa).
+  - Pix: avisa quando o recebedor não aparece no documento. Boleto: avisa quando o banco do código de barras é diferente do banco impresso.
+  - Dá para desligar em Configurações.
+- Pix copia e cola quebrado em duas linhas era acusado como "alterado" sem estar.
+
 ## 0.14.0
 
 - **Tradução de artigos em duas colunas mais fiel**: o parágrafo que continua na outra coluna é traduzido inteiro mesmo com legenda ou nota no meio; fórmulas e nomes de autores/instituições da primeira página ficam como no original.

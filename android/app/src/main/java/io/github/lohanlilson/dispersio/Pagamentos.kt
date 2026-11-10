@@ -27,6 +27,7 @@ data class PayItem(
     var problem: String = "",
     var source: String = "texto",  // texto | código | texto e código
     val key: String = "",
+    var alert: String = "",        // estranho, mas não necessariamente errado (recebedor fora do documento, banco trocado)
 ) {
     val copyLabel get() = when (kind) {
         "pix" -> "Copiar Pix copia e cola"
@@ -266,15 +267,58 @@ object Pagamentos {
             val run = m.value.filter { it != ' ' && it != '.' && it != '-' && it != '/' }
             for (a in 0..run.length - 44) run.substring(a, a + 44).let { if (chaveOk(it)) add(chaveItem(page, it)) }
         }
-        val flat = t.replace(Regex("\\s*\\n\\s*"), "")
-        for (src in listOf(flat, t)) {
+        // a quebra de linha pode ter caído num espaço do código (nome do recebedor) ou no meio de uma palavra
+        val flat = t.replace(Regex("[ \\t]*\\n[ \\t]*"), "")
+        val spaced = t.replace(Regex("[ \\t]*\\n[ \\t]*"), " ")
+        val pixOk = ArrayList<PayItem>(); val pixBad = ArrayList<PayItem>()
+        for (src in listOf(flat, spaced, t)) {
             var i = src.indexOf("000201")
             while (i >= 0) {
-                pixExtract(src.substring(i))?.let { add(pixItem(page, it)) }
+                pixExtract(src.substring(i))?.let { pixItem(page, it) }?.let { if (it.ok) pixOk += it else pixBad += it }
                 i = src.indexOf("000201", i + 1)
             }
         }
+        fun head(s: String) = s.filterNot { it.isWhitespace() }.take(50)
+        pixOk.forEach { add(it) }
+        pixBad.filter { b -> pixOk.none { head(it.copy) == head(b.copy) } }.forEach { add(it) }
+        items.filter { it.kind == "boleto" }.forEach { checkBank(it, t) }
         return items
+    }
+
+    private val BANK_HEADER = Regex("(?<![\\d.,/-])(\\d{3})\\s?-\\s?[\\dxX](?!\\d)")
+
+    /** Banco do código de barras diferente do banco impresso no cabeçalho do boleto (ex.: “237-2”). */
+    fun checkBank(it: PayItem, text: String) {
+        val printed = BANK_HEADER.findAll(text).map { m -> m.groupValues[1] }.filter { c -> c in BANCOS }.toSortedSet()
+        val code = it.copy.take(3)
+        if (printed.isNotEmpty() && code !in printed && it.ok) {
+            val other = printed.first()
+            it.alert = "O código de barras é do ${BANCOS[code] ?: "banco $code"} ($code), mas o boleto mostra ${BANCOS[other]} ($other). " +
+                "Golpistas trocam o código e mantêm a aparência do boleto: confirme com quem emitiu."
+        }
+    }
+
+    private val STOP_NAME = setOf("ltda", "me", "mei", "epp", "eireli", "sa", "da", "de", "do", "das", "dos", "e", "cia",
+        "comercio", "servicos", "brasil", "pagamentos", "ip", "inst", "instituicao")
+
+    private fun norm(s: String) = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "").lowercase()
+
+    /** Pix cujo recebedor não aparece em lugar nenhum do documento: típico de cobrança com QR trocado. */
+    fun checkPixPayee(items: List<PayItem>, texts: List<String>) {
+        var full = texts.joinToString("\n")
+        items.filter { it.kind == "pix" }.forEach { full = full.replace(it.copy, " ") }
+        full = full.replace(Regex("0002\\s*01[\\s\\S]{0,600}?6\\s*3\\s*0\\s*4[\\s0-9A-Fa-f]{4,8}"), " ")
+        val plain = norm(full).replace(Regex("\\s+"), " ")
+        if (plain.length < 200) return
+        for (it in items) {
+            if (it.kind != "pix" || !it.ok) continue
+            val name = it.details.toMap()["Recebedor"] ?: continue
+            val words = Regex("[a-z0-9]{3,}").findAll(norm(name)).map { m -> m.value }.filter { w -> w !in STOP_NAME }.toList()
+            if (words.isNotEmpty() && words.none { w -> Regex("\\b" + Regex.escape(w) + "\\b").containsMatchIn(plain) })
+                it.alert = "O Pix vai para “${name.trim()}”, nome que não aparece em nenhum lugar do documento. " +
+                    "Confira se é mesmo quem está cobrando antes de pagar."
+        }
     }
 
     // ------------------------------------------------------------------ códigos desenhados
@@ -324,9 +368,11 @@ object Pagamentos {
 
     suspend fun scan(engine: PdfEngine, pdf: OpenPdf, pages: Int, today: LocalDate = LocalDate.now()): List<PayItem> {
         val out = ArrayList<PayItem>()
+        val texts = ArrayList<String>()
         for (p in 0 until pages) {
             kotlinx.coroutines.yield()
             val text = runCatching { engine.pageText(pdf, p) }.getOrDefault("")
+            texts += text
             val ti = findInText(text, p, today)
             val codes = if (p < IMAGE_PAGES) {
                 val bmp = engine.renderFresh(pdf, p, 1700)
@@ -336,6 +382,7 @@ object Pagamentos {
             } else emptyList()
             out += merge(ti, codes)
         }
+        checkPixPayee(out, texts)
         return out
     }
 }
