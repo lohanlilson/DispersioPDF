@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.18.2
+
+- **Impressão que falhava com "Não foi possível iniciar a impressão nesta impressora"**: quando o driver recusa o trabalho, o programa tenta de novo com configurações mais simples (resolução e papel padrão da impressora). Se mesmo assim não der, avisa o motivo: impressora desligada/offline, pausada, sem papel, marcada como "Usar impressora offline", removida ou da área de trabalho remota. Vale também para a impressão rápida (botão direito do Windows, Outlook).
+
 ## 1.18.1
 
 - **Seleção em tabelas**: arrastar dentro de uma coluna (ex.: só o nome numa tabela de consultas) seleciona e copia só aquela coluna, sem puxar a data e o CNPJ das colunas do lado. Em texto corrido nada muda.

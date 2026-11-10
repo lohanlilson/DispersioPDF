@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QVBoxLayout, QGridLayout, Q
                                QGroupBox, QStackedWidget, QWidget, QScrollArea, QFrame, QFileDialog, QMessageBox,
                                QProgressDialog, QInputDialog, QToolButton, QApplication, QSizePolicy)
 
-from . import ops, icons
+from . import ops, icons, impressora
 from .config import cfg
 
 PDF_PRINTER = "__pdf__"
@@ -319,6 +319,48 @@ def printers():
     infos = QPrinterInfo.availablePrinters()
     default = QPrinterInfo.defaultPrinterName()
     return infos, default
+
+
+class PrinterUnavailable(RuntimeError):
+    """A impressora recusou o trabalho (desligada, pausada, removida...): aviso comum, não erro do programa."""
+
+
+_STATUS = [(0x80, "Ela está desligada ou desconectada (offline)."), (0x1000, "Ela não está disponível agora."),
+           (0x1, "A impressora está pausada: abra a fila de impressão do Windows e clique em Continuar."),
+           (0x10, "Está sem papel."), (0x8, "O papel enroscou."), (0x40000, "Está sem toner/tinta."),
+           (0x400000, "Há uma tampa aberta."), (0x100000, "Ela precisa de atenção (veja o painel da impressora)."),
+           (0x4, "Ela está sendo removida do Windows."), (0x2, "Ela está com erro.")]
+
+
+def printer_problem(name):
+    """Motivo provável de a impressora recusar o trabalho (Windows), em português; "" se não souber."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import win32print
+    except Exception:
+        return ""
+    try:
+        h = win32print.OpenPrinter(name)
+    except Exception:
+        return ("A impressora não existe mais neste computador — pode ter sido desconectada, removida ou ser uma "
+                "impressora da área de trabalho remota de outra sessão. Escolha outra na lista.")
+    try:
+        inf = win32print.GetPrinter(h, 2)
+    except Exception:
+        return ""
+    finally:
+        win32print.ClosePrinter(h)
+    if inf.get("Attributes", 0) & 0x400:
+        return "Ela está marcada como “Usar impressora offline” no Windows: abra a fila de impressão e desmarque essa opção."
+    st = inf.get("Status", 0)
+    for bit, txt in _STATUS:
+        if st & bit:
+            return txt
+    port = (inf.get("pPortName") or "")
+    if port.lower().startswith("ts") or "redirec" in name.lower():
+        return "É uma impressora redirecionada da área de trabalho remota: confira se a conexão remota está aberta."
+    return ""
 
 
 def printer_state_text(info):
@@ -1089,6 +1131,8 @@ class PrintManager(QDialog):
                 self._save_pdf(o, orientation, paper, area)
             else:
                 self._print(o, orientation, area)
+        except PrinterUnavailable as e:
+            QMessageBox.warning(self, "Imprimir", str(e))
         except Exception as e:
             from . import errors
             errors.report(self, f"A impressão falhou: {e}", e, "Imprimir")
@@ -1115,23 +1159,50 @@ class PrintManager(QDialog):
             QApplication.processEvents()
         return True
 
-    def _print(self, o, orientation, area):
-        info = self._info()
-        pr = self._driver_printer or QPrinter(info, QPrinter.HighResolution)
+    def _setup_printer(self, info, o, orientation, level=0):
+        """level 0: como escolhido; 1: impressora nova, sem forçar resolução; 2: só o básico (o driver recusou algo)."""
+        pr = self._driver_printer if (level == 0 and self._driver_printer) else QPrinter(info, QPrinter.HighResolution)
         if pr.outputFormat() == QPrinter.NativeFormat and pr.printerName() != info.printerName():
             pr.setPrinterName(info.printerName())
-        pr.setPageSize(QPageSize(QPageSize.PageSizeId(o["paper"])))
+        if level < 2:
+            pr.setPageSize(QPageSize(QPageSize.PageSizeId(o["paper"])))
         pr.setPageOrientation(QPageLayout.Landscape if orientation == "landscape" else QPageLayout.Portrait)
-        pr.setColorMode(QPrinter.GrayScale if o["gray"] else QPrinter.Color)
-        dup = {"long": QPrinter.DuplexLongSide, "short": QPrinter.DuplexShortSide}.get(o["duplex"], QPrinter.DuplexNone)
-        if o["mode"] == "booklet" and o["duplex"] in ("long", "short"):
-            dup = QPrinter.DuplexShortSide
-        pr.setDuplex(dup)
+        if level < 2:
+            pr.setColorMode(QPrinter.GrayScale if o["gray"] else QPrinter.Color)
+            dup = {"long": QPrinter.DuplexLongSide, "short": QPrinter.DuplexShortSide}.get(o["duplex"], QPrinter.DuplexNone)
+            if o["mode"] == "booklet" and o["duplex"] in ("long", "short"):
+                dup = QPrinter.DuplexShortSide
+            pr.setDuplex(dup)
         pr.setCopyCount(1)
         pr.setFullPage(False)
         names = ", ".join(s.name for s in self.sources)
         pr.setDocName(names[:120])
-        pr.setResolution(o["quality"])
+        if level == 0:
+            pr.setResolution(o["quality"])
+        return pr
+
+    def _begin(self, info, o, orientation):
+        """Começa o trabalho de impressão. Se o driver recusar, tenta de novo com menos exigências; se ainda assim
+        não der, explica o motivo (desligada, pausada, sem papel, impressora que não existe mais...)."""
+        if impressora.PRINTER.lower() == info.printerName().lower() and not impressora.agent_running():
+            try:
+                impressora.start_agent()
+            except Exception:
+                pass
+        for level in (0, 1, 2):
+            pr = self._setup_printer(info, o, orientation, level)
+            painter = QPainter()
+            if painter.begin(pr):
+                return pr, painter
+        why = printer_problem(info.printerName())
+        raise PrinterUnavailable(f"Não foi possível iniciar a impressão em “{info.printerName()}”." + (f" {why}" if why else
+                           " Confira se ela está ligada e conectada, ou escolha outra impressora."))
+
+    def _print(self, o, orientation, area):
+        info = self._info()
+        if info is None or info.isNull():
+            raise PrinterUnavailable("A impressora escolhida não está mais disponível. Escolha outra na lista.")
+        pr, first_painter = self._begin(info, o, orientation)
         res = pr.resolution()
         k = res / 72
         # origem: a área imprimível (painter começa nela) + margem extra
@@ -1162,9 +1233,13 @@ class PrintManager(QDialog):
                 if r != QMessageBox.Yes:
                     break
                 prog.show()
-            painter = QPainter()
-            if not painter.begin(pr):
-                raise RuntimeError("Não foi possível iniciar a impressão nesta impressora.")
+            if first_painter is not None:
+                painter, first_painter = first_painter, None
+            else:
+                painter = QPainter()
+                if not painter.begin(pr):
+                    why = printer_problem(info.printerName())
+                    raise PrinterUnavailable(f"Não foi possível imprimir os versos em “{info.printerName()}”." + (f" {why}" if why else ""))
             painter.setRenderHint(QPainter.SmoothPixmapTransform)
             ok = self._paint_all(painter, pr.newPage, part, o, k, origin, area, prog, done, total)
             if not ok:
@@ -1174,6 +1249,9 @@ class PrintManager(QDialog):
                 return
             painter.end()
             done += len(part)
+        if first_painter is not None:      # cancelou antes de começar
+            pr.abort()
+            first_painter.end()
         prog.close()
         self.win.statusBar().showMessage(f"{len(seq)} folha(s) enviada(s) para {info.printerName()}.", 8000)
         self.accept()
@@ -1287,7 +1365,19 @@ def quick_print(sources, printer_name="", opts=None, printer=None):
     origin = ((area.x() - paint.x()) * k, (area.y() - paint.y()) * k)
     painter = QPainter()
     if not painter.begin(printer):
-        raise RuntimeError(f"Não foi possível imprimir em “{name}”.")
+        retry = None
+        if not test_dir and printer_name is not None and printer.outputFormat() == QPrinter.NativeFormat:
+            retry = QPrinter(find_printer(printer_name), QPrinter.HighResolution)    # sem forçar resolução e papel
+            retry.setPageOrientation(printer.pageLayout().orientation())
+            retry.setDocName(printer.docName())
+        if retry is None or not painter.begin(retry):
+            why = printer_problem(name)
+            raise PrinterUnavailable(f"Não foi possível imprimir em “{name}”." + (f" {why}" if why else
+                                     " Confira se ela está ligada e conectada, ou escolha outra impressora."))
+        printer = retry
+        k = printer.resolution() / 72
+        paint2 = printer.pageLayout().paintRectPoints()
+        origin = ((area.x() - paint2.x()) * k, (area.y() - paint2.y()) * k)
     painter.setRenderHint(QPainter.SmoothPixmapTransform)
     for n, sh in enumerate(seq):
         if n:
