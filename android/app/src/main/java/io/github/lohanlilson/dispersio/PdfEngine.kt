@@ -432,14 +432,64 @@ class PageChars(val page: Int, val text: String, val frac: Array<FracRect?>, val
         return selection(s, e)
     }
 
+    /** Trecho contínuo de linha de cada caractere (x inicial, x final): um espaço grande separa colunas de tabela/texto. */
+    private val segs: Array<FloatArray?> by lazy {
+        val out = arrayOfNulls<FloatArray>(size)
+        var run = ArrayList<Int>()
+        fun flush() {
+            if (run.isEmpty()) return
+            val x0 = run.minOf { frac[it]!!.l }; val x1 = run.maxOf { frac[it]!!.r }
+            val seg = floatArrayOf(x0, x1)
+            run.forEach { out[it] = seg }
+            run = ArrayList()
+        }
+        for (k in 0 until size) {
+            val f = frac[k] ?: continue
+            val last = run.lastOrNull()?.let { frac[it] }
+            if (last != null) {
+                val h = maxOf(f.b - f.t, last.b - last.t)
+                val same = kotlin.math.abs((f.t + f.b) / 2 - (last.t + last.b) / 2) < h * 0.6f
+                if (!same || f.l < last.l - h || f.l - last.r > 2.5f * h) flush()
+            }
+            run += k
+        }
+        flush()
+        out
+    }
+
+    private fun segNear(k: Int, s: Int, e: Int): FloatArray? {
+        for (d in 0..(e - s)) {
+            segs.getOrNull(k + d)?.let { if (k + d <= e) return it }
+            segs.getOrNull(k - d)?.let { if (k - d >= s) return it }
+        }
+        return null
+    }
+
+    /** Caracteres entre s e e na mesma faixa horizontal (coluna) do começo e do fim: numa tabela, só a coluna arrastada. */
+    private fun keep(s: Int, e: Int): BooleanArray {
+        val keep = BooleanArray(e - s + 1) { true }
+        val sa = segNear(s, s, e) ?: return keep
+        val sb = segNear(e, s, e) ?: return keep
+        val lo = minOf(sa[0], sb[0]) - 0.003f; val hi = maxOf(sa[1], sb[1]) + 0.003f
+        var prev = true
+        for (k in s..e) {
+            val g = segs[k]
+            prev = if (g == null) prev else (g[1] >= lo && g[0] <= hi)
+            keep[k - s] = prev
+        }
+        return keep
+    }
+
     fun selection(a: Int, b: Int): TextSelection {
         val s = minOf(a, b).coerceIn(0, size - 1)
         val e = maxOf(a, b).coerceIn(0, size - 1)
+        val kept = keep(s, e)
         val fr = ArrayList<FracRect>()
         val pr = ArrayList<RectF>()
         var cf: FracRect? = null
         var cp: RectF? = null
         for (k in s..e) {
+            if (!kept[k - s]) continue
             val f = frac[k] ?: continue
             val p = pdf[k] ?: continue
             val c = cf
@@ -456,6 +506,9 @@ class PageChars(val page: Int, val text: String, val frac: Array<FracRect?>, val
             }
         }
         cf?.let { fr += it; pr += cp!! }
-        return TextSelection(page, s, e, text.substring(s, minOf(e + 1, text.length)).replace("\r\n", "\n"), fr, pr)
+        val sb = StringBuilder()
+        for (k in s..minOf(e, text.length - 1)) if (kept[k - s]) sb.append(text[k]) else if (sb.isNotEmpty() && sb.last() != '\n') sb.append('\n')
+        val txt = sb.toString().replace("\r\n", "\n").replace(Regex("[ \\t]*\n[\\s]*"), "\n").trim()
+        return TextSelection(page, s, e, txt, fr, pr)
     }
 }

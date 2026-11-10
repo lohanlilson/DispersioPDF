@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.18.1
+
+- **Seleção em tabelas**: arrastar dentro de uma coluna (ex.: só o nome numa tabela de consultas) seleciona e copia só aquela coluna, sem puxar a data e o CNPJ das colunas do lado. Em texto corrido nada muda.
+
 ## 1.18.0
 
 - **Proteção contra golpes**

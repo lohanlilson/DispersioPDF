@@ -162,6 +162,7 @@ class PdfView(QGraphicsView):
             self.scene_.addItem(it)
         self.cache.clear()
         self._words.clear()
+        self.__dict__.pop('_segs', None)
         self._links.clear()
         self._pages = {}
         self._sizes = {}
@@ -396,11 +397,13 @@ class PdfView(QGraphicsView):
         if pages is None:
             self.cache.clear()
             self._words.clear()
+            self.__dict__.pop('_segs', None)
             self._links.clear()
         else:
             for p in pages:
                 self.cache.pop(p, None)
                 self._words.pop(p, None)
+                self.__dict__.get("_segs", {}).pop(p, None)
                 self._links.pop(p, None)
         self._schedule_visible()
         self.viewport().update()
@@ -642,7 +645,9 @@ class PdfView(QGraphicsView):
             return
         a, b = sorted((i0, i1))
         self.sel = (page, a, b)
-        ws = self.words(page)[a:b + 1]
+        self._sel_idx = self._column_filter(page, a, b)
+        allw = self.words(page)
+        ws = [allw[k] for k in self._sel_idx]
         lines = {}
         for r, _, bl, ln in ws:
             key = (bl, ln)
@@ -651,9 +656,54 @@ class PdfView(QGraphicsView):
         self.selectionChanged.emit(True)
         self.viewport().update()
 
+    def _segments(self, page):
+        """Para cada palavra, o trecho contínuo da linha em que ela está (x0, x1). Um espaço grande separa trechos:
+        é assim que as colunas de uma tabela ou de um texto em duas colunas ficam separadas."""
+        cache = self.__dict__.setdefault("_segs", {})
+        if page in cache:
+            return cache[page]
+        ws = self.words(page)
+        rows = {}
+        for k, (r, _, bl, ln) in enumerate(ws):
+            rows.setdefault((bl, ln), []).append(k)
+        seg = [None] * len(ws)
+        for ks in rows.values():
+            ks.sort(key=lambda k: ws[k][0].x0)
+            groups, cur = [], [ks[0]]
+            for k in ks[1:]:
+                prev = ws[cur[-1]][0]
+                h = max(prev.height, ws[k][0].height, 4)
+                if ws[k][0].x0 - prev.x1 > 2.5 * h:
+                    groups.append(cur)
+                    cur = [k]
+                else:
+                    cur.append(k)
+            groups.append(cur)
+            for g in groups:
+                x0 = min(ws[k][0].x0 for k in g)
+                x1 = max(ws[k][0].x1 for k in g)
+                for k in g:
+                    seg[k] = (x0, x1)
+        cache[page] = seg
+        return seg
+
+    def _column_filter(self, page, a, b):
+        """Palavras entre a e b que estão na mesma faixa horizontal (coluna) do começo e do fim da seleção.
+        Em texto corrido a faixa é a linha inteira (nada muda); numa tabela, só a coluna arrastada."""
+        if b - a < 1:
+            return list(range(a, b + 1))
+        seg = self._segments(page)
+        ws = self.words(page)
+        sa, sb = seg[a], seg[b]
+        if ws[a][0].y0 > ws[b][0].y0:     # a ordem do texto pode não ser a de cima para baixo
+            sa, sb = sb, sa
+        lo, hi = min(sa[0], sb[0]) - 2, max(sa[1], sb[1]) + 2
+        return [k for k in range(a, b + 1) if seg[k][1] >= lo and seg[k][0] <= hi]
+
     def clear_selection(self):
         had = self.sel is not None
         self.sel = None
+        self._sel_idx = None
         self.sel_rects = {}
         if had:
             self.selectionChanged.emit(False)
@@ -670,7 +720,9 @@ class PdfView(QGraphicsView):
             return ""
         p, a, b = self.sel
         out, last = [], None
-        for r, t, bl, ln in self.words(p)[a:b + 1]:
+        allw = self.words(p)
+        idx = getattr(self, "_sel_idx", None) or range(a, b + 1)
+        for r, t, bl, ln in (allw[k] for k in idx):
             if last is not None and (bl, ln) != last:
                 out.append("\n")
             elif last is not None:
