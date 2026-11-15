@@ -1,5 +1,13 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.17.0
+
+- **Continuar do computador**: na tela inicial, lê o QR do Dispersio PDF do computador e abre o documento na mesma página (pela rede Wi-Fi, sem nuvem). No documento, "⋮ › Enviar para o computador (QR)" faz o contrário.
+- **Fila do Dispersio**: em qualquer app, Compartilhar › "Fila do Dispersio" guarda o arquivo (PDF ou foto) numa fila. Depois dá para juntar e abrir, imprimir tudo, juntar e enviar ou enviar separados, em todos ou só nos selecionados, mudando a ordem.
+- **Preencher com meus dados**: se o PDF não tiver campos (só linhas em branco), cria os campos e já mostra o que vai preencher.
+- **Relatório de erro**: se o app fechar com erro, na próxima vez oferece enviar o relatório (e-mail ou GitHub). Em Configurações: "Relatar problema ou enviar sugestão".
+- **PDFs grandes**: a busca mostra o primeiro resultado assim que acha; a procura de boletos olha o começo e o fim de documentos enormes.
+
 ## 0.16.0
 
 - **Tabelas**: selecionar da primeira à última coluna pega a linha inteira (com células de várias linhas) e copiar já cola no Excel em colunas.

@@ -12,6 +12,7 @@ class DispersioApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        Relatorio.install(this)
         com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
         TextEdit.assets = assets
         engine = PdfEngine(this)

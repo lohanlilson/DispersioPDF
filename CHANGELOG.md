@@ -2,6 +2,15 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.20.0
+
+- **Continuar no celular** (Arquivo › Continuar no celular): o computador mostra um QR; no app do celular, "Continuar do computador" baixa o documento (com as alterações) pela rede Wi-Fi e abre na mesma página. O contrário também: no celular, "⋮ › Enviar para o computador" abre o documento aqui na página em que estava. Sem nuvem; a ligação só existe enquanto a janela do QR estiver aberta.
+- **Meus dados**: guarde nome, CPF, RG, endereço, empresa, CNPJ etc. (Preferências ou Formulários › Meus dados). "Preencher com meus dados" preenche o formulário com um clique; se o PDF só tiver linhas em branco ("Nome: ____"), cria os campos antes. Campos de outra pessoa ("Nome da mãe", "Testemunha") ficam de fora.
+- **Relatar problema**: a tela de erro e Ajuda › Relatar problema enviam o relatório por e-mail, pelo Gmail no navegador (não precisa de programa de e-mail) ou pelo GitHub, com os últimos erros registrados.
+- **PDFs grandes**:
+  - a busca não trava mais a janela: mostra o primeiro resultado na hora e continua procurando;
+  - as verificações automáticas (golpes, boletos, orientação) usam metade da memória e terminam bem mais rápido em documentos de centenas de páginas.
+
 ## 1.19.0
 
 - **Tabelas**

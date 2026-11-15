@@ -88,11 +88,13 @@ CATALOG = [
     ]),
     ("Formulários", [
         ("detect_fields", "form", "Detectar campos automaticamente"),
-        ("form_fill", "form", "Preencher formulário"), ("field_text", "textfield", "Campo de texto"),
+        ("form_fill", "form", "Preencher formulário"), ("autofill", "form", "Preencher com meus dados"),
+        ("my_data", "edit", "Meus dados (para preencher)"), ("field_text", "textfield", "Campo de texto"),
         ("field_check", "checkbox", "Caixa de seleção"), ("field_combo", "form", "Lista suspensa"),
     ]),
     ("Mais ferramentas", [
         ("payments", "barcode", "Boletos, Pix e notas fiscais"), ("search_folder", "search", "Buscar em vários PDFs (pasta)"),
+        ("phone", "phone", "Continuar no celular"),
         ("articles", "search", "Pesquisar artigos científicos"), ("articles_doc", "search", "Artigos sobre este documento"), ("translate", "translate", "Traduzir documento"),
         ("compare", "compare", "Comparar arquivos"), ("read_aloud", "speaker", "Ler em voz alta"),
         ("attach", "attach", "Anexar arquivo"), ("print", "print", "Imprimir"),

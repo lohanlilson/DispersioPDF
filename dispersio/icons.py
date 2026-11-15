@@ -66,6 +66,7 @@ _P = {
     "comments": '<path d="M4 4h16v12H9l-5 4z"/>',
     "attach": '<path d="M20 11l-8.5 8.5a5 5 0 01-7-7L13 4a3.3 3.3 0 014.7 4.7L9.2 17.2a1.6 1.6 0 01-2.3-2.3L15 7"/>',
     "tools": '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M17 14v6M14 17h6"/>',
+    "phone": '<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/>',
     "home": '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
     "fit_width": '<path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"/>',
     "fit_page": '<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 9l-2-2M15 9l2-2M9 15l-2 2M15 15l2 2"/>',

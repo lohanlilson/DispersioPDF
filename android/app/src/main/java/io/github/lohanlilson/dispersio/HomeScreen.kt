@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.MergeType
@@ -112,6 +114,9 @@ fun HomeScreen(vm: AppVm) {
     if (vm.showSettings) SettingsScreen(vm) { vm.showSettings = false }
     if (vm.showArticles) ArticlesScreen(vm) { vm.showArticles = false }
     if (vm.showSearchAll) SearchAllScreen(vm) { vm.showSearchAll = false }
+    val ctx = LocalContext.current
+    var crash by remember { mutableStateOf(Relatorio.pending(ctx)) }
+    crash?.let { CrashReportDialog(it) { crash = null } }
 }
 
 @Composable
@@ -191,6 +196,11 @@ private fun QuickActions(vm: AppVm) {
             }
             ActionCard(Icons.Filled.Settings, "Preferências", "Tema, nome, rubrica…", Modifier.weight(1f)) { vm.showSettings = true }
         }
+        val ctxA = LocalContext.current
+        ActionCard(Icons.Filled.Computer, "Continuar do computador", "Lê o QR do computador e abre na mesma página",
+            Modifier.fillMaxWidth()) { vm.continueFromComputer(ctxA) }
+        ActionCard(Icons.Filled.Inbox, "Fila do Dispersio" + if (vm.queueCount > 0) " (${vm.queueCount})" else "",
+            "Compartilhe arquivos de outros apps para juntar, imprimir ou enviar", Modifier.fillMaxWidth()) { vm.showQueue = true }
         ActionCard(Icons.Filled.Search, "Buscar em vários PDFs", "Nome, CPF, CNPJ… nos recentes ou numa pasta", Modifier.fillMaxWidth()) { vm.showSearchAll = true }
         ActionCard(Icons.Filled.Science, "Artigos científicos", "Pesquise, baixe e traduza PDFs de pesquisa", Modifier.fillMaxWidth()) { vm.showArticles = true }
     }

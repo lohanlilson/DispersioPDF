@@ -133,6 +133,10 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
 
                 Section("Sobre")
                 Text("Dispersio PDF para Android ${BuildConfig.VERSION_NAME}")
+                TextButton({
+                    val body = Relatorio.info() + Relatorio.lastErrors(ctx).let { if (it.isBlank()) "\n\n(nenhum erro registrado)\n\nO que aconteceu:\n" else "\n\nÚltimos erros:\n\n$it" }
+                    Relatorio.sendEmail(ctx, body, "problema ou sugestão")
+                }) { Text("Relatar problema ou enviar sugestão") }
                 Text("Desenvolvido por Lohan Lilson S. Lopes", style = MaterialTheme.typography.bodySmall)
                 Text("lohanlilson@gmail.com", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(bottom = 40.dp))

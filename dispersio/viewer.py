@@ -803,22 +803,60 @@ class PdfView(QGraphicsView):
 
     # ------------------------------------------------------------ busca
     def search(self, text):
+        """Procura em todas as páginas. Em documentos grandes, procura em partes (a janela não trava): começa pela
+        página atual, mostra o primeiro resultado logo e continua em segundo plano. Devolve quantos achou até agora."""
+        self._search_gen = getattr(self, "_search_gen", 0) + 1
         self.search_hits = {}
         self.hit_list = []
         self.hit_pos = -1
-        if text and self.doc:
-            for i in range(self.doc.page_count):
+        self.search_running = False
+        if not text or not self.doc:
+            self.viewport().update()
+            return 0
+        n = self.doc.page_count
+        cur = min(max(self._cur_page, 0), n - 1)
+        self._search_todo = list(range(cur, n)) + list(range(0, cur))
+        self._search_text = text
+        self.search_running = True
+        self._search_step(self._search_gen, budget=0.25)
+        return len(self.hit_list)
+
+    def _search_step(self, gen, budget=0.08):
+        import time as _t
+        if gen != getattr(self, "_search_gen", 0) or not self.doc:
+            return
+        t0 = _t.perf_counter()
+        had = bool(self.hit_list)
+        cur_hit = self.hit_list[self.hit_pos] if 0 <= self.hit_pos < len(self.hit_list) else None
+        added = False
+        while self._search_todo and _t.perf_counter() - t0 < budget:
+            i = self._search_todo.pop(0)
+            try:
                 page = self._page(i)
-                rects = [r * page.rotation_matrix for r in (page.search_for(text) or [])]
-                if rects:
-                    self.search_hits[i] = rects
-                    self.hit_list += [(i, k) for k in range(len(rects))]
-        self.viewport().update()
-        if self.hit_list:
-            start = next((n for n, (pg, _) in enumerate(self.hit_list) if pg >= self._cur_page), 0)
+                rects = [r * page.rotation_matrix for r in (page.search_for(self._search_text) or [])]
+            except Exception:
+                rects = []
+            if rects:
+                self.search_hits[i] = rects
+                added = True
+        if added:
+            self.hit_list = [(pg, k) for pg in sorted(self.search_hits) for k in range(len(self.search_hits[pg]))]
+            if cur_hit in self.hit_list:
+                self.hit_pos = self.hit_list.index(cur_hit)
+        if not had and self.hit_list:
+            start = next((m for m, (pg, _) in enumerate(self.hit_list) if pg >= self._cur_page), 0)
             self.hit_pos = start - 1
             self.next_hit()
-        return len(self.hit_list)
+        self.viewport().update()
+        if self._search_todo:
+            done = self.doc.page_count - len(self._search_todo)
+            self.status.emit(f"Procurando… página {done} de {self.doc.page_count} — {len(self.hit_list)} resultado(s)")
+            QTimer.singleShot(0, lambda: self._search_step(gen))
+        else:
+            self.search_running = False
+            n = len(self.hit_list)
+            if budget < 0.25 or n == 0:       # terminou em segundo plano: avisa o total
+                self.status.emit(f"{n} ocorrência(s) de “{self._search_text}”" if n else f"“{self._search_text}” não encontrado")
 
     def next_hit(self, step=1):
         if not self.hit_list:

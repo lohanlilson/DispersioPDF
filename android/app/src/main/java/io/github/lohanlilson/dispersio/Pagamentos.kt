@@ -366,10 +366,14 @@ object Pagamentos {
 
     const val IMAGE_PAGES = 10
 
+    const val MAX_SCAN = 60
+
     suspend fun scan(engine: PdfEngine, pdf: OpenPdf, pages: Int, today: LocalDate = LocalDate.now()): List<PayItem> {
         val out = ArrayList<PayItem>()
         val texts = ArrayList<String>()
-        for (p in 0 until pages) {
+        // documento enorme: boletos, Pix e notas ficam no começo ou no fim
+        val list = if (pages <= MAX_SCAN) (0 until pages).toList() else ((0 until MAX_SCAN - 10) + (pages - 10 until pages)).distinct()
+        for (p in list) {
             kotlinx.coroutines.yield()
             val text = runCatching { engine.pageText(pdf, p) }.getOrDefault("")
             texts += text

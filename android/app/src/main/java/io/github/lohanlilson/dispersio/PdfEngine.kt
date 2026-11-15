@@ -170,7 +170,7 @@ class PdfEngine(context: Context) {
         return FracRect(l, t, rr, b)
     }
 
-    suspend fun search(pdf: OpenPdf, query: String, onPage: (Int) -> Unit = {}): List<SearchHit> = withContext(dispatcher) {
+    suspend fun search(pdf: OpenPdf, query: String, onPage: (Int) -> Unit = {}, onHit: (SearchHit) -> Unit = {}): List<SearchHit> = withContext(dispatcher) {
         val out = ArrayList<SearchHit>()
         if (query.isBlank()) return@withContext out
         for (i in 0 until pdf.sizes.size) {
@@ -184,7 +184,7 @@ class PdfEngine(context: Context) {
                             val cnt = fr.getSchCount()
                             val nr = tp.textPageCountRects(idx, cnt)
                             val rects = (0 until nr).mapNotNull { k -> tp.textPageGetRect(k)?.let { frac(p, sizeOf(pdf, i, p), it) } }
-                            if (rects.isNotEmpty()) out += SearchHit(i, rects)
+                            if (rects.isNotEmpty()) SearchHit(i, rects).also { out += it; onHit(it) }
                         }
                     } finally {
                         fr.close()

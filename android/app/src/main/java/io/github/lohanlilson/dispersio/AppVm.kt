@@ -1134,6 +1134,83 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     var showSettings by mutableStateOf(false)
     var showArticles by mutableStateOf(false)
     var showSearchAll by mutableStateOf(false)
+
+    // ------------------------------------------------------------ computador (QR na rede Wi-Fi)
+    private val NOT_LINK = "Esse QR não é do Dispersio PDF do computador. No computador, use Arquivo › Continuar no celular."
+    private fun netError(e: Exception) = "Não foi possível falar com o computador.\nConfira se o celular está no mesmo Wi-Fi e se a " +
+        "janela do QR ainda está aberta no computador.\n(${e.message ?: e.javaClass.simpleName})"
+
+    /** Lê o QR do computador, baixa o documento (com as alterações) e abre na mesma página. */
+    fun continueFromComputer(ctx: android.content.Context) = viewModelScope.launch {
+        val url = Celular.scan(ctx) ?: return@launch
+        if (!Celular.isLink(url)) { error = NOT_LINK; return@launch }
+        loading = true
+        try {
+            val info = Celular.info(url)
+            if (!info.hasDoc) { error = "O computador não tem documento aberto. Abra o PDF lá e mostre o QR de novo."; return@launch }
+            progress = "Recebendo do computador…"
+            val f = Celular.download(getApplication(), url, info.name) { progress = "Recebendo do computador… ${(it * 100).toInt()}%" }
+            progress = null
+            doc?.let { closeDoc() }
+            openPrepared(Uri.fromFile(f), f.name, null, info.page)
+            toast = "Continuando na página ${info.page + 1}"
+        } catch (e: Exception) {
+            error = netError(e)
+        } finally { loading = false; progress = null }
+    }
+
+    /** Lê o QR do computador e manda o documento aberto (abre lá na mesma página). */
+    fun sendToComputer(ctx: android.content.Context, d: ViewerDoc) = viewModelScope.launch {
+        val url = Celular.scan(ctx) ?: return@launch
+        if (!Celular.isLink(url)) { error = NOT_LINK; return@launch }
+        try {
+            progress = "Enviando para o computador…"
+            flushAutosave()
+            val f = currentFile(d)
+            Celular.upload(url, f, d.name, d.page)
+            toast = "Aberto no computador, na página ${d.page + 1}"
+        } catch (e: Exception) {
+            error = netError(e)
+        } finally { progress = null }
+    }
+
+    // ------------------------------------------------------------ fila do Dispersio
+    var showQueue by mutableStateOf(false)
+    var queueCount by mutableIntStateOf(Fila.list(app).size)
+        private set
+    fun refreshQueue() { queueCount = Fila.list(getApplication()).size }
+
+    fun addToQueue(uris: List<Uri>) = viewModelScope.launch {
+        val n = withContext(Dispatchers.IO) { Fila.add(getApplication(), uris) }
+        refreshQueue()
+        toast = if (n == 0) "Não foi possível adicionar à fila" else "$n arquivo(s) na fila do Dispersio (total: $queueCount)"
+        showQueue = true
+    }
+
+    fun queueMerge(files: List<File>, open: Boolean) = viewModelScope.launch {
+        loading = true
+        try {
+            val out = withContext(Dispatchers.IO) { Fila.merge(getApplication(), files) }
+            if (open) openPrepared(Uri.fromFile(out), out.name, null)
+        } catch (e: Exception) {
+            error = "Não foi possível juntar.\n${e.message ?: ""}"
+        } finally { loading = false }
+    }
+
+    /** Junta e entrega o arquivo para imprimir (a impressão do Android precisa da tela, por isso o callback). */
+    fun queuePrint(files: List<File>, print: (File) -> Unit) = viewModelScope.launch {
+        try {
+            val out = withContext(Dispatchers.IO) { Fila.merge(getApplication(), files) }
+            print(out)
+        } catch (e: Exception) { error = "Não foi possível imprimir.\n${e.message ?: ""}" }
+    }
+
+    fun queueShareMerged(files: List<File>) = viewModelScope.launch {
+        try {
+            val out = withContext(Dispatchers.IO) { Fila.merge(getApplication(), files) }
+            Fila.share(getApplication(), listOf(out))
+        } catch (e: Exception) { error = "Não foi possível juntar.\n${e.message ?: ""}" }
+    }
     var progress by mutableStateOf<String?>(null)
     var compare by mutableStateOf<CompareState?>(null)
     var closeAfterSave = false
@@ -1180,9 +1257,16 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         if (q.isBlank()) return@launch
         d.searching = true
         try {
-            val res = engine.search(d.pdf, q) { p -> d.searchPage = p }
+            // mostra o primeiro resultado (da página atual em diante) assim que aparece; o resto chega depois
+            val main = android.os.Handler(android.os.Looper.getMainLooper())
+            val start = d.page
+            val res = engine.search(d.pdf, q, onPage = { p -> d.searchPage = p }) { h ->
+                if (h.page >= start && d.hitIndex < 0) main.post { if (d.query == q && d.hitIndex < 0 && d.hits.isEmpty()) { d.hits.add(h); d.hitIndex = 0 } }
+            }
+            if (d.query != q) return@launch
+            d.hits.clear()
             d.hits.addAll(res)
-            d.hitIndex = res.indexOfFirst { it.page >= d.page }.let { if (it < 0 && res.isNotEmpty()) 0 else it }
+            d.hitIndex = res.indexOfFirst { it.page >= start }.let { if (it < 0 && res.isNotEmpty()) 0 else it }
         } finally {
             d.searching = false
         }

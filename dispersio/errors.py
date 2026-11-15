@@ -48,23 +48,57 @@ def write_log(report):
         pass
 
 
+def recent_reports(n=3):
+    """Os últimos n relatórios do registro de erros (inclui os que só foram gravados, como os da impressão rápida)."""
+    try:
+        data = open(log_path(), encoding="utf-8", errors="replace").read()
+    except OSError:
+        return ""
+    parts = [p.strip() for p in data.split("=" * 70) if p.strip()]
+    return ("\n\n" + "-" * 40 + "\n\n").join(parts[-n:])
+
+
+def _subject(summary=""):
+    return f"{APP_NAME} {__version__} — " + (summary[:80] if summary else "relatório de problema")
+
+
+def mail_url(body, summary=""):
+    return f"mailto:{EMAIL}?subject={urllib.parse.quote(_subject(summary))}&body={urllib.parse.quote(body)}"
+
+
+def gmail_url(body, summary=""):
+    """Gmail no navegador: funciona mesmo sem programa de e-mail instalado."""
+    return ("https://mail.google.com/mail/?view=cm&fs=1&to=" + urllib.parse.quote(EMAIL)
+            + "&su=" + urllib.parse.quote(_subject(summary)) + "&body=" + urllib.parse.quote(body))
+
+
+def github_url(body, summary=""):
+    from . import UPDATE_REPO
+    return (f"https://github.com/{UPDATE_REPO}/issues/new?title=" + urllib.parse.quote(_subject(summary))
+            + "&body=" + urllib.parse.quote("```\n" + body + "\n```"))
+
+
+LIMIT = 1800   # links longos demais são cortados pelo navegador / programa de e-mail
+
+
 class ErrorDialog(QDialog):
-    def __init__(self, parent, summary, report):
+    def __init__(self, parent, summary, report, title="Algo deu errado"):
         super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} — erro")
-        self.setMinimumWidth(560)
+        self.setWindowTitle(f"{APP_NAME} — {'erro' if title == 'Algo deu errado' else 'relatar problema'}")
+        self.setMinimumWidth(600)
         self.report = report
+        self.summary = summary
         lay = QVBoxLayout(self)
-        head = QLabel(f"<span style='font-size:15px; font-weight:600'>Algo deu errado</span><br>{summary}")
+        head = QLabel(f"<span style='font-size:15px; font-weight:600'>{title}</span>" + (f"<br>{summary}" if summary else ""))
         head.setWordWrap(True)
         head.setTextFormat(Qt.RichText)
         lay.addWidget(head)
-        info = QLabel("Você pode enviar este relatório ao desenvolvedor para que o problema seja corrigido "
-                      "numa próxima atualização. Nenhum documento é enviado — só os dados técnicos abaixo.")
+        info = QLabel("Envie este relatório ao desenvolvedor para o problema ser corrigido numa próxima atualização. "
+                      "Nenhum documento é enviado — só os dados técnicos abaixo. Você confere tudo antes de enviar.")
         info.setWordWrap(True)
         info.setObjectName("Muted")
         lay.addWidget(info)
-        self.text = QPlainTextEdit(report)
+        self.text = QPlainTextEdit(report or "(nenhum erro registrado)")
         self.text.setReadOnly(True)
         self.text.setMinimumHeight(170)
         self.text.setLineWrapMode(QPlainTextEdit.NoWrap)
@@ -75,38 +109,48 @@ class ErrorDialog(QDialog):
         self.user_note.setFixedHeight(60)
         lay.addWidget(self.user_note)
         row = QHBoxLayout()
-        copy = QPushButton("Copiar relatório")
+        copy = QPushButton("Copiar")
         copy.clicked.connect(self._copy)
         row.addWidget(copy)
         row.addStretch()
         close = QPushButton("Fechar")
         close.clicked.connect(self.reject)
-        send = QPushButton("Enviar por e-mail")
-        send.setObjectName("Primary")
-        send.clicked.connect(self._send)
         row.addWidget(close)
-        row.addWidget(send)
+        for label, fn, tip in (("GitHub", github_url, "Abre um chamado no GitHub já preenchido (precisa de conta no GitHub)"),
+                               ("Gmail", gmail_url, "Abre o Gmail no navegador já preenchido — não precisa de programa de e-mail"),
+                               ("E-mail", mail_url, "Abre o seu programa de e-mail (Outlook etc.) já preenchido")):
+            b = QPushButton(f"Enviar por {label}")
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, f=fn: self._send(f))
+            if label == "E-mail":
+                b.setObjectName("Primary")
+            row.addWidget(b)
         lay.addLayout(row)
 
     def _full(self):
         note = self.user_note.toPlainText().strip()
-        return (f"O que o usuário fazia: {note}\n\n" if note else "") + self.report
+        return (f"O que o usuário fazia: {note}\n\n" if note else "") + (self.report or "")
 
     def _copy(self):
         QGuiApplication.clipboard().setText(self._full())
-        self.note.setText("Relatório copiado. Cole num e-mail para " + EMAIL)
+        self.note.setText("Relatório copiado. Cole numa mensagem para " + EMAIL)
 
-    def _send(self):
+    def _send(self, make_url):
         body = self._full()
-        if len(body) > 1800:  # limite prático do mailto
-            body = body[:1800] + "\n…(relatório completo copiado para a área de transferência — cole aqui)"
-            QGuiApplication.clipboard().setText(self._full())
-        subject = f"{APP_NAME} {__version__} — relatório de erro"
-        url = f"mailto:{EMAIL}?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
-        if not QDesktopServices.openUrl(QUrl(url)):
+        if len(body) > LIMIT:
+            QGuiApplication.clipboard().setText(body)
+            body = body[:LIMIT] + "\n…(o relatório completo foi copiado — cole aqui com Ctrl+V)"
+        if not QDesktopServices.openUrl(QUrl(make_url(body, self.summary))):
             self._copy()
             return
         self.accept()
+
+
+def report_problem(parent):
+    """Ajuda › Relatar problema: junta os últimos erros registrados para enviar."""
+    rep = recent_reports(3)
+    rep = system_info() + ("\n\nÚltimos erros registrados:\n\n" + rep if rep else "\n\n(nenhum erro registrado)")
+    ErrorDialog(parent, "", rep, title="Relatar problema ou enviar sugestão").exec()
 
 
 _busy = False

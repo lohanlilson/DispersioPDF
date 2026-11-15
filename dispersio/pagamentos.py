@@ -409,11 +409,15 @@ def decode_page_image(page, dpi=200):
 IMAGE_PAGES = 10   # código de barras / QR: só nas primeiras páginas (é o que costuma ter boleto e DANFE)
 
 
-def scan(doc, today=None, images=True, cancel=lambda: False) -> list[Item]:
-    """Tudo o que foi encontrado no documento, por página."""
+def scan(doc, today=None, images=True, cancel=lambda: False, max_pages=None) -> list[Item]:
+    """Tudo o que foi encontrado no documento, por página. max_pages: em documentos enormes, olha só o começo e o
+    fim (boletos, Pix e notas ficam nas primeiras ou nas últimas páginas)."""
     found: list[Item] = []
     texts = []
-    for pno in range(doc.page_count):
+    n = doc.page_count
+    pages = range(n) if not max_pages or n <= max_pages else \
+        sorted(set(range(max_pages - 10)) | set(range(n - 10, n)))
+    for pno in pages:
         if cancel():
             break
         page = doc[pno]

@@ -55,6 +55,12 @@ import atexit as _atexit
 _atexit.register(stop_background)
 
 
+def _open_src(src):
+    """Arquivo no disco (lido aos poucos, pouca memória) ou bytes."""
+    import pymupdf
+    return pymupdf.open(src) if isinstance(src, str) else pymupdf.open(stream=src, filetype="pdf")
+
+
 class _PayThread(QThread):
     done = Signal(object)
 
@@ -66,11 +72,12 @@ class _PayThread(QThread):
         try:
             import pymupdf
             from . import pagamentos
-            d = pymupdf.open(stream=self.data, filetype="pdf")
+            d = _open_src(self.data)
             if d.needs_pass and self.password:
                 d.authenticate(self.password)
-            self.done.emit(pagamentos.scan(d, cancel=self.isInterruptionRequested))
+            self.done.emit(pagamentos.scan(d, cancel=self.isInterruptionRequested, max_pages=60))
             d.close()
+            pymupdf.TOOLS.store_shrink(100)     # devolve o cache do MuPDF usado na varredura
         except Exception:
             self.done.emit([])
 
@@ -86,7 +93,7 @@ class _SecThread(QThread):
         try:
             import pymupdf
             from . import seguranca
-            d = pymupdf.open(stream=self.data, filetype="pdf")
+            d = _open_src(self.data)
             if d.needs_pass and self.password:
                 d.authenticate(self.password)
             self.done.emit(seguranca.scan(d, cancel=self.isInterruptionRequested))
@@ -110,8 +117,11 @@ class _OrientThread(QThread):
         src, out = os.path.join(tmp, "doc.pdf"), os.path.join(tmp, "res.json")
         proc = None
         try:
-            with open(src, "wb") as f:
-                f.write(self.data)
+            if isinstance(self.data, str):
+                src = self.data                     # arquivo no disco, sem alteração: não precisa copiar
+            else:
+                with open(src, "wb") as f:
+                    f.write(self.data)
             if getattr(sys, "frozen", False):
                 cmd = [sys.executable]
             else:
@@ -198,7 +208,7 @@ class _TrJob(QThread):
         try:
             import pymupdf
             from . import traducao
-            d = pymupdf.open(stream=self.data, filetype="pdf")
+            d = _open_src(self.data)
             if d.needs_pass and self.password:
                 d.authenticate(self.password)
             traducao.translate_document(d, self.path, self.dst, lambda p, items: self.page.emit((p, items)),
@@ -493,6 +503,16 @@ class DocTab(QWidget):
         self.check_orientation()
         self.check_language()
 
+    def _scan_source(self):
+        """Para as verificações em segundo plano: o caminho do arquivo, se ele ainda é o que foi aberto (assim cada
+        verificação lê do disco em vez de guardar outra cópia inteira na memória); senão, os bytes."""
+        try:
+            if self.path and os.path.isfile(self.path) and os.path.getsize(self.path) == len(self.original_bytes):
+                return self.path
+        except Exception:
+            pass
+        return self.original_bytes
+
     # ------------------------------------------------------------ golpes
     def scan_threats(self):
         """Procura em segundo plano o que é típico de PDF de golpe (no arquivo como foi aberto)."""
@@ -500,7 +520,7 @@ class DocTab(QWidget):
         self.threats = None
         if not cfg.get("detect_threats"):
             return
-        self._sec_thread = _track(_SecThread(self.original_bytes, self.password))
+        self._sec_thread = _track(_SecThread(self._scan_source(), self.password))
         self._sec_thread.done.connect(self._sec_done)
         self._sec_thread.start()
 
@@ -515,7 +535,7 @@ class DocTab(QWidget):
         self.pay_bar.hide()
         if not cfg.get("detect_payments"):
             return
-        self._pay_thread = _track(_PayThread(self.original_bytes, self.password))
+        self._pay_thread = _track(_PayThread(self._scan_source(), self.password))
         self._pay_thread.done.connect(self._pay_done)
         self._pay_thread.start()
 
@@ -529,7 +549,7 @@ class DocTab(QWidget):
         self.orient_bar.hide()
         if not cfg.get("detect_orientation"):
             return
-        self._orient_thread = _track(_OrientThread(self.original_bytes, self.password))
+        self._orient_thread = _track(_OrientThread(self._scan_source(), self.password))
         self._orient_thread.done.connect(self._orient_done)
         self._orient_thread.start()
 

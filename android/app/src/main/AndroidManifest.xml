@@ -54,6 +54,21 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- "Fila do Dispersio" no Compartilhar: junta arquivos de vários apps para unir, imprimir ou enviar de uma vez -->
+        <activity-alias
+            android:name=".Fila"
+            android:targetActivity=".MainActivity"
+            android:label="Fila do Dispersio"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity-alias>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

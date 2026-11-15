@@ -24,7 +24,7 @@ MODE_TOOLS = {"note", "highlight", "underline", "strikeout", "freetext", "ink", 
               "line", "stamp", "edittext", "addtext", "image", "link", "redact", "crop", "signature",
               "field_text", "field_check", "field_combo", "certsign", "select", "hand"}
 NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch", "articles", "printer_queue",
-                    "search_folder"}
+                    "search_folder", "my_data", "phone"}
 
 
 class Worker(QThread):
@@ -215,6 +215,7 @@ class MainWindow(QMainWindow):
         act(m, "Imprimir todas as abas abertas…", lambda: self.run_tool("print_all"), "Ctrl+Shift+P", "print")
         m.addSeparator()
         act(m, "Buscar em vários PDFs (pasta)…", lambda: self.run_tool("search_folder"), "Ctrl+Shift+F", "search")
+        act(m, "Continuar no celular / receber do celular…", lambda: self.run_tool("phone"), None, "phone")
         m.addSeparator()
         act(m, "Fechar aba", lambda: self.close_tab(self.tabbar.currentIndex()), "Ctrl+W")
         act(m, "Sair", self.close, "Ctrl+Q")
@@ -279,8 +280,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         act(m, "Abrir registro de erros", lambda: __import__("PySide6.QtGui", fromlist=["QDesktopServices"]).QDesktopServices.openUrl(
             __import__("PySide6.QtCore", fromlist=["QUrl"]).QUrl.fromLocalFile(errors.log_dir())))
-        act(m, "Enviar sugestão ou relatar problema…", lambda: __import__("PySide6.QtGui", fromlist=["QDesktopServices"]).QDesktopServices.openUrl(
-            __import__("PySide6.QtCore", fromlist=["QUrl"]).QUrl(f"mailto:{EMAIL}?subject={APP} {__version__}")))
+        act(m, "Relatar problema ou enviar sugestão…", lambda: errors.report_problem(self))
         act(m, f"Sobre o {APP}", self.about)
 
         for key, sc in [("select", "V"), ("hand", "H"), ("highlight", "Ctrl+Shift+H"), ("note", "Ctrl+6")]:
@@ -591,7 +591,8 @@ class MainWindow(QMainWindow):
             return
         t.view._last_search = txt
         n = t.view.search(txt)
-        self.statusBar().showMessage(f"{n} ocorrência(s) de \"{txt}\"" if n else f"\"{txt}\" não encontrado", 6000)
+        if not getattr(t.view, "search_running", False):
+            self.statusBar().showMessage(f"{n} ocorrência(s) de \"{txt}\"" if n else f"\"{txt}\" não encontrado", 6000)
 
     def _top_tab(self, key):
         self.tools.setVisible(True)
@@ -1218,6 +1219,43 @@ class MainWindow(QMainWindow):
                                 + ".\n\nOs campos aparecem destacados em azul. Clique em um campo de assinatura para assinar."
                                 "\nPara desfazer, use Ctrl+Z.")
 
+    def tool_my_data(self, tab=None, **kw):
+        from .meus_dados import MyDataDialog
+        return MyDataDialog(self).exec()
+
+    def tool_autofill(self, tab, **kw):
+        """Preenche os campos do formulário com “Meus dados”. Sem campos (só linhas ____), cria os campos antes."""
+        from . import meus_dados as md
+        if not md.has_any():
+            QMessageBox.information(self, APP, "Primeiro preencha “Meus dados” (nome, CPF, endereço…). Eles ficam guardados "
+                                               "neste computador e servem para todos os formulários.")
+            if not md.MyDataDialog(self).exec() or not md.has_any():
+                return
+        tab.checkpoint()
+        created = 0
+        if not any(p.first_widget for p in tab.doc):
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                created = sum(ops.create_detected_fields(tab.doc).values())
+            finally:
+                QApplication.restoreOverrideCursor()
+        while True:
+            fills = md.plan(tab.doc)
+            dlg = md.AutofillDialog(self, fills)
+            ok = dlg.exec()
+            if dlg.want_edit:
+                md.MyDataDialog(self).exec()
+                continue
+            break
+        chosen = dlg.chosen() if ok else []
+        if not chosen and not created:
+            tab.undo_stack.pop()
+            return
+        n = md.apply(tab.doc, chosen)
+        tab.changed(list(range(tab.doc.page_count)))
+        extra = f" ({created} campo(s) criado(s) nas linhas em branco)" if created else ""
+        self.statusBar().showMessage(f"{n} campo(s) preenchido(s){extra}. Confira e salve. Ctrl+Z desfaz.", 10000)
+
     def tool_rect_field_text(self, tab, page, rect, **kw):
         self._field(tab, page, rect, "text")
 
@@ -1421,6 +1459,23 @@ class MainWindow(QMainWindow):
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+        return dlg
+
+    def tool_phone(self, tab=None, **kw):
+        """Continuar no celular: QR na tela; o celular baixa o documento (com as alterações) e abre na mesma página.
+        Também recebe o documento que o celular mandar."""
+        from .celular import PhoneDialog
+        data = name = None
+        page = 0
+        if tab is not None:
+            try:
+                data = tab.doc.tobytes(garbage=1, deflate=True)
+            except Exception:
+                data = tab.doc.tobytes()
+            name = os.path.basename(tab.path or getattr(tab, "_suggested", None) or "Documento.pdf")
+            page = tab.view.current_page()
+        dlg = PhoneDialog(self, data, name, page)
+        dlg.show()
         return dlg
 
     def open_at(self, path, page=0, match=""):

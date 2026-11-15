@@ -32,6 +32,16 @@ class MainActivity : FragmentActivity() {
 
     @Suppress("DEPRECATION")
     private fun handle(i: Intent?) {
+        // "Fila do Dispersio" no Compartilhar: guarda na fila em vez de abrir
+        if (i?.component?.className?.endsWith(".Fila") == true && (i.action == Intent.ACTION_SEND || i.action == Intent.ACTION_SEND_MULTIPLE)) {
+            val list: List<Uri> = if (i.action == Intent.ACTION_SEND_MULTIPLE) {
+                (if (Build.VERSION.SDK_INT >= 33) i.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else i.getParcelableArrayListExtra(Intent.EXTRA_STREAM)).orEmpty()
+            } else listOfNotNull(if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else i.getParcelableExtra(Intent.EXTRA_STREAM))
+            if (list.isNotEmpty()) vm.addToQueue(list)
+            return
+        }
         val uri: Uri? = when (i?.action) {
             Intent.ACTION_VIEW -> i.data
             Intent.ACTION_SEND ->

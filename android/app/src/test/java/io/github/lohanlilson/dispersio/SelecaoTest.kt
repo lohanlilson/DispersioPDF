@@ -78,3 +78,11 @@ class BuscaTest {
         assertEquals("07.202.627/0001-74", Busca.searchText(pages, Busca.pattern("07202627000174")!!).single().match)
     }
 }
+
+class CelularTest {
+    @Test fun reconheceQr() {
+        org.junit.Assert.assertTrue(Celular.isLink("http://192.168.0.12:51234/AbC_d-12345678"))
+        org.junit.Assert.assertFalse(Celular.isLink("https://site.com/AbC12345678"))
+        org.junit.Assert.assertFalse(Celular.isLink("00020126580014br.gov.bcb.pix"))
+    }
+}

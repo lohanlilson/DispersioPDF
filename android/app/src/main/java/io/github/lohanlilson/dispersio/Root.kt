@@ -52,6 +52,7 @@ fun DispersioRoot(vm: AppVm) {
         BackHandler { if (d.editing && d.tool != Tool.NONE) d.tool = Tool.NONE else vm.requestClose() }
         ViewerScreen(vm, d)
     }
+    if (vm.showQueue) FilaScreen(vm) { vm.showQueue = false; vm.refreshQueue() }
     if (vm.loading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
     }

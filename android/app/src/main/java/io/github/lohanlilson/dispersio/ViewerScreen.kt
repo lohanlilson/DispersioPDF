@@ -300,9 +300,15 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     })
                                     DropdownMenuItem(text = { Text("Reconhecer texto (OCR)") }, onClick = { menu = false; vm.ocr(d) })
                                     DropdownMenuItem(text = { Text("Converter…") }, onClick = { menu = false; dlg = "converter" })
+                                    DropdownMenuItem(text = { Text("Enviar para o computador (QR)") }, onClick = { menu = false; vm.sendToComputer(ctx, d) })
                                     DropdownMenuItem(text = { Text("Preencher com meus dados") }, onClick = {
                                         menu = false
-                                        dlg = if (Autofill.hasAny(ctx)) "autofill" else "meusdados"
+                                        when {
+                                            !Autofill.hasAny(ctx) -> dlg = "meusdados"
+                                            // PDF sem campos (só linhas ____): cria os campos primeiro e depois mostra o que preencher
+                                            d.fields.isEmpty() -> guarded { vm.detectFields(d).invokeOnCompletion { dlg = "autofill" } }
+                                            else -> dlg = "autofill"
+                                        }
                                     })
                                     DropdownMenuItem(text = { Text("Detectar campos de formulário") }, onClick = { menu = false; guarded { vm.detectFields(d) } })
                                     DropdownMenuItem(text = { Text("Comparar com outro PDF…") }, onClick = { menu = false; pickCompare.launch(arrayOf("application/pdf")) })
@@ -713,7 +719,12 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
             splitReq = m to v
             pickFolder.launch(null)
         }
-        "meusdados" -> MyDataDialog { dlg = if (Autofill.hasAny(ctx)) "autofill" else "" }
+        "meusdados" -> MyDataDialog {
+            dlg = ""
+            if (Autofill.hasAny(ctx)) {
+                if (d.fields.isEmpty()) guarded { vm.detectFields(d).invokeOnCompletion { dlg = "autofill" } } else dlg = "autofill"
+            }
+        }
         "autofill" -> AutofillDialog(remember(d.fields) { Autofill.plan(d.fields.map { it.first }, Autofill.load(ctx)) },
             onEditData = { dlg = "meusdados" }, onDismiss = { dlg = "" }) { fills ->
             dlg = ""
