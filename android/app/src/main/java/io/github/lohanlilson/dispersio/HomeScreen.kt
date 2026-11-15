@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -110,6 +111,7 @@ fun HomeScreen(vm: AppVm) {
     }
     if (vm.showSettings) SettingsScreen(vm) { vm.showSettings = false }
     if (vm.showArticles) ArticlesScreen(vm) { vm.showArticles = false }
+    if (vm.showSearchAll) SearchAllScreen(vm) { vm.showSearchAll = false }
 }
 
 @Composable
@@ -189,6 +191,7 @@ private fun QuickActions(vm: AppVm) {
             }
             ActionCard(Icons.Filled.Settings, "Preferências", "Tema, nome, rubrica…", Modifier.weight(1f)) { vm.showSettings = true }
         }
+        ActionCard(Icons.Filled.Search, "Buscar em vários PDFs", "Nome, CPF, CNPJ… nos recentes ou numa pasta", Modifier.fillMaxWidth()) { vm.showSearchAll = true }
         ActionCard(Icons.Filled.Science, "Artigos científicos", "Pesquise, baixe e traduza PDFs de pesquisa", Modifier.fillMaxWidth()) { vm.showArticles = true }
     }
 }

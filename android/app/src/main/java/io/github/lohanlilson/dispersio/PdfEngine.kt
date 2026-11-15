@@ -432,58 +432,50 @@ class PageChars(val page: Int, val text: String, val frac: Array<FracRect?>, val
         return selection(s, e)
     }
 
-    /** Trecho contínuo de linha de cada caractere (x inicial, x final): um espaço grande separa colunas de tabela/texto. */
-    private val segs: Array<FloatArray?> by lazy {
-        val out = arrayOfNulls<FloatArray>(size)
-        var run = ArrayList<Int>()
-        fun flush() {
-            if (run.isEmpty()) return
-            val x0 = run.minOf { frac[it]!!.l }; val x1 = run.maxOf { frac[it]!!.r }
-            val seg = floatArrayOf(x0, x1)
-            run.forEach { out[it] = seg }
-            run = ArrayList()
-        }
-        for (k in 0 until size) {
-            val f = frac[k] ?: continue
-            val last = run.lastOrNull()?.let { frac[it] }
-            if (last != null) {
-                val h = maxOf(f.b - f.t, last.b - last.t)
-                val same = kotlin.math.abs((f.t + f.b) / 2 - (last.t + last.b) / 2) < h * 0.6f
-                if (!same || f.l < last.l - h || f.l - last.r > 2.5f * h) flush()
-            }
-            run += k
-        }
-        flush()
-        out
-    }
+    /** Trechos contínuos de linha (um espaço grande separa colunas de tabela/texto) e as tabelas da página. */
+    private val segData by lazy { Tabela.segments(text, frac) }
+    val tables by lazy { Tabela.pageTables(segData.first) }
 
-    private fun segNear(k: Int, s: Int, e: Int): FloatArray? {
+    private fun segNear(k: Int, s: Int, e: Int): Tabela.Seg? {
+        val (segs, of) = segData
         for (d in 0..(e - s)) {
-            segs.getOrNull(k + d)?.let { if (k + d <= e) return it }
-            segs.getOrNull(k - d)?.let { if (k - d >= s) return it }
+            if (k + d <= e) of.getOrNull(k + d)?.takeIf { it >= 0 }?.let { return segs[it] }
+            if (k - d >= s) of.getOrNull(k - d)?.takeIf { it >= 0 }?.let { return segs[it] }
         }
         return null
     }
 
-    /** Caracteres entre s e e na mesma faixa horizontal (coluna) do começo e do fim: numa tabela, só a coluna arrastada. */
-    private fun keep(s: Int, e: Int): BooleanArray {
+    /** Quais caracteres entre s e e ficam na seleção, e a tabela (se for seleção de linha de tabela).
+     *  Mesma coluna no começo e no fim: só aquela coluna. Colunas diferentes na mesma linha de uma tabela: a linha toda. */
+    private fun keep(s: Int, e: Int): Pair<BooleanArray, List<List<String>>?> {
         val keep = BooleanArray(e - s + 1) { true }
-        val sa = segNear(s, s, e) ?: return keep
-        val sb = segNear(e, s, e) ?: return keep
-        val lo = minOf(sa[0], sb[0]) - 0.003f; val hi = maxOf(sa[1], sb[1]) + 0.003f
+        val sa = segNear(s, s, e) ?: return keep to null
+        val sb = segNear(e, s, e) ?: return keep to null
+        val (segs, of) = segData
+        Tabela.rowSelection(segs, sa, sb, tables)?.let { chosen ->
+            val ids = chosen.map { segs.indexOf(it) }.toSet()
+            val all = BooleanArray(size) { k -> of[k] >= 0 && of[k] in ids }
+            return all to Tabela.grid(chosen)
+        }
+        val lo = minOf(sa.x0, sb.x0) - 0.003f; val hi = maxOf(sa.x1, sb.x1) + 0.003f
         var prev = true
         for (k in s..e) {
-            val g = segs[k]
-            prev = if (g == null) prev else (g[1] >= lo && g[0] <= hi)
+            val g = of[k].takeIf { it >= 0 }?.let { segs[it] }
+            prev = if (g == null) prev else (g.x1 >= lo && g.x0 <= hi)
             keep[k - s] = prev
         }
-        return keep
+        return keep to null
     }
 
     fun selection(a: Int, b: Int): TextSelection {
-        val s = minOf(a, b).coerceIn(0, size - 1)
-        val e = maxOf(a, b).coerceIn(0, size - 1)
-        val kept = keep(s, e)
+        var s = minOf(a, b).coerceIn(0, size - 1)
+        var e = maxOf(a, b).coerceIn(0, size - 1)
+        val (kept0, table) = keep(s, e)
+        var kept = kept0
+        if (table != null) {               // linha de tabela: os caracteres podem estar fora de s..e na ordem do PDF
+            s = kept.indexOfFirst { it }.coerceAtLeast(0); e = kept.indexOfLast { it }.coerceAtLeast(s)
+            kept = kept.copyOfRange(s, e + 1)
+        }
         val fr = ArrayList<FracRect>()
         val pr = ArrayList<RectF>()
         var cf: FracRect? = null
@@ -508,7 +500,8 @@ class PageChars(val page: Int, val text: String, val frac: Array<FracRect?>, val
         cf?.let { fr += it; pr += cp!! }
         val sb = StringBuilder()
         for (k in s..minOf(e, text.length - 1)) if (kept[k - s]) sb.append(text[k]) else if (sb.isNotEmpty() && sb.last() != '\n') sb.append('\n')
-        val txt = sb.toString().replace("\r\n", "\n").replace(Regex("[ \\t]*\n[\\s]*"), "\n").trim()
+        val txt = if (table != null && (table.size > 1 || table.firstOrNull()?.size ?: 0 > 1)) Tabela.toTsv(table)
+            else sb.toString().replace("\r\n", "\n").replace(Regex("[ \\t]*\n[\\s]*"), "\n").trim()
         return TextSelection(page, s, e, txt, fr, pr)
     }
 }

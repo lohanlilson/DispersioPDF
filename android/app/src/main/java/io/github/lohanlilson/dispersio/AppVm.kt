@@ -205,7 +205,21 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun openPrepared(uri: Uri, name: String, pwd: String?) {
+    /** Abre na página indicada, já procurando o texto achado (resultado da busca em vários PDFs). */
+    fun openAt(uri: Uri, name: String, page: Int, match: String) = viewModelScope.launch {
+        loading = true
+        try {
+            val ready = withContext(Dispatchers.IO) { prepareUri(getApplication(), uri, true) }
+            openPrepared(ready, name, null, page)
+            doc?.let { d -> if (match.isNotBlank()) search(d, match) }
+        } catch (e: Exception) {
+            error = "Não foi possível abrir “$name”.\n${e.message ?: ""}"
+        } finally {
+            loading = false
+        }
+    }
+
+    private suspend fun openPrepared(uri: Uri, name: String, pwd: String?, page: Int? = null) {
         val pdf = try {
             engine.open(getApplication(), uri, pwd)
         } catch (e: PasswordNeeded) {
@@ -214,7 +228,8 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         }
         doc?.let { if (it.readOnly) showTranslated(false); closeDoc() }
         val key = uri.toString()
-        val start = if (!prefs.rememberPage) 0 else recents.list().firstOrNull { it.uri == key }?.page?.coerceIn(0, pdf.sizes.size - 1) ?: 0
+        val start = page?.coerceIn(0, pdf.sizes.size - 1)
+            ?: if (!prefs.rememberPage) 0 else recents.list().firstOrNull { it.uri == key }?.page?.coerceIn(0, pdf.sizes.size - 1) ?: 0
         recents.touch(key, name)
         doc = ViewerDoc(pdf, key, name, start, pwd).also { it.night = prefs.nightPages }
         refreshRecents()
@@ -1118,6 +1133,7 @@ class AppVm(app: Application) : AndroidViewModel(app) {
     var confirmClose by mutableStateOf(false)
     var showSettings by mutableStateOf(false)
     var showArticles by mutableStateOf(false)
+    var showSearchAll by mutableStateOf(false)
     var progress by mutableStateOf<String?>(null)
     var compare by mutableStateOf<CompareState?>(null)
     var closeAfterSave = false
@@ -1255,11 +1271,17 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             }
             val pages = allText(d)
             if (pages.all { it.isBlank() }) { error = "Este PDF não tem texto (é imagem). Use \"Reconhecer texto (OCR)\" antes."; return@launch }
+            // Excel: as tabelas da página (alinhadas por colunas), uma aba por tabela; sem tabelas, o texto
+            val tables = if (kind != "excel") emptyList() else (0 until d.pageCount).flatMap { p ->
+                progress = "Procurando tabelas na página ${p + 1}…"
+                runCatching { engine.pageChars(d.pdf, p).tables }.getOrDefault(emptyList())
+                    .mapIndexed { i, t -> "Pág ${p + 1} - Tabela ${i + 1}" to t.grid }
+            }
             withContext(Dispatchers.IO) {
                 app.contentResolver.openOutputStream(target!!, "wt")!!.use { o ->
                     when (kind) {
                         "word" -> Convert.docx(pages, o)
-                        "excel" -> Convert.xlsx(pages, o)
+                        "excel" -> if (tables.isNotEmpty()) Convert.xlsxTables(tables, o) else Convert.xlsx(pages, o)
                         else -> o.write(pages.joinToString("\n\n\u000C").toByteArray())
                     }
                 }

@@ -162,7 +162,8 @@ class PdfView(QGraphicsView):
             self.scene_.addItem(it)
         self.cache.clear()
         self._words.clear()
-        self.__dict__.pop('_segs', None)
+        self.__dict__.pop('_segs_cache', None)
+        self.__dict__.pop('_tables_cache', None)
         self._links.clear()
         self._pages = {}
         self._sizes = {}
@@ -397,13 +398,15 @@ class PdfView(QGraphicsView):
         if pages is None:
             self.cache.clear()
             self._words.clear()
-            self.__dict__.pop('_segs', None)
+            self.__dict__.pop('_segs_cache', None)
+            self.__dict__.pop('_tables_cache', None)
             self._links.clear()
         else:
             for p in pages:
                 self.cache.pop(p, None)
                 self._words.pop(p, None)
-                self.__dict__.get("_segs", {}).pop(p, None)
+                self.__dict__.get("_segs_cache", {}).pop(p, None)
+                self.__dict__.get("_tables_cache", {}).pop(p, None)
                 self._links.pop(p, None)
         self._schedule_visible()
         self.viewport().update()
@@ -649,61 +652,56 @@ class PdfView(QGraphicsView):
         allw = self.words(page)
         ws = [allw[k] for k in self._sel_idx]
         lines = {}
-        for r, _, bl, ln in ws:
-            key = (bl, ln)
+        _, of = self._segs(page)
+        for k, (r, _, bl, ln) in zip(self._sel_idx, ws):
+            key = of[k] if of[k] is not None else (bl, ln)       # um destaque por trecho: colunas não se juntam
             lines[key] = (lines[key] | r) if key in lines else pymupdf.Rect(r)
         self.sel_rects = {page: list(lines.values())}
         self.selectionChanged.emit(True)
         self.viewport().update()
 
-    def _segments(self, page):
-        """Para cada palavra, o trecho contínuo da linha em que ela está (x0, x1). Um espaço grande separa trechos:
-        é assim que as colunas de uma tabela ou de um texto em duas colunas ficam separadas."""
-        cache = self.__dict__.setdefault("_segs", {})
-        if page in cache:
-            return cache[page]
-        ws = self.words(page)
-        rows = {}
-        for k, (r, _, bl, ln) in enumerate(ws):
-            rows.setdefault((bl, ln), []).append(k)
-        seg = [None] * len(ws)
-        for ks in rows.values():
-            ks.sort(key=lambda k: ws[k][0].x0)
-            groups, cur = [], [ks[0]]
-            for k in ks[1:]:
-                prev = ws[cur[-1]][0]
-                h = max(prev.height, ws[k][0].height, 4)
-                if ws[k][0].x0 - prev.x1 > 2.5 * h:
-                    groups.append(cur)
-                    cur = [k]
-                else:
-                    cur.append(k)
-            groups.append(cur)
-            for g in groups:
-                x0 = min(ws[k][0].x0 for k in g)
-                x1 = max(ws[k][0].x1 for k in g)
-                for k in g:
-                    seg[k] = (x0, x1)
-        cache[page] = seg
-        return seg
+    def _segs(self, page):
+        """Trechos contínuos de linha da página (colunas de tabela ou de texto ficam separadas). Em cache."""
+        cache = self.__dict__.setdefault("_segs_cache", {})
+        if page not in cache:
+            from . import tabela
+            cache[page] = tabela.segments(self.words(page))
+        return cache[page]
 
     def _column_filter(self, page, a, b):
-        """Palavras entre a e b que estão na mesma faixa horizontal (coluna) do começo e do fim da seleção.
-        Em texto corrido a faixa é a linha inteira (nada muda); numa tabela, só a coluna arrastada."""
+        """Índices das palavras selecionadas entre a e b.
+        - Começo e fim na mesma coluna: só as palavras daquela coluna (numa tabela, só a coluna arrastada; em texto
+          corrido a coluna é a linha inteira e nada muda).
+        - Começo e fim em colunas diferentes de uma tabela: a linha inteira, com as células de várias linhas."""
+        self._sel_table = None
         if b - a < 1:
             return list(range(a, b + 1))
-        seg = self._segments(page)
+        from . import tabela
+        segs, of = self._segs(page)
         ws = self.words(page)
-        sa, sb = seg[a], seg[b]
-        if ws[a][0].y0 > ws[b][0].y0:     # a ordem do texto pode não ser a de cima para baixo
-            sa, sb = sb, sa
-        lo, hi = min(sa[0], sb[0]) - 2, max(sa[1], sb[1]) + 2
-        return [k for k in range(a, b + 1) if seg[k][1] >= lo and seg[k][0] <= hi]
+        if of[a] is None or of[b] is None:
+            return list(range(a, b + 1))
+        try:
+            pw = self._page(page).rect.width
+        except Exception:
+            pw = 600
+        tcache = self.__dict__.setdefault("_tables_cache", {})
+        if page not in tcache:
+            tcache[page] = tabela.page_tables(ws, pw)
+        row = tabela.row_selection(ws, segs, of, a, b, pw, tcache[page])
+        if row:
+            idx, chosen = row
+            self._sel_table = tabela.grid(chosen, ws)
+            return idx
+        sa, sb = segs[of[a]], segs[of[b]]
+        lo, hi = min(sa.x0, sb.x0) - 2, max(sa.x1, sb.x1) + 2
+        return [k for k in range(a, b + 1) if of[k] is not None and segs[of[k]].x1 >= lo and segs[of[k]].x0 <= hi]
 
     def clear_selection(self):
         had = self.sel is not None
         self.sel = None
         self._sel_idx = None
+        self._sel_table = None
         self.sel_rects = {}
         if had:
             self.selectionChanged.emit(False)
@@ -721,6 +719,10 @@ class PdfView(QGraphicsView):
         p, a, b = self.sel
         out, last = [], None
         allw = self.words(p)
+        tab = getattr(self, "_sel_table", None)
+        if tab and (len(tab) > 1 or len(tab[0]) > 1):
+            from . import tabela
+            return tabela.to_tsv(tab)      # colunas separadas por tabulação: cola certinho no Excel
         idx = getattr(self, "_sel_idx", None) or range(a, b + 1)
         for r, t, bl, ln in (allw[k] for k in idx):
             if last is not None and (bl, ln) != last:
@@ -730,6 +732,40 @@ class PdfView(QGraphicsView):
             out.append(t)
             last = (bl, ln)
         return "".join(out)
+
+    def selection_grid(self):
+        """A seleção como grade (linhas × colunas), pelas posições das palavras."""
+        if not self.sel:
+            return []
+        tab = getattr(self, "_sel_table", None)
+        if tab:
+            return tab
+        from . import tabela
+        p = self.sel[0]
+        allw = self.words(p)
+        sub = [allw[k] for k in (getattr(self, "_sel_idx", None) or range(self.sel[1], self.sel[2] + 1))]
+        segs, _ = tabela.segments(sub)
+        return tabela.grid(segs, sub)
+
+    def copy_selection_table(self):
+        self._copy_grid(self.selection_grid())
+
+    def _copy_grid(self, grid):
+        from . import tabela
+        if grid:
+            QGuiApplication.clipboard().setText(tabela.to_tsv(grid))
+            self.status.emit(f"Tabela copiada ({len(grid)} linha(s)). Cole no Excel com Ctrl+V.")
+
+    def table_at(self, page, pt):
+        """Grade da tabela sob o ponto (com ou sem linhas desenhadas), ou None."""
+        from . import ops
+        try:
+            for box, g in ops.find_page_tables(self._page(page)):
+                if box.contains(pt):
+                    return g
+        except Exception:
+            pass
+        return None
 
     def copy_selection(self):
         txt = self.selected_text()
@@ -1484,6 +1520,8 @@ class PdfView(QGraphicsView):
             menu.addAction("Excluir", self.delete_selected_annot)
         elif self.sel:
             menu.addAction("Copiar", self.copy_selection)
+            menu.addAction("Copiar para o Excel (em colunas)", self.copy_selection_table)
+            menu.addAction("Salvar seleção no Excel…", lambda: self.request_tool("export_grid", grid=self.selection_grid()))
             menu.addSeparator()
             menu.addAction("Destacar texto", lambda: self.markup_selection("highlight"))
             menu.addAction("Sublinhar texto", lambda: self.markup_selection("underline"))
@@ -1494,6 +1532,11 @@ class PdfView(QGraphicsView):
             if getattr(self, "on_translate_selection", None):
                 menu.addAction("Traduzir seleção", lambda: self.on_translate_selection(self.selected_text()))
         else:
+            tab_here = self.table_at(i, pt) if i is not None else None
+            if tab_here:
+                menu.addAction("Copiar tabela para o Excel", lambda g=tab_here: self._copy_grid(g))
+                menu.addAction("Salvar tabela no Excel…", lambda g=tab_here: self.request_tool("export_grid", grid=g))
+                menu.addSeparator()
             menu.addAction("Selecionar tudo", self.select_all)
             menu.addAction("Adicionar nota aqui", lambda: i is not None and self._add_note(i, pt))
             menu.addSeparator()

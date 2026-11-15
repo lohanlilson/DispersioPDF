@@ -79,30 +79,68 @@ object Convert {
     }
 
     /** Excel: uma planilha por página; colunas separadas por 2+ espaços ou tabulação; números viram números. */
-    fun xlsx(pages: List<String>, out: OutputStream) {
-        val sheets = pages.mapIndexed { pi, p ->
+    fun xlsx(pages: List<String>, out: OutputStream) =
+        xlsxTables(pages.mapIndexed { i, p ->
+            "Página ${i + 1}" to p.split("\n").map { it.trimEnd('\r') }.filter { it.isNotBlank() }.map { it.trim().split(Regex("\\t|\\s{2,}")) }
+        }, out, header = false)
+
+    /** Valor de célula do Excel: (xml da célula sem a referência, estilo). Datas viram datas, R$ e % viram números;
+     *  CPF, CNPJ, códigos, telefones e números com zero à esquerda continuam texto. */
+    fun cell(ref: String, raw: String, header: Boolean = false): String {
+        val v = raw.trim()
+        fun text(st: Int = 0) = "<c r=\"$ref\" t=\"inlineStr\"${if (st > 0) " s=\"$st\"" else ""}><is><t xml:space=\"preserve\">${esc(v)}</t></is></c>"
+        if (header) return text(5)
+        if (v.isEmpty()) return ""
+        Regex("^(\\d{1,2})/(\\d{1,2})/(\\d{4}|\\d{2})$").find(v)?.let { m ->
+            val (d, mo, y0) = m.destructured
+            val y = y0.toInt().let { if (it < 100) it + 2000 else it }
+            val date = runCatching { java.time.LocalDate.of(y, mo.toInt(), d.toInt()) }.getOrNull() ?: return text()
+            val serial = java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.of(1899, 12, 30), date)
+            return "<c r=\"$ref\" s=\"1\"><v>$serial</v></c>"
+        }
+        val digits = v.filter { it.isDigit() }
+        val codeLike = Regex("^[\\d.\\-/() ]+$").matches(v) && ((v.startsWith("0") && digits.length > 1) || digits.length >= 11 ||
+            (Regex("\\d[.\\-/]\\d{3}[.\\-/]|\\d-\\d").containsMatchIn(v) && !Regex("^-?\\d{1,3}(\\.\\d{3})+(,\\d+)?$").matches(v)))
+        if (codeLike) return text()
+        Regex("^(-)?\\s*R\\$\\s*(-)?\\s*([\\d.]+(,\\d+)?)$").find(v)?.let { m ->
+            brNumber(m.groupValues[3])?.let { n -> return "<c r=\"$ref\" s=\"2\"><v>${if (m.groupValues[1].isNotEmpty() || m.groupValues[2].isNotEmpty()) -n else n}</v></c>" }
+        }
+        if (v.endsWith("%")) brNumber(v)?.let { return "<c r=\"$ref\" s=\"3\"><v>${it / 100}</v></c>" }
+        brNumber(v)?.let { return "<c r=\"$ref\"${if (',' in v) " s=\"4\"" else ""}><v>$it</v></c>" }
+        return text()
+    }
+
+    private const val STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/><numFmt numFmtId="165" formatCode="&quot;R$&quot; #,##0.00"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCE6F2"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="10" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>"""
+
+    /** Excel a partir de tabelas: uma aba por tabela, primeira linha em negrito, larguras ajustadas. */
+    fun xlsxTables(tables: List<Pair<String, List<List<String>>>>, out: OutputStream, header: Boolean = true) {
+        val sheets = tables.mapIndexed { si, (_, grid) ->
             val rows = StringBuilder()
-            p.split("\n").map { it.trimEnd('\r') }.filter { it.isNotBlank() }.forEachIndexed { ri, line ->
+            val widths = HashMap<Int, Int>()
+            grid.forEachIndexed { ri, line ->
                 rows.append("<row r=\"${ri + 1}\">")
-                line.trim().split(Regex("\\t|\\s{2,}")).forEachIndexed { ci, cell ->
-                    val ref = "${colName(ci)}${ri + 1}"
-                    val n = brNumber(cell)
-                    if (n != null) rows.append("<c r=\"$ref\"><v>$n</v></c>")
-                    else rows.append("<c r=\"$ref\" t=\"inlineStr\"><is><t xml:space=\"preserve\">${esc(cell)}</t></is></c>")
+                line.forEachIndexed { ci, c ->
+                    rows.append(cell("${colName(ci)}${ri + 1}", c, header && ri == 0 && grid.size > 1))
+                    widths[ci] = maxOf(widths[ci] ?: 0, minOf(c.length, 60))
                 }
                 rows.append("</row>")
             }
-            "xl/worksheets/sheet${pi + 1}.xml" to """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>$rows</sheetData></worksheet>"""
+            val cols = if (widths.isEmpty()) "" else "<cols>" + widths.toSortedMap().entries.joinToString("") { (c, w) ->
+                "<col min=\"${c + 1}\" max=\"${c + 1}\" width=\"${maxOf(8, w + 2)}\" customWidth=\"1\"/>" } + "</cols>"
+            val pane = if (header && grid.size > 1) "<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>" else ""
+            "xl/worksheets/sheet${si + 1}.xml" to """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">$pane$cols<sheetData>$rows</sheetData></worksheet>"""
         }
         val n = sheets.size
         val ct = (1..n).joinToString("") { """<Override PartName="/xl/worksheets/sheet$it.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>""" }
-        val wbSheets = (1..n).joinToString("") { """<sheet name="Página $it" sheetId="$it" r:id="rId$it"/>""" }
-        val wbRels = (1..n).joinToString("") { """<Relationship Id="rId$it" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet$it.xml"/>""" }
+        val wbSheets = tables.mapIndexed { i, (name, _) -> """<sheet name="${esc(name.take(31).replace(Regex("[\\\\/?*\\[\\]:]"), " "))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>""" }.joinToString("")
+        val wbRels = (1..n).joinToString("") { """<Relationship Id="rId$it" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet$it.xml"/>""" } +
+            """<Relationship Id="rId${n + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"""
         zip(out, mapOf(
-            "[Content_Types].xml" to """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>$ct</Types>""",
+            "[Content_Types].xml" to """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>$ct</Types>""",
             "_rels/.rels" to """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>""",
             "xl/workbook.xml" to """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>$wbSheets</sheets></workbook>""",
             "xl/_rels/workbook.xml.rels" to """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">$wbRels</Relationships>""",
+            "xl/styles.xml" to STYLES,
         ) + sheets.toMap())
     }
 

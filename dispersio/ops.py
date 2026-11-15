@@ -254,52 +254,145 @@ def to_docx(pdf_bytes, out_path, pages=None):
     return out_path
 
 
-def to_xlsx(doc, out_path):
+def _page_words(page):
+    """Palavras no formato do leitor: (rect, texto, bloco, linha)."""
+    return [(pymupdf.Rect(w[:4]), w[4], w[5], w[6]) for w in page.get_text("words", sort=True)]
+
+
+def find_page_tables(page):
+    """Tabelas da página como grades de texto: as desenhadas com linhas (PyMuPDF) e as só alinhadas por espaço."""
+    from . import tabela
+    out = []
+    words = page.get_text("words", sort=True)
+    try:
+        for t in page.find_tables().tables:
+            g = []
+            for row in t.rows:          # texto de cada célula pelas palavras dentro dela (o extract() às vezes come espaços)
+                line = []
+                for cb in row.cells:
+                    if cb is None:
+                        line.append("")
+                        continue
+                    r = pymupdf.Rect(cb)
+                    line.append(" ".join(w[4] for w in words
+                                         if r.x0 - 1 <= (w[0] + w[2]) / 2 <= r.x1 + 1 and r.y0 - 1 <= (w[1] + w[3]) / 2 <= r.y1 + 1))
+                g.append(line)
+            if g and any(any(c for c in r) for r in g):
+                out.append((pymupdf.Rect(t.bbox), g))
+    except Exception:
+        pass
+    for box, g in tabela.page_tables(_page_words(page), page.rect.width):
+        r = pymupdf.Rect(box)
+        if not any(abs(r & o) > 0.5 * min(abs(r), abs(o)) for o, _ in out if abs(r) and abs(o)):
+            out.append((r, g))
+    out.sort(key=lambda t: (t[0].y0, t[0].x0))
+    return out
+
+
+def _write_grid(ws, grid, header=True):
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    head_fill = PatternFill("solid", fgColor="DCE6F2")
+    widths = {}
+    for r_idx, row in enumerate(grid, 1):
+        for c_idx, val in enumerate(row, 1):
+            v, fmt = cell_value(val)
+            c = ws.cell(r_idx, c_idx, v)
+            if fmt:
+                c.number_format = fmt
+            c.alignment = Alignment(vertical="top", wrap_text=len(str(val)) > 60)
+            if header and r_idx == 1:
+                c.font = Font(bold=True)
+                c.fill = head_fill
+            widths[c_idx] = max(widths.get(c_idx, 0), min(len(str(val)), 60))
+    for c_idx, wdt in widths.items():
+        ws.column_dimensions[get_column_letter(c_idx)].width = max(8, wdt + 2)
+    if header and len(grid) > 1:
+        ws.freeze_panes = "A2"
+
+
+def grid_to_xlsx(grid, out_path, sheet="Tabela", header=True):
+    """Salva uma grade (lista de linhas) numa planilha."""
     from openpyxl import Workbook
-    from openpyxl.styles import Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet[:31]
+    _write_grid(ws, grid, header)
+    wb.save(out_path)
+    return out_path
+
+
+def to_xlsx(doc, out_path, pages=None):
+    """Salva as tabelas do documento numa planilha (uma aba por tabela). Sem tabela: o texto, com as colunas
+    separadas pelo espaçamento. Datas viram datas, valores viram números, CPF/CNPJ e códigos continuam texto."""
+    from openpyxl import Workbook
+    from . import tabela
     wb = Workbook()
     wb.remove(wb.active)
     found = 0
-    for i, page in enumerate(doc):
-        try:
-            tables = page.find_tables().tables
-        except Exception:
-            tables = []
-        for t_idx, tab in enumerate(tables, 1):
-            ws = wb.create_sheet(f"P{i + 1}_T{t_idx}"[:31])
-            for r_idx, row in enumerate(tab.extract(), 1):
-                for c_idx, val in enumerate(row, 1):
-                    val = (val or "").replace("\n", " ").strip()
-                    ws.cell(r_idx, c_idx, _num(val))
-                    if r_idx == 1:
-                        ws.cell(r_idx, c_idx).font = Font(bold=True)
+    write = _write_grid
+    for i in (pages if pages is not None else range(doc.page_count)):
+        for t_idx, (_box, grid) in enumerate(find_page_tables(doc[i]), 1):
+            write(wb.create_sheet(f"Pág {i + 1} - Tabela {t_idx}"[:31]), grid)
             found += 1
     if not found:  # sem tabelas: cada linha de texto vira uma linha, colunas por espaçamento
         ws = wb.create_sheet("Texto")
-        r = 1
-        for i, page in enumerate(doc):
+        rows = []
+        for i in (pages if pages is not None else range(doc.page_count)):
+            words = _page_words(doc[i])
+            segs, _ = tabela.segments(words)
             lines = {}
-            for w in page.get_text("words", sort=True):
-                key = (w[5], w[6])
-                lines.setdefault(key, []).append(w)
-            for words in lines.values():
-                cells, last_x, buf = [], None, []
-                for w in words:
-                    if last_x is not None and w[0] - last_x > 12:
-                        cells.append(" ".join(buf))
-                        buf = []
-                    buf.append(w[4])
-                    last_x = w[2]
-                cells.append(" ".join(buf))
-                for c, v in enumerate(cells, 1):
-                    ws.cell(r, c, _num(v))
-                r += 1
+            for sg in segs:
+                lines.setdefault((words[sg.words[0]][2], words[sg.words[0]][3]), []).append(sg)
+            for line in lines.values():
+                rows.append([" ".join(words[k][1] for k in sg.words) for sg in sorted(line, key=lambda q: q.x0)])
+        write(ws, rows, header=False)
     wb.save(out_path)
     return out_path, found
 
 
+_DATE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})")
+
+
+def cell_value(v):
+    """Texto da célula -> (valor para o Excel, formato). Mantém como texto o que perderia informação como número."""
+    import datetime as _dt
+    v = (v or "").strip()
+    if not v:
+        return "", None
+    m = _DATE.fullmatch(v)
+    if m:
+        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        y = y + 2000 if y < 100 else y
+        try:
+            return _dt.date(y, mo, d), "DD/MM/YYYY"
+        except ValueError:
+            return v, None
+    digits = re.sub(r"\D", "", v)
+    # CPF, CNPJ, códigos de barras, telefones, CEP, contas: texto (zero à esquerda e números longos se perdem)
+    if re.fullmatch(r"[\d.\-/() ]+", v) and (v.startswith("0") and len(digits) > 1 or len(digits) >= 11
+                                            or re.search(r"\d[.\-/]\d{3}[.\-/]|\d-\d", v) and not re.fullmatch(r"-?\d{1,3}(\.\d{3})+(,\d+)?", v)):
+        return v, None
+    money = re.fullmatch(r"(-)?\s*R\$\s*(-)?\s*([\d.]+(,\d+)?)", v)
+    if money:
+        n = _num(money.group(3))
+        if isinstance(n, float):
+            return (-n if (money.group(1) or money.group(2)) else n), '"R$" #,##0.00'
+    pct = re.fullmatch(r"(-?[\d.]+(,\d+)?)\s*%", v)
+    if pct:
+        n = _num(pct.group(1))
+        if isinstance(n, float):
+            return n / 100, "0.00%"
+    n = _num(v)
+    if isinstance(n, float):
+        return (int(n) if n.is_integer() and "," not in v and "." not in v else n), ("#,##0.00" if "," in v else None)
+    return v, None
+
+
 def _num(v):
     s = v.replace(".", "").replace(",", ".") if re.fullmatch(r"-?[\d.]+,\d+", v) else v
+    if re.fullmatch(r"-?\d{1,3}(\.\d{3})+", v):           # 1.234.567 (milhar sem decimais)
+        s = v.replace(".", "")
     try:
         return float(s) if re.fullmatch(r"-?\d+(\.\d+)?", s) else v
     except ValueError:

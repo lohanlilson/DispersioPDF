@@ -2,6 +2,23 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.19.0
+
+- **Tabelas**
+  - Arrastar da primeira à última coluna de uma linha seleciona a linha inteira, inclusive células com várias linhas (ex.: data, nome da cooperativa e CNPJ). Arrastando por várias linhas, pega todas.
+  - Copiar uma linha ou tabela já cola no Excel separado em colunas. Botão direito: "Copiar para o Excel (em colunas)", "Salvar seleção no Excel…" e, sobre uma tabela, "Copiar tabela para o Excel" e "Salvar tabela no Excel…".
+- **Exportar para Excel** melhorado:
+  - acha tabelas mesmo sem linhas desenhadas;
+  - não junta mais palavras ("Serum albumin");
+  - datas viram datas e R$ e % viram números;
+  - CPF, CNPJ, CEP e telefone ficam como texto (antes o CNPJ perdia o zero e virava "7,2E+12");
+  - colunas com largura ajustada e cabeçalho fixo.
+- **Buscar em vários PDFs** (Arquivo › Buscar em vários PDFs, Ctrl+Shift+F):
+  - procura em todos os PDFs de uma pasta e subpastas;
+  - acentos e maiúsculas não importam;
+  - CPF e CNPJ são achados com ou sem pontuação;
+  - clicar no resultado abre o arquivo na página, com o trecho destacado.
+
 ## 1.18.2
 
 - **Impressão que falhava com "Não foi possível iniciar a impressão nesta impressora"**: quando o driver recusa o trabalho, o programa tenta de novo com configurações mais simples (resolução e papel padrão da impressora). Se mesmo assim não der, avisa o motivo: impressora desligada/offline, pausada, sem papel, marcada como "Usar impressora offline", removida ou da área de trabalho remota. Vale também para a impressão rápida (botão direito do Windows, Outlook).

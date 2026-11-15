@@ -155,7 +155,8 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var bars by remember { mutableStateOf(true) }
-    var searchMode by remember { mutableStateOf(false) }
+    var searchMode by remember(d) { mutableStateOf(d.query.isNotEmpty()) }
+    LaunchedEffect(d.query) { if (d.query.isNotEmpty()) searchMode = true }
     var showToc by remember { mutableStateOf(false) }
     var gotoDialog by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }

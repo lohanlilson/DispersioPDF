@@ -23,7 +23,8 @@ APP = "Dispersio PDF"
 MODE_TOOLS = {"note", "highlight", "underline", "strikeout", "freetext", "ink", "rect", "ellipse", "arrow",
               "line", "stamp", "edittext", "addtext", "image", "link", "redact", "crop", "signature",
               "field_text", "field_check", "field_combo", "certsign", "select", "hand"}
-NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch", "articles", "printer_queue"}
+NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch", "articles", "printer_queue",
+                    "search_folder"}
 
 
 class Worker(QThread):
@@ -212,6 +213,8 @@ class MainWindow(QMainWindow):
         act(m, "Propriedades…", lambda: self.run_tool("properties"), "Ctrl+D", "info")
         act(m, "Imprimir…", lambda: self.run_tool("print"), "Ctrl+P", "print")
         act(m, "Imprimir todas as abas abertas…", lambda: self.run_tool("print_all"), "Ctrl+Shift+P", "print")
+        m.addSeparator()
+        act(m, "Buscar em vários PDFs (pasta)…", lambda: self.run_tool("search_folder"), "Ctrl+Shift+F", "search")
         m.addSeparator()
         act(m, "Fechar aba", lambda: self.close_tab(self.tabbar.currentIndex()), "Ctrl+W")
         act(m, "Sair", self.close, "Ctrl+Q")
@@ -1398,6 +1401,42 @@ class MainWindow(QMainWindow):
             data = tab.doc.tobytes()
             self._run_worker("Extraindo tabelas…", lambda w: ops.to_xlsx(pymupdf.open("pdf", data), fn),
                              lambda r: self._open_file(fn))
+
+    def tool_export_grid(self, tab, grid=None, **kw):
+        """Salva uma tabela (seleção ou tabela clicada) como planilha do Excel."""
+        if not grid:
+            QMessageBox.information(self, APP, "Nada para salvar: selecione o texto da tabela primeiro.")
+            return
+        fn = self._save_target(tab, ".xlsx", "Excel")
+        if fn:
+            ops.grid_to_xlsx(grid, fn)
+            self._open_file(fn)
+
+    def tool_search_folder(self, tab=None, **kw):
+        """Busca um texto em todos os PDFs de uma pasta (janela que pode ficar aberta enquanto você abre os resultados)."""
+        from .busca_pasta import FolderSearchDialog
+        dlg = getattr(self, "_folder_search", None)
+        if dlg is None:
+            dlg = self._folder_search = FolderSearchDialog(self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def open_at(self, path, page=0, match=""):
+        """Abre (ou mostra, se já estiver aberto) o arquivo na página, destacando o texto achado."""
+        self.open_path(path)
+        t = self.cur()
+        if not t or not t.path or os.path.normcase(os.path.abspath(t.path)) != os.path.normcase(os.path.abspath(path)):
+            return
+        page = max(0, min(page, t.doc.page_count - 1))
+        t.view.goto(page)
+        if match:
+            QApplication.processEvents()
+            if t.view.search(match):
+                self.search.setText(match)
+        self.raise_()
+        self.activateWindow()
 
     def tool_export_text(self, tab, **kw):
         fn = self._save_target(tab, ".txt", "Texto")

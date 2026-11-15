@@ -92,7 +92,7 @@ CATALOG = [
         ("field_check", "checkbox", "Caixa de seleção"), ("field_combo", "form", "Lista suspensa"),
     ]),
     ("Mais ferramentas", [
-        ("payments", "barcode", "Boletos, Pix e notas fiscais"),
+        ("payments", "barcode", "Boletos, Pix e notas fiscais"), ("search_folder", "search", "Buscar em vários PDFs (pasta)"),
         ("articles", "search", "Pesquisar artigos científicos"), ("articles_doc", "search", "Artigos sobre este documento"), ("translate", "translate", "Traduzir documento"),
         ("compare", "compare", "Comparar arquivos"), ("read_aloud", "speaker", "Ler em voz alta"),
         ("attach", "attach", "Anexar arquivo"), ("print", "print", "Imprimir"),

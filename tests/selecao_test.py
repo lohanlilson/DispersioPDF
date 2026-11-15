@@ -27,9 +27,26 @@ assert len(v.sel_rects[0]) == 3, "só as três linhas da coluna ficam destacadas
 v.set_selection(0, ix["COOPERATIVA"], ix["VOTORANTIM"])
 assert "26/08" not in v.selected_text() and "0720" not in v.selected_text() and "SEJA CREDITO" in v.selected_text()
 
+v.set_selection(0, ix["26/08/2026"], ix["07202627000174"])
+assert v.selected_text() == ("26/08/2026\tCOOPERATIVA CENTRAL DE CREDITO E ECONOMIA COM INTERACAO SOLIDARIA CRESOL CENTRAL BRASIL"
+                             "\t07202627000174"), repr(v.selected_text())
+v.set_selection(0, ix["26/08/2026"], ix["59588111000103"])
+assert v.selected_text().count("\n") == 2 and "BANCO VOTORANTIM S.A.\t59588111000103" in v.selected_text(), "três linhas, prontas para o Excel"
+
 d2 = pymupdf.open(); p2 = d2.new_page()
 p2.insert_textbox(pymupdf.Rect(72, 72, 520, 400), "Lorem ipsum dolor sit amet consectetur adipiscing elit. " * 12, fontsize=11)
 v.set_document(d2)
 v.set_selection(0, 5, 60)
 assert len(v.selected_text().split()) == 56, "texto corrido: nada some"
+# Excel: tabela sem linhas desenhadas, célula de várias linhas, CNPJ como texto, data como data
+import tempfile, datetime, openpyxl
+from dispersio import ops
+xl = os.path.join(tempfile.mkdtemp(), "t.xlsx")
+_, n = ops.to_xlsx(d, xl)
+ws_ = openpyxl.load_workbook(xl).active
+assert n == 1 and ws_.cell(1, 2).value.startswith("COOPERATIVA") and ws_.cell(1, 2).value.endswith("BRASIL"), ws_.cell(1, 2).value
+assert ws_.cell(1, 3).value == "07202627000174" and ws_.cell(1, 1).value == datetime.datetime(2026, 8, 26)
+assert ops.cell_value("R$ 1.234,56")[0] == 1234.56 and ops.cell_value("111.222.333-44")[0] == "111.222.333-44"
+v.set_document(d)
+assert v.table_at(0, pymupdf.Point(300, 120))[2][1] == "BANCO VOTORANTIM S.A.", "botão direito na tabela"
 print("seleção em colunas ok")

@@ -1,5 +1,19 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.16.0
+
+- **Tabelas**: selecionar da primeira à última coluna pega a linha inteira (com células de várias linhas) e copiar já cola no Excel em colunas.
+- **Converter para Excel** melhorado:
+  - uma aba por tabela;
+  - datas, R$ e % viram números;
+  - CPF e CNPJ ficam como texto;
+  - colunas com largura ajustada.
+- **Buscar em vários PDFs** (tela inicial):
+  - procura nos recentes ou numa pasta escolhida;
+  - ignora acentos e maiúsculas;
+  - CPF e CNPJ com ou sem pontuação;
+  - abre o arquivo na página do resultado.
+
 ## 0.15.1
 
 - **Seleção em tabelas**: arrastar dentro de uma coluna (ex.: só o nome numa tabela de consultas) seleciona e copia só aquela coluna, sem puxar a data e o CNPJ das colunas do lado. Em texto corrido nada muda.
