@@ -38,7 +38,7 @@ class FilaTest {
     fun compartilharParaAFila() {
         Fila.list(ctx).forEach { it.delete() }
         val a = pdf("a.pdf", 1); val b = pdf("b.pdf", 2)
-        val i = Intent(Intent.ACTION_SEND_MULTIPLE).setComponent(ComponentName(ctx, "${ctx.packageName}.Fila"))
+        val i = Intent(Intent.ACTION_SEND_MULTIPLE).setComponent(ComponentName(ctx.packageName, "io.github.lohanlilson.dispersio.Fila"))
             .setType("application/pdf")
             .putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(Uri.fromFile(a), Uri.fromFile(b)))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

@@ -504,13 +504,8 @@ class DocTab(QWidget):
         self.check_language()
 
     def _scan_source(self):
-        """Para as verificações em segundo plano: o caminho do arquivo, se ele ainda é o que foi aberto (assim cada
-        verificação lê do disco em vez de guardar outra cópia inteira na memória); senão, os bytes."""
-        try:
-            if self.path and os.path.isfile(self.path) and os.path.getsize(self.path) == len(self.original_bytes):
-                return self.path
-        except Exception:
-            pass
+        """Para as verificações em segundo plano: os bytes do arquivo como foi aberto. (Não o caminho: no Windows, um
+        arquivo aberto em outra linha de execução fica preso e não deixa salvar por cima.)"""
         return self.original_bytes
 
     # ------------------------------------------------------------ golpes
