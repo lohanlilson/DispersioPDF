@@ -134,7 +134,7 @@ class BoletoTest {
             }
             assertEquals(emptyMap<Int, Int>(), again)
             InstrumentationRegistry.getInstrumentation().runOnMainSync { vm.undo(d) }
-            assertTrue(waitFor(20_000) { !d.busy && runBlocking { vm.engine.pageRotation(d.pdf, 2) } == 0 })
+            assertTrue(waitFor(20_000) { !d.busy && !d.canUndo && runBlocking { vm.engine.pageRotation(d.pdf, 2) } == 0 })
             assertFalse(d.canUndo)
         }
     }

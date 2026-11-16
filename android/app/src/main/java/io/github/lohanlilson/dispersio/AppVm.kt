@@ -382,9 +382,9 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         d.work?.let { w -> d.redo.addLast(w); currentSizes(d)?.let { d.sizesOf[w.path] = it } }
         d.work = prev
         d.dirty = true
-        reopen(d, prev, d.sizesOf[prev.path])
         d.canUndo = d.undo.isNotEmpty()
         d.canRedo = d.redo.isNotEmpty()
+        reopen(d, prev, d.sizesOf[prev.path])
     }
 
     fun redo(d: ViewerDoc) = viewModelScope.launch {
@@ -392,9 +392,9 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         d.work?.let { w -> d.undo.addLast(w); currentSizes(d)?.let { d.sizesOf[w.path] = it } }
         d.work = next
         d.dirty = true
-        reopen(d, next, d.sizesOf[next.path])
         d.canUndo = d.undo.isNotEmpty()
         d.canRedo = d.redo.isNotEmpty()
+        reopen(d, next, d.sizesOf[next.path])
     }
 
     fun loadFields(d: ViewerDoc, parsed: Parsed? = null) = viewModelScope.launch {
