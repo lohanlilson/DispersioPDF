@@ -434,6 +434,58 @@ def _validation_context():
     return ValidationContext(**kw)
 
 
+def _fmt_cpf(d):
+    d = "".join(ch for ch in d if ch.isdigit())
+    return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}" if len(d) == 11 else d
+
+
+def _fmt_cnpj(d):
+    d = "".join(ch for ch in d if ch.isdigit())
+    return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}" if len(d) == 14 else d
+
+
+def icp_brasil(cert):
+    """Dados ICP-Brasil gravados no certificado (SubjectAltName, otherName 2.16.76.1.3.x).
+
+    e-CNPJ: o nome da empresa fica no titular, mas quem responde pelo certificado (quem tem a senha e assina)
+    vem em 2.16.76.1.3.2 (nome) e 2.16.76.1.3.4 (nascimento + CPF). e-CPF: 2.16.76.1.3.1 (nascimento + CPF).
+    """
+    out = {}
+    try:
+        san = cert.subject_alt_name_value
+    except Exception:
+        san = None
+    for gn in san or []:
+        try:
+            if gn.name != "other_name":
+                continue
+            oid = gn.chosen["type_id"].dotted
+            raw = gn.chosen["value"].contents
+            try:
+                val = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                val = raw.decode("latin-1")
+            val = val.strip()
+        except Exception:
+            continue
+        if oid in ("2.16.76.1.3.1", "2.16.76.1.3.4") and len(val) >= 19:
+            nasc, cpf = val[:8], val[8:19]
+            if cpf.isdigit() and set(cpf) != {"0"}:
+                key = "titular" if oid == "2.16.76.1.3.1" else "responsavel"
+                out[f"{key}_cpf"] = _fmt_cpf(cpf)
+                if nasc.isdigit() and set(nasc) != {"0"}:
+                    out[f"{key}_nascimento"] = f"{nasc[:2]}/{nasc[2:4]}/{nasc[4:]}"
+        elif oid == "2.16.76.1.3.2" and val:
+            out["responsavel"] = " ".join(val.split())
+        elif oid == "2.16.76.1.3.3" and val.isdigit():
+            out["cnpj"] = _fmt_cnpj(val)
+    if "cnpj" in out or "responsavel" in out:
+        out["tipo"] = "e-CNPJ"
+    elif "titular_cpf" in out:
+        out["tipo"] = "e-CPF"
+    return out
+
+
 def _cert_info(cert):
     try:
         subj = cert.subject.native
@@ -447,9 +499,28 @@ def _cert_info(cert):
                 "emissor_org": iss.get("organization_name", ""),
                 "serie": format(cert.serial_number, "X"),
                 "valido_de": validity["not_before"].native, "valido_ate": validity["not_after"].native,
-                "assunto": cert.subject.human_friendly, "algoritmo": cert.signature_algo}
+                "assunto": cert.subject.human_friendly, "algoritmo": cert.signature_algo,
+                **_icp_fmt(doc, icp_brasil(cert))}
     except Exception:
         return {}
+
+
+def _icp_fmt(doc, icp):
+    """Documento formatado e o responsável pelo e-CNPJ (quem de fato assinou pela empresa)."""
+    out = dict(icp)
+    if doc and len(doc) == 14:
+        out.setdefault("cnpj", _fmt_cnpj(doc))
+        out.setdefault("tipo", "e-CNPJ")
+    elif doc and len(doc) == 11:
+        out.setdefault("titular_cpf", _fmt_cpf(doc))
+    return out
+
+
+def signer_label(info):
+    """Texto curto para listas: "EMPRESA LTDA (por FULANO)" no e-CNPJ, senão o nome."""
+    c = info.get("cert") or {}
+    nome = c.get("nome") or (info.get("signer") or "?").split(":")[0]
+    return f"{nome} (por {c['responsavel']})" if c.get("responsavel") else nome
 
 
 def validate(pdf_bytes, field=None):

@@ -1153,14 +1153,14 @@ class MainWindow(QMainWindow):
         new_fields = [k for k in fb if k not in fa and fb[k][0] != pymupdf.PDF_WIDGET_TYPE_SIGNATURE]
         parts = []
         if later:
-            parts.append(f"{len(later)} assinatura(s) posterior(es): " + ", ".join(o["signer"].split(":")[0] for o in later))
+            parts.append(f"{len(later)} assinatura(s) posterior(es): " + ", ".join(signing.signer_label(o) for o in later))
         if nb != na:
             parts.append(f"{nb - na:+d} comentário(s)")
         if filled:
             parts.append(f"{len(filled)} campo(s) de formulário preenchido(s)/alterado(s)")
         if new_fields:
             parts.append(f"{len(new_fields)} campo(s) de formulário novo(s)")
-        who = info["signer"].split(":")[0]
+        who = signing.signer_label(info)
         intro = (f"<b>Depois da assinatura de {who}:</b> " + ("; ".join(parts) if parts else "sem comentários, campos ou assinaturas novos")
                  + ". À esquerda, o documento como foi assinado; à direita, a versão atual.")
         self._compare_win = open_compare(self, a, f"Versão assinada por {who}", b, "Versão atual",

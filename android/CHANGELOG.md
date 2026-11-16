@@ -1,5 +1,9 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.19.0
+
+- **Assinaturas com e-CNPJ mostram quem assinou pela empresa**: a faixa do documento e a lista de assinaturas mostram a empresa e o responsável pelo certificado (nome e CPF gravados no e-CNPJ).
+
 ## 0.18.0
 
 - **Quadrinhos e mangás**: leitor próprio para .cbz e .cbr (RAR4).

@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.23.0
+
+- **Assinaturas com e-CNPJ mostram quem assinou pela empresa.** O certificado e-CNPJ leva o nome da empresa, mas traz gravado o responsável por ele (nome e CPF). Agora a faixa do documento mostra "Assinado por: EMPRESA — responsável: FULANO, CPF …", e o mesmo aparece no Painel de assinaturas e na Validação da assinatura (com CNPJ, CPF do responsável e data de nascimento). Se o certificado não informar o responsável, isso é dito. No e-CPF aparece o CPF do titular.
+
 ## 1.22.0
 
 - **Dicionário**: duplo clique numa palavra (ou botão direito › Significado) mostra o significado.

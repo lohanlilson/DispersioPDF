@@ -398,7 +398,21 @@ class SignatureBar(QFrame):
         if self.tab.modified:
             msg += " (alterações não salvas não são consideradas)"
         self._style(lvl)
-        self.text.setText(f"<b>{msg}</b> {n} assinatura(s). Clique sobre uma assinatura para ver os detalhes.")
+        from html import escape
+        quem = []
+        for r in results[:4]:
+            c = r.get("cert") or {}
+            nome = escape(c.get("nome") or (r.get("signer") or "?").split(":")[0])
+            if c.get("responsavel"):
+                cpf = f", CPF {c['responsavel_cpf']}" if c.get("responsavel_cpf") else ""
+                nome += f" — responsável: <b>{escape(c['responsavel'])}</b>{cpf}"
+            elif c.get("tipo") == "e-CNPJ":
+                nome += " — responsável não informado no certificado"
+            quem.append(nome)
+        if n > 4:
+            quem.append(f"e mais {n - 4}")
+        self.text.setText(f"<b>{msg}</b> Assinado por: {'; '.join(quem)}. "
+                          "Clique sobre uma assinatura para ver os detalhes.")
         self.btn.show()
         self.show()
 

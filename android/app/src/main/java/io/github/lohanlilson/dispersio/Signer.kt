@@ -85,7 +85,10 @@ data class SigInfo(
     val intact: Boolean, val coversWhole: Boolean, val reason: String?, val location: String?,
     val issuer: String, val validUntil: Date?, val error: String?, val revisionEnd: Int = 0,
     val identity: IcpTrust.Identity? = null,
+    val icp: Certs.Icp = Certs.Icp(),
 ) {
+    /** "EMPRESA (por FULANO)" no e-CNPJ, senão o nome */
+    val label get() = if (icp.responsible != null) "$signer (por ${icp.responsible})" else signer
     val ok get() = intact && error == null
     /** assinatura íntegra mas com certificado revogado/vencido */
     val badCert get() = identity?.status == IcpTrust.Status.REVOKED || identity?.status == IcpTrust.Status.EXPIRED
@@ -99,6 +102,60 @@ object Certs {
     fun cn(c: X509Certificate): String = runCatching {
         X500Name.getInstance(c.subjectX500Principal.encoded).getRDNs(BCStyle.CN).first().first.value.toString()
     }.getOrDefault(c.subjectX500Principal.name)
+
+    /** Dados ICP-Brasil do certificado. No e-CNPJ, o titular é a empresa e quem responde por ele (quem assina)
+     *  fica em 2.16.76.1.3.2 (nome) e 2.16.76.1.3.4 (nascimento + CPF); no e-CPF, 2.16.76.1.3.1. */
+    data class Icp(val type: String? = null, val cnpj: String? = null, val responsible: String? = null,
+                   val responsibleCpf: String? = null, val responsibleBirth: String? = null, val holderCpf: String? = null)
+
+    fun fmtCpf(d: String) = if (d.length == 11) "${d.substring(0, 3)}.${d.substring(3, 6)}.${d.substring(6, 9)}-${d.substring(9)}" else d
+    fun fmtCnpj(d: String) = if (d.length == 14) "${d.substring(0, 2)}.${d.substring(2, 5)}.${d.substring(5, 8)}/${d.substring(8, 12)}-${d.substring(12)}" else d
+
+    /** conteúdo (sem tipo/tamanho) de um TLV DER que começa em [off] */
+    private fun derValue(b: ByteArray, off: Int): Pair<Int, Int>? {
+        if (off + 2 > b.size) return null
+        var i = off + 1
+        var len = b[i].toInt() and 0xFF; i++
+        if (len and 0x80 != 0) {
+            val n = len and 0x7F; len = 0
+            repeat(n) { len = (len shl 8) or (b[i].toInt() and 0xFF); i++ }
+        }
+        return if (i + len <= b.size) i to len else null
+    }
+
+    fun icpBrasil(c: X509Certificate): Icp {
+        val ext = c.getExtensionValue("2.5.29.17") ?: return Icp()
+        val names = runCatching {
+            GeneralNames.getInstance(org.bouncycastle.asn1.ASN1OctetString.getInstance(ext).octets).names
+        }.getOrNull() ?: return Icp()
+        val vals = HashMap<String, String>()
+        for (gn in names) {
+            if (gn.tagNo != GeneralName.otherName) continue
+            runCatching {
+                val seq = org.bouncycastle.asn1.ASN1Sequence.getInstance(gn.name)
+                val oid = org.bouncycastle.asn1.ASN1ObjectIdentifier.getInstance(seq.getObjectAt(0)).id
+                val tagged = seq.getObjectAt(1).toASN1Primitive().encoded          // [0] { valor }
+                val (o1, _) = derValue(tagged, 0)!!
+                val (o2, l2) = derValue(tagged, o1)!!                              // OCTET STRING / PrintableString / UTF8
+                val raw = tagged.copyOfRange(o2, o2 + l2)
+                val txt = runCatching { java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(raw)).toString() }
+                    .getOrElse { String(raw, Charsets.ISO_8859_1) }
+                vals[oid] = txt.trim()
+            }
+        }
+        fun cpfOf(v: String?): Pair<String?, String?> {
+            if (v == null || v.length < 19) return null to null
+            val birth = v.substring(0, 8); val cpf = v.substring(8, 19)
+            if (!cpf.all { it.isDigit() } || cpf.all { it == '0' }) return null to null
+            return fmtCpf(cpf) to (if (birth.all { it.isDigit() } && !birth.all { it == '0' }) "${birth.substring(0, 2)}/${birth.substring(2, 4)}/${birth.substring(4)}" else null)
+        }
+        val (respCpf, respBirth) = cpfOf(vals["2.16.76.1.3.4"])
+        val (holderCpf, _) = cpfOf(vals["2.16.76.1.3.1"])
+        val cnpj = vals["2.16.76.1.3.3"]?.takeIf { it.all(Char::isDigit) }?.let(::fmtCnpj)
+        val resp = vals["2.16.76.1.3.2"]?.split(Regex("\\s+"))?.joinToString(" ")?.takeIf { it.isNotBlank() }
+        val type = when { cnpj != null || resp != null -> "e-CNPJ"; holderCpf != null -> "e-CPF"; else -> null }
+        return Icp(type, cnpj, resp, respCpf, respBirth, holderCpf)
+    }
 
     /** ICP-Brasil: "NOME:CPF" -> ("NOME", "CPF"). */
     fun splitName(cn: String): Pair<String, String?> {
@@ -456,7 +513,7 @@ object PdfSigner {
                     val identity = runCatching { IcpTrust.check(cert, embedded, at, online) }.getOrNull()
                     out += SigInfo(field, name, docId, sig.signDate?.time, tsa, ok, covers, sig.reason, sig.location,
                         runCatching { X500Name.getInstance(cert.issuerX500Principal.encoded).getRDNs(BCStyle.CN).first().first.value.toString() }.getOrDefault(""),
-                        cert.notAfter, null, end, identity)
+                        cert.notAfter, null, end, identity, runCatching { Certs.icpBrasil(cert) }.getOrDefault(Certs.Icp()))
                 } catch (e: Exception) {
                     out += SigInfo(field, sig.name ?: "?", null, sig.signDate?.time, null, false, false, sig.reason, sig.location,
                         "", null, e.message ?: e.javaClass.simpleName)

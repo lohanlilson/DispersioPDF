@@ -60,7 +60,7 @@ jobs:
           LUMEN_KEYSTORE_PASS: ${{ secrets.LUMEN_KEYSTORE_PASS }}
         run: |
           if [ -n "$KS_B64" ]; then echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/lumen.jks"; export LUMEN_KEYSTORE="$RUNNER_TEMP/lumen.jks"; fi
-          ./gradlew assembleDebug assembleDebugAndroidTest assembleRelease --console=plain
+          ./gradlew assembleDebug assembleDebugAndroidTest assembleRelease testDebugUnitTest --console=plain
 
       - name: Habilitar aceleração do emulador
         run: |

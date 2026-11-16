@@ -193,8 +193,9 @@ fun SignatureBanner(d: ViewerDoc, onOpen: () -> Unit) {
     val msg = when {
         sigs.any { !it.ok } -> "Pelo menos uma assinatura é inválida"
         bad -> "Certificado revogado ou vencido na assinatura"
-        sigs.size == 1 -> "Assinado por ${sigs[0].signer} — " + (if (icp) "assinatura válida (ICP-Brasil)" else "íntegra, identidade não confirmada")
-        else -> "${sigs.size} assinaturas — " + (if (icp) "todas válidas (ICP-Brasil)" else "íntegras, identidade não confirmada")
+        sigs.size == 1 -> "Assinado por ${sigs[0].label} — " + (if (icp) "assinatura válida (ICP-Brasil)" else "íntegra, identidade não confirmada")
+        else -> "${sigs.size} assinaturas (${sigs.take(3).joinToString("; ") { it.label }}${if (sigs.size > 3) "…" else ""}) — " +
+            (if (icp) "todas válidas (ICP-Brasil)" else "íntegras, identidade não confirmada")
     }
     Surface(color = bg, modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -216,7 +217,14 @@ fun SignaturesSheet(d: ViewerDoc, onChanges: (SigInfo) -> Unit = {}, onDismiss: 
                 Column(Modifier.padding(vertical = 10.dp)) {
                     val color = if (s.ok) Color(0xFF2D9D78) else Color(0xFFD7373F)
                     Text((if (s.ok) "✔ " else "✖ ") + s.signer, color = color, fontWeight = FontWeight.SemiBold)
-                    s.document?.let { Text("CPF/CNPJ: $it", style = MaterialTheme.typography.bodySmall) }
+                    if (s.icp.type == "e-CNPJ") {
+                        Text("CNPJ: ${s.icp.cnpj ?: s.document?.let(Certs::fmtCnpj) ?: "—"}", style = MaterialTheme.typography.bodySmall)
+                        Text("Responsável: ${s.icp.responsible ?: "não informado no certificado"}",
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        s.icp.responsibleCpf?.let { Text("CPF do responsável: $it" + (s.icp.responsibleBirth?.let { b -> " · nascimento $b" } ?: ""),
+                            style = MaterialTheme.typography.bodySmall) }
+                    } else (s.icp.holderCpf ?: s.document)?.let { Text("CPF/CNPJ: $it", style = MaterialTheme.typography.bodySmall) }
+                    s.icp.type?.let { Text("Certificado $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     Text("Data: " + ((s.tsaDate ?: s.date)?.let { fmt.format(it) } ?: "—") +
                         (if (s.tsaDate != null) " (carimbo de tempo)" else " (relógio do signatário)"), style = MaterialTheme.typography.bodySmall)
                     Text(when {

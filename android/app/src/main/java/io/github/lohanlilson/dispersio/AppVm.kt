@@ -1534,9 +1534,9 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             val fb = File(app.cacheDir, "versao_atual.pdf").apply { writeBytes(bytes) }
             val a = engine.open(app, Uri.fromFile(fa), d.password)
             val b = engine.open(app, Uri.fromFile(fb), d.password)
-            val later = d.signatures.filter { it.revisionEnd > sig.revisionEnd }.joinToString { it.signer }
+            val later = d.signatures.filter { it.revisionEnd > sig.revisionEnd }.joinToString { it.label }
             runCompare(a, b, "Versão assinada", "Versão atual", "Alterações após a assinatura",
-                "Depois da assinatura de ${sig.signer}" + (if (later.isNotEmpty()) " · assinaturas posteriores: $later" else ""))
+                "Depois da assinatura de ${sig.label}" + (if (later.isNotEmpty()) " · assinaturas posteriores: $later" else ""))
         } catch (e: Exception) {
             error = "Não foi possível comparar.\n${e.message ?: ""}"
         }

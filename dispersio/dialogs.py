@@ -470,8 +470,20 @@ class SignatureInfoDialog(QDialog):
                    "OTHER": "Conteúdo alterado depois da assinatura"}.get(mod, mod)
         rows = [
             ("<b>Signatário</b>", ""),
-            ("Nome", c.get("nome") or info.get("signer")),
-            ("CPF/CNPJ", c.get("documento") or "—"),
+            ("Empresa" if c.get("tipo") == "e-CNPJ" else "Nome", c.get("nome") or info.get("signer")),
+        ]
+        if c.get("tipo") == "e-CNPJ":
+            rows += [
+                ("CNPJ", c.get("cnpj") or c.get("documento") or "—"),
+                ("Responsável", c.get("responsavel") or "não informado no certificado"),
+                ("CPF do responsável", c.get("responsavel_cpf") or "—"),
+            ]
+            if c.get("responsavel_nascimento"):
+                rows.append(("Nascimento", c["responsavel_nascimento"]))
+        else:
+            rows.append(("CPF/CNPJ", c.get("titular_cpf") or c.get("documento") or "—"))
+        rows += [
+            ("Tipo de certificado", c.get("tipo") or "—"),
             ("Organização", c.get("organizacao") or "—"),
             ("E-mail", c.get("email") or "—"),
             ("<b>Assinatura</b>", ""),
@@ -559,7 +571,7 @@ class SignaturesDialog(QDialog):
             later = sum(1 for o in results if (o.get("revision_end") or 0) > (info.get("revision_end") or 0))
             after = ("Sem alterações" if not info.get("later_changes") else
                      (f"{later} assinatura(s) e alterações" if later else "Houve alterações"))
-            vals = [SIG_SYMBOL[lvl], info["signer"], _fmt_dt(info["time"])[:16], after, title]
+            vals = [SIG_SYMBOL[lvl], signing.signer_label(info), _fmt_dt(info["time"])[:16], after, title]
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(str(v))
                 if c in (0, 4):
