@@ -172,6 +172,16 @@ class AppVm(app: Application) : AndroidViewModel(app) {
         loading = true
         try {
             val name = withContext(Dispatchers.IO) { displayName(getApplication(), uri) }
+            if (Epub.isEpubName(name)) {                       // livro EPUB: leitor próprio
+                val b = withContext(Dispatchers.IO) { Epub.open(getApplication(), uri, name) }
+                closeComic(); epub = b
+                return@launch
+            }
+            if (Comic.isComicName(name)) {                    // quadrinho/mangá: leitor próprio
+                if (fromPicker) runCatching { getApplication<Application>().contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                openComicNow(uri, name, emptyList(), 0, Comic.key(uri))
+                return@launch
+            }
             val ready = withContext(Dispatchers.IO) { prepareUri(getApplication(), uri, fromPicker) }
             openPrepared(ready, name, null)
         } catch (e: Exception) {
@@ -1173,6 +1183,50 @@ class AppVm(app: Application) : AndroidViewModel(app) {
             error = netError(e)
         } finally { progress = null }
     }
+
+    // ------------------------------------------------------------ quadrinhos e mangás
+    var comic by mutableStateOf<ComicSession?>(null)
+        private set
+    var showLibrary by mutableStateOf(false)
+
+    private suspend fun openComicNow(uri: Uri, name: String, chapters: List<Library.Chapter>, index: Int, series: String) {
+        val app = getApplication<Application>()
+        val (book, ratios) = withContext(Dispatchers.IO) {
+            val b = Comic.open(app, uri, name)
+            b to b.pages.indices.map { b.ratio(it) }
+        }
+        val sorted = ratios.sorted()
+        val median = if (sorted.isEmpty()) 1.4f else sorted[sorted.size / 2]
+        val def = when { book.rtl -> "manga"; median > 2.2f -> "webtoon"; else -> "pagina" }
+        comic?.book?.close()
+        comic = ComicSession(book, ratios, chapters, index, series, def)
+    }
+
+    fun openComicFromLibrary(s: Library.Series, i: Int) = viewModelScope.launch {
+        loading = true
+        try { openComicNow(s.chapters[i].uri, s.chapters[i].name, s.chapters, i, s.id) }
+        catch (e: Exception) { error = "Não foi possível abrir o capítulo.\n${e.message ?: ""}" }
+        finally { loading = false }
+    }
+
+    /** Capítulo anterior/próximo da mesma série. */
+    fun comicChapter(step: Int) = viewModelScope.launch {
+        val c = comic ?: return@launch
+        val j = c.index + step
+        val ch = c.chapters.getOrNull(j) ?: return@launch
+        if (step > 0) Comic.savePage(getApplication(), c.book.key, c.book.pages.size - 1, c.book.pages.size)   // terminou o atual
+        loading = true
+        try {
+            openComicNow(ch.uri, ch.name, c.chapters, j, c.series)
+        } catch (e: Exception) { error = "Não foi possível abrir o capítulo.\n${e.message ?: ""}" }
+        finally { loading = false }
+    }
+
+    fun closeComic() { comic?.book?.close(); comic = null }
+
+    var epub by mutableStateOf<Epub.Book?>(null)
+        private set
+    fun closeEpub() { epub = null }
 
     // ------------------------------------------------------------ fila do Dispersio
     var showQueue by mutableStateOf(false)

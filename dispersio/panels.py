@@ -94,7 +94,7 @@ CATALOG = [
     ]),
     ("Mais ferramentas", [
         ("payments", "barcode", "Boletos, Pix e notas fiscais"), ("search_folder", "search", "Buscar em vários PDFs (pasta)"),
-        ("phone", "phone", "Continuar no celular"),
+        ("phone", "phone", "Continuar no celular"), ("library", "readmode", "Biblioteca (quadrinhos e livros)"),
         ("articles", "search", "Pesquisar artigos científicos"), ("articles_doc", "search", "Artigos sobre este documento"), ("translate", "translate", "Traduzir documento"),
         ("compare", "compare", "Comparar arquivos"), ("read_aloud", "speaker", "Ler em voz alta"),
         ("attach", "attach", "Anexar arquivo"), ("print", "print", "Imprimir"),

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.DocumentScanner
@@ -83,7 +84,7 @@ fun HomeScreen(vm: AppVm) {
     Scaffold(
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { picker.launch(arrayOf("application/pdf")) },
+                onClick = { picker.launch(OPEN_TYPES) },
                 icon = { Icon(Icons.Filled.FolderOpen, null) },
                 text = { Text("Abrir PDF") },
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -197,6 +198,8 @@ private fun QuickActions(vm: AppVm) {
             ActionCard(Icons.Filled.Settings, "Preferências", "Tema, nome, rubrica…", Modifier.weight(1f)) { vm.showSettings = true }
         }
         val ctxA = LocalContext.current
+        ActionCard(Icons.AutoMirrored.Filled.MenuBook, "Quadrinhos e mangás", "Sua biblioteca de .cbz/.cbr: webtoon, página ou mangá",
+            Modifier.fillMaxWidth()) { vm.showLibrary = true }
         ActionCard(Icons.Filled.Computer, "Continuar do computador", "Lê o QR do computador e abre na mesma página",
             Modifier.fillMaxWidth()) { vm.continueFromComputer(ctxA) }
         ActionCard(Icons.Filled.Inbox, "Fila do Dispersio" + if (vm.queueCount > 0) " (${vm.queueCount})" else "",

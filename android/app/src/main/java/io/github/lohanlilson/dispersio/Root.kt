@@ -42,17 +42,24 @@ fun DispersioRoot(vm: AppVm) {
     LaunchedEffect(vm.pendingAction) {
         when (vm.pendingAction) {
             "scan" -> scan()
-            "open" -> pick.launch(arrayOf("application/pdf"))
+            "open" -> pick.launch(OPEN_TYPES)
         }
         vm.pendingAction = null
     }
-    if (d == null) {
+    val hq = vm.comic
+    val ep = vm.epub
+    if (ep != null) {
+        EpubScreen(vm, ep)
+    } else if (hq != null) {
+        ComicScreen(vm, hq)
+    } else if (d == null) {
         HomeScreen(vm)
     } else {
         BackHandler { if (d.editing && d.tool != Tool.NONE) d.tool = Tool.NONE else vm.requestClose() }
         ViewerScreen(vm, d)
     }
     if (vm.showQueue) FilaScreen(vm) { vm.showQueue = false; vm.refreshQueue() }
+    if (vm.showLibrary && vm.comic == null) LibraryScreen(vm) { vm.showLibrary = false }
     if (vm.loading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
     }

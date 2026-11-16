@@ -2,6 +2,25 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.21.0
+
+- **Quadrinhos, mangás e livros**
+  - Abre .cbz, .cbr (RAR4/RAR5), .cb7 e .zip de imagens, e livros .epub, .mobi e .fb2. As imagens entram sem recompressão: abre rápido e sem perder qualidade. O original nunca é alterado e fechar não pergunta se quer salvar.
+  - **Modo quadrinhos**, com uma barra na parte de baixo:
+    - **Webtoon**: rolagem contínua sem espaço entre as páginas;
+    - **Página**: uma por vez, com setas ou espaço;
+    - **Dupla**: duas páginas lado a lado, com a capa sozinha;
+    - **Mangá**: da direita para a esquerda.
+
+    O modo é escolhido sozinho (mangá pelo ComicInfo.xml, webtoon pelas páginas compridas) e lembrado por série.
+  - **Capítulo anterior/próximo**: abre o arquivo seguinte da mesma pasta, em ordem natural (Cap 9 → Cap 10), no mesmo modo.
+  - **Biblioteca** (Arquivo › Biblioteca, Ctrl+B):
+    - escolha a pasta e cada subpasta vira uma série;
+    - cada série mostra capa, % lido e etiquetas (Lendo, Quero ler, Concluído, Favoritos);
+    - "Continuar" abre o primeiro capítulo não terminado.
+- **Abre na página em que você parou**, em qualquer arquivo (pode desligar em Preferências).
+- O Windows oferece o Dispersio no "Abrir com" de .cbz, .cbr, .epub, .mobi e .fb2.
+
 ## 1.20.0
 
 - **Continuar no celular** (Arquivo › Continuar no celular): o computador mostra um QR; no app do celular, "Continuar do computador" baixa o documento (com as alterações) pela rede Wi-Fi e abre na mesma página. O contrário também: no celular, "⋮ › Enviar para o computador" abre o documento aqui na página em que estava. Sem nuvem; a ligação só existe enquanto a janela do QR estiver aberta.

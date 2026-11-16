@@ -87,6 +87,7 @@ dependencies {
     // OCR no próprio celular (sem internet)
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")   // ler o QR do computador (sem pedir câmera)
+    implementation("com.github.junrar:junrar:7.5.5")   // quadrinhos .cbr (RAR)
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     androidTestImplementation(bom)

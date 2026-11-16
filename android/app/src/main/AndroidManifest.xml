@@ -46,6 +46,20 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
+            <!-- quadrinhos e mangás (.cbz/.cbr) e livros (.epub) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="application/x-cdisplay" />
+                <data android:mimeType="application/epub+zip" />
+            </intent-filter>
             <!-- "Compartilhar" com o Dispersio PDF -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

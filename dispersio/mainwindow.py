@@ -24,7 +24,7 @@ MODE_TOOLS = {"note", "highlight", "underline", "strikeout", "freetext", "ink", 
               "line", "stamp", "edittext", "addtext", "image", "link", "redact", "crop", "signature",
               "field_text", "field_check", "field_combo", "certsign", "select", "hand"}
 NEEDS_DOC_EXCEPT = {"merge", "create_pdf", "compare", "open", "create_signature", "print_batch", "articles", "printer_queue",
-                    "search_folder", "my_data", "phone"}
+                    "search_folder", "my_data", "phone", "library"}
 
 
 class Worker(QThread):
@@ -215,6 +215,7 @@ class MainWindow(QMainWindow):
         act(m, "Imprimir todas as abas abertas…", lambda: self.run_tool("print_all"), "Ctrl+Shift+P", "print")
         m.addSeparator()
         act(m, "Buscar em vários PDFs (pasta)…", lambda: self.run_tool("search_folder"), "Ctrl+Shift+F", "search")
+        act(m, "Biblioteca de quadrinhos, mangás e livros…", lambda: self.run_tool("library"), "Ctrl+B", "readmode")
         act(m, "Continuar no celular / receber do celular…", lambda: self.run_tool("phone"), None, "phone")
         m.addSeparator()
         act(m, "Fechar aba", lambda: self.close_tab(self.tabbar.currentIndex()), "Ctrl+W")
@@ -360,6 +361,7 @@ class MainWindow(QMainWindow):
 
     def add_tab(self, tab):
         tab.view.pageChanged.connect(lambda c, n, t=tab: self._show_page(t, c, n))
+        tab.view.pageChanged.connect(lambda c, n, t=tab: self._save_position(t, c))
         tab.titleChanged.connect(lambda t=tab: self._retitle(t))
         tab.statusMsg.connect(lambda m: self.statusBar().showMessage(m, 6000))
         tab.view.request_tool = lambda name, **kw: self.run_tool(name, **kw)
@@ -431,7 +433,9 @@ class MainWindow(QMainWindow):
 
     def open_dialog(self):
         fns, _ = QFileDialog.getOpenFileNames(self, "Abrir", self.settings.value("last_dir", os.path.expanduser("~")),
-                                              "PDF (*.pdf);;Imagens e outros (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.xps *.epub *.cbz *.svg);;Todos (*.*)")
+                                              "Todos os suportados (*.pdf *.cbz *.cbr *.cb7 *.epub *.mobi *.fb2 *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.xps *.svg "
+                                              "*.doc *.docx *.xls *.xlsx *.odt *.rtf);;PDF (*.pdf);;Quadrinhos e mangás (*.cbz *.cbr *.cb7 *.zip);;"
+                                              "Livros (*.epub *.mobi *.fb2);;Imagens e outros (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.xps *.svg);;Todos (*.*)")
         for fn in fns:
             self.open_path(fn)
         return bool(fns)
@@ -441,12 +445,26 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP, f"Arquivo não encontrado:\n{path}")
             return
         for i, t in enumerate(self.tab_widgets):
-            if t and t.path and os.path.normcase(os.path.abspath(t.path)) == os.path.normcase(os.path.abspath(path)):
+            src = t and (t.path or getattr(t, "source_path", None))
+            if src and os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(path)):
                 self.tabbar.setCurrentIndex(i)
                 return
         self.settings.setValue("last_dir", os.path.dirname(path))
+        from . import quadrinhos as hq
+        comic = None
         try:
             ext = os.path.splitext(path)[1].lower()
+            if hq.is_comic(path) or hq.is_book(path):
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+                try:
+                    if hq.is_book(path):
+                        data, comic = hq.book_to_pdf(path), {"book": True}
+                    else:
+                        data, comic = hq.comic_to_pdf(path)
+                finally:
+                    QApplication.restoreOverrideCursor()
+                self._open_reading(path, data, comic)
+                return
             if ext in (".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".rtf"):
                 out = os.path.join(tempfile.mkdtemp(), os.path.splitext(os.path.basename(path))[0] + ".pdf")
                 ops.office_to_pdf(path, out)
@@ -498,11 +516,61 @@ class MainWindow(QMainWindow):
             if save_path is None:
                 tab.modified = True
                 tab._suggested = suggested
+            saved = self._saved_position(save_path)
+            tab._restoring = True
             self.add_tab(tab)
             if save_path:
                 self._add_recent(path)
+            self._restore_position(tab, saved)
         except Exception as e:
             QMessageBox.critical(self, APP, f"Não foi possível abrir o arquivo:\n{e}")
+
+    def _open_reading(self, path, data, info):
+        """Quadrinho/mangá/livro: abre a versão em PDF feita na memória, sem perguntar se quer salvar ao fechar e sem
+        mexer no original; lembra a página e liga o modo quadrinhos."""
+        tab = DocTab(data, None, None, self.settings)
+        tab.source_path = os.path.abspath(path)
+        tab.comic = info
+        tab._suggested = os.path.splitext(path)[0] + ".pdf"
+        tab.modified = False
+        saved = self._saved_position(tab.source_path)
+        tab._restoring = True
+        self.add_tab(tab)
+        self._add_recent(path)
+        self._restore_position(tab, saved)
+        if not info.get("book"):
+            from .quadrinhos_ui import apply_comic_mode
+            apply_comic_mode(self, tab)
+        if info.get("skipped"):
+            self.statusBar().showMessage(f"{info['skipped']} imagem(ns) não puderam ser lidas e ficaram de fora.", 8000)
+
+    def _saved_position(self, path):
+        from . import quadrinhos as hq
+        if not path or not cfg.get("remember_page"):
+            return 0
+        try:
+            return int(cfg.qs.value(hq.pos_key(path), 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _restore_position(self, tab, p):
+        """Volta para a página em que você parou da última vez neste arquivo (p foi lido antes de abrir a aba)."""
+        if 0 < p < tab.doc.page_count:
+            def go():
+                tab.view.goto(p)
+                tab._restoring = False
+            QTimer.singleShot(0, go)
+            self.statusBar().showMessage(f"Continuando na página {p + 1}, onde você parou.", 5000)
+        else:
+            tab._restoring = False
+
+    def _save_position(self, tab, page):
+        from . import quadrinhos as hq
+        src = tab.path or getattr(tab, "source_path", None)
+        # só a aba que você está lendo: abas escondidas/fechando também mudam de "página" ao serem redimensionadas
+        if src and cfg.get("remember_page") and tab is self.cur() and tab.isVisible() and not getattr(tab, "_restoring", False):
+            cfg.qs.setValue(hq.pos_key(src), int(page))
+            cfg.qs.setValue(hq.pos_key(src) + "_t", int(tab.doc.page_count))      # para o “% lido” da biblioteca
 
     def open_bytes(self, data, name):
         tab = DocTab(data, None, None, self.settings)
@@ -1456,6 +1524,17 @@ class MainWindow(QMainWindow):
         dlg = getattr(self, "_folder_search", None)
         if dlg is None:
             dlg = self._folder_search = FolderSearchDialog(self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def tool_library(self, tab=None, **kw):
+        """Biblioteca: séries com capa, % lido, etiquetas e “Continuar”. Fica aberta ao lado enquanto você lê."""
+        from .biblioteca import LibraryDialog
+        dlg = getattr(self, "_library", None)
+        if dlg is None:
+            dlg = self._library = LibraryDialog(self)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()

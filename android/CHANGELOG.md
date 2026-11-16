@@ -1,5 +1,15 @@
 # Novidades do Dispersio PDF para Android
 
+## 0.18.0
+
+- **Quadrinhos e mangás**: leitor próprio para .cbz e .cbr (RAR4).
+  - Modos Webtoon (rolagem contínua), Página e Mangá (direita para a esquerda), escolhidos sozinhos e lembrados por série.
+  - Zoom com pinça ou toque duplo, barra de páginas e cartão "Próximo capítulo" no fim.
+  - Lembra a página de cada capítulo.
+- **Biblioteca** (tela inicial › Quadrinhos e mangás): escolha a pasta e cada subpasta vira uma série, com capa, % lido, etiquetas (Lendo, Quero ler, Concluído), favoritos e "Continuar".
+- **Livros EPUB**: capítulos com tamanho da letra e tema claro, sépia ou escuro, voltando onde parou.
+- "Abrir" e "Abrir com" aceitam .cbz, .cbr e .epub.
+
 ## 0.17.0
 
 - **Continuar do computador**: na tela inicial, lê o QR do Dispersio PDF do computador e abre o documento na mesma página (pela rede Wi-Fi, sem nuvem). No documento, "⋮ › Enviar para o computador (QR)" faz o contrário.

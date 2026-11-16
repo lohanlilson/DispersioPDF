@@ -9,6 +9,7 @@ DEFAULTS = {
     "window_mode": "maximized",          # maximized | last | normal
     "startup": "home",                   # home | last_session
     "recent_max": 20,
+    "remember_page": True,               # abrir na página em que parou (todos os arquivos, inclusive quadrinhos)
     "auto_update": True,
     "confirm_delete_pages": True,
     "autosave": True,

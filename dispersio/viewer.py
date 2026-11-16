@@ -104,6 +104,8 @@ class PdfView(QGraphicsView):
         self.zoom = 1.0
         self.zoom_mode = "fit_width"
         self.two_page = False
+        self.page_gap = GAP          # 0 no modo webtoon (páginas coladas)
+        self.rtl = False             # mangá: duas páginas da direita para a esquerda, setas invertidas
         self.invert = False
         self.base = (self.logicalDpiX() or 96) / 72.0
         self.cache = {}
@@ -220,26 +222,29 @@ class PdfView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff if fit else Qt.ScrollBarAsNeeded)
         if fit:
             self.zoom = self._fit_zoom(self.zoom_mode)
+        g = self.page_gap
         s = self.scale()
         sizes = [self.page_size(i) for i in range(len(self.items))]
-        if self.two_page:
+        if self.two_page and getattr(self, "cover_alone", False) and sizes:     # capa sozinha, depois páginas duplas
+            rows = [[0]] + [list(range(i, min(i + 2, len(sizes)))) for i in range(1, len(sizes), 2)]
+        elif self.two_page:
             rows = [list(range(i, min(i + 2, len(sizes)))) for i in range(0, len(sizes), 2)]
         else:
             rows = [[i] for i in range(len(sizes))]
-        row_w = [sum(sizes[i][0] * s for i in r) + GAP * (len(r) - 1) for r in rows]
+        row_w = [sum(sizes[i][0] * s for i in r) + g * (len(r) - 1) for r in rows]
         total_w = max(row_w) if row_w else 0
-        y = GAP
+        y = g
         for r, rw in zip(rows, row_w):
-            x = (total_w - rw) / 2 + GAP
+            x = (total_w - rw) / 2 + g
             h = max(sizes[i][1] * s for i in r)
-            for i in r:
+            for i in (reversed(r) if self.rtl else r):
                 it = self.items[i]
                 it.prepareGeometryChange()
                 it.w, it.h = sizes[i][0] * s, sizes[i][1] * s
                 it.setPos(x, y)
-                x += it.w + GAP
-            y += h + GAP
-        self.scene_.setSceneRect(0, 0, total_w + 2 * GAP, y)
+                x += it.w + g
+            y += h + g
+        self.scene_.setSceneRect(0, 0, total_w + 2 * g, y)
         hb = self.horizontalScrollBar()
         hb.setValue((hb.minimum() + hb.maximum()) // 2)
         self.zoomChanged.emit(self.zoom)
@@ -247,15 +252,16 @@ class PdfView(QGraphicsView):
         self.viewport().update()
 
     def _fit_zoom(self, mode):
+        g = max(self.page_gap, 4)
         sb = 0 if self.verticalScrollBar().isVisible() else self.verticalScrollBar().sizeHint().width()
-        vw = max(100, self.viewport().width() - sb - 3 * GAP)
-        vh = max(100, self.viewport().height() - 2 * GAP)
+        vw = max(100, self.viewport().width() - sb - 3 * g)
+        vh = max(100, self.viewport().height() - 2 * g)
         i = min(self._cur_page, self.doc.page_count - 1) if self.doc.page_count else 0
         if not self.doc.page_count:
             return 1.0
         w, h = self.page_size(i)
         if self.two_page:
-            w = w * 2 + GAP / self.base
+            w = w * 2 + g / self.base
         zw = vw / (w * self.base)
         if mode == "fit_width":
             return max(0.1, min(zw, 8))
@@ -307,7 +313,7 @@ class PdfView(QGraphicsView):
             return 0, 0.0
         top = self.mapToScene(0, 0).y()
         for it in self.items:
-            if it.y() + it.h + GAP / 2 >= top:
+            if it.y() + it.h + self.page_gap / 2 >= top:
                 return it.index, max(0.0, (top - it.y()) / it.h)
         return len(self.items) - 1, 0.0
 
@@ -316,7 +322,7 @@ class PdfView(QGraphicsView):
             return
         index = max(0, min(index, len(self.items) - 1))
         it = self.items[index]
-        y = it.y() + frac * it.h - (GAP if frac == 0 else 0)
+        y = it.y() + frac * it.h - (self.page_gap if frac == 0 else 0)
         self.verticalScrollBar().setValue(int(y))
         self._on_scroll()
 
@@ -1520,8 +1526,12 @@ class PdfView(QGraphicsView):
             self._img_sel = None
             self.set_mode("select")
         elif e.key() in (Qt.Key_Right,) and self.zoom_mode == "fit_page":
-            self.next_page()
+            self.prev_page() if self.rtl else self.next_page()
         elif e.key() in (Qt.Key_Left,) and self.zoom_mode == "fit_page":
+            self.next_page() if self.rtl else self.prev_page()
+        elif e.key() in (Qt.Key_Space, Qt.Key_PageDown) and self.zoom_mode == "fit_page":
+            self.next_page()
+        elif e.key() == Qt.Key_PageUp and self.zoom_mode == "fit_page":
             self.prev_page()
         elif e.key() == Qt.Key_Home and e.modifiers() & Qt.ControlModifier:
             self.goto(0)
