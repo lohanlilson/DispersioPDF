@@ -54,7 +54,7 @@ object Epub {
         val dir = File(ctx.filesDir, "epub/$key")
         if (!File(dir, ".pronto").exists()) {
             dir.deleteRecursively(); dir.mkdirs()
-            val tmp = File(ctx.cacheDir, "livro.epub")
+            val tmp = File.createTempFile("epub-", ".zip", ctx.cacheDir)
             ctx.contentResolver.openInputStream(uri)!!.use { i -> tmp.outputStream().use { i.copyTo(it) } }
             ZipFile(tmp).use { z ->
                 for (e in z.entries()) {
