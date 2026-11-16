@@ -79,6 +79,10 @@ class ComicBar(QFrame):
             lay.addWidget(b)
         self.info = QLabel()
         lay.addWidget(self.info)
+        self.trad = QPushButton("Traduzir")
+        self.trad.setToolTip("Traduz os balões para o português (o original volta com “Ver original” ou Ctrl+Z)")
+        self.trad.clicked.connect(self._translate_menu)
+        lay.addWidget(self.trad)
         full = QPushButton("⛶")
         full.setToolTip("Tela cheia (Esc sai)")
         full.clicked.connect(self._full)
@@ -89,6 +93,80 @@ class ComicBar(QFrame):
         lay.addWidget(self.next_ch)
         tab.view.pageChanged.connect(lambda c, n: self._page(c, n))
         self.sync()
+
+    # ------------------------------------------------------------ tradução nos balões
+    def _translate_menu(self):
+        from PySide6.QtWidgets import QMenu
+        m = QMenu(self)
+        if getattr(self.tab, "_translated", False):
+            m.addAction("Ver original", self._original)
+            m.addSeparator()
+        last = cfg.qs.value("hq_traduzir/idioma", "en")
+        from .manga_trad import LANGS
+        for code, (_t, name) in LANGS.items():
+            sub = m.addMenu(("● " if code == last else "") + f"Do {name.lower()}")
+            sub.addAction("Esta página", lambda c=code: self.translate(c, "page"))
+            sub.addAction("Capítulo inteiro", lambda c=code: self.translate(c, "all"))
+        m.exec(self.trad.mapToGlobal(self.trad.rect().topLeft()))
+
+    def _original(self):
+        while getattr(self.tab, "_translated", 0):
+            self.tab.undo()
+            self.tab._translated -= 1
+        self.tab.modified = False
+
+    def translate(self, lang, scope):
+        from PySide6.QtWidgets import QProgressDialog, QMessageBox, QApplication
+        from . import manga_trad as mt, traducao
+        from .artigos_ui import ensure_models
+        cfg.qs.setValue("hq_traduzir/idioma", lang)
+        try:
+            path = traducao.route(lang, "pt")
+        except Exception:
+            path = None
+        if not path:
+            QMessageBox.warning(self.win, "Traduzir", "Sem internet para baixar o pacote de tradução deste idioma.")
+            return
+        if traducao.missing(path) and not ensure_models(self.win, path):
+            return
+        if not mt.tess_for(lang):
+            dlg = QProgressDialog(f"Baixando o reconhecimento de texto em {mt.LANGS[lang][1].lower()}…", None, 0, 0, self.win)
+            dlg.show()
+            QApplication.processEvents()
+            try:
+                mt.download_ocr(lang)
+            except Exception as e:
+                dlg.close()
+                QMessageBox.warning(self.win, "Traduzir", f"Não foi possível baixar o reconhecimento de texto:\n{e}")
+                return
+            dlg.close()
+        v = self.tab.view
+        pages = [v.current_page()] if scope == "page" else list(range(self.tab.doc.page_count))
+        prog = QProgressDialog("Traduzindo os balões…", "Parar", 0, len(pages), self.win)
+        prog.setWindowTitle("Traduzir")
+        prog.setMinimumDuration(400)
+        self.tab.checkpoint()
+        total = 0
+        try:
+            for k, pno in enumerate(pages):
+                prog.setValue(k)
+                prog.setLabelText(f"Traduzindo a página {pno + 1}… ({total} balões até agora)")
+                QApplication.processEvents()
+                if prog.wasCanceled():
+                    break
+                total += mt.translate_page(self.tab.doc, pno, lang, path)
+                self.tab.changed([pno])
+        except Exception as e:
+            QMessageBox.warning(self.win, "Traduzir", f"Não foi possível traduzir:\n{e}")
+        finally:
+            prog.close()
+        self.tab.modified = False            # é só leitura: fechar não pergunta se quer salvar
+        if total:
+            self.tab._translated = getattr(self.tab, "_translated", 0) + 1
+            self.win.statusBar().showMessage(f"{total} balão(ões) traduzido(s). “Traduzir › Ver original” volta ao original.", 8000)
+        else:
+            self.tab.undo_stack.pop() if self.tab.undo_stack else None
+            self.win.statusBar().showMessage("Nenhum texto encontrado nos balões.", 6000)
 
     def _full(self):
         self.win.toggle_read_mode()

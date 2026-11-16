@@ -62,7 +62,10 @@ def _images_from_zip(path):
 
 def _images_from_archive(path):
     """RAR/7z/tar: extrai com o tar do sistema (no Windows 10/11 é o libarchive, que lê RAR4/RAR5/7z)."""
-    tar = shutil.which("bsdtar") or shutil.which("tar")
+    # no Windows, o tar.exe do próprio sistema (libarchive: lê RAR/7z). O “tar” do Git (GNU) vem antes no PATH em
+    # muitos computadores e não abre RAR nem entende “C:\…”.
+    sys_tar = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tar.exe")
+    tar = (sys_tar if sys.platform == "win32" and os.path.isfile(sys_tar) else None) or shutil.which("bsdtar") or shutil.which("tar")
     if not tar:
         raise RuntimeError("Não há como abrir este formato neste computador.")
     tmp = tempfile.mkdtemp(prefix="dispersio_hq_")

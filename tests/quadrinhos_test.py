@@ -116,3 +116,31 @@ dlg.close()
 while len(w.tab_widgets) > 1:
     w.close_tab(len(w.tab_widgets) - 1)
 print("quadrinhos ok")
+
+# tradução nos balões (OCR em inglês acompanha o programa; o pacote de tradução só se já estiver instalado)
+from PIL import ImageDraw, ImageFont
+from dispersio import manga_trad as mt, traducao
+assert mt.dialog_br("Onde foste ontem à noite?") == "Onde você foi ontem à noite?"
+assert mt.dialog_br("Não mintas para mim!") == "Não minta para mim!"
+font = None
+for cand in ("C:/Windows/Fonts/arialbd.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
+    if os.path.exists(cand):
+        font = ImageFont.truetype(cand, 26)
+if font:
+    im = Image.new("RGB", (900, 1300), (170, 170, 180)); dr = ImageDraw.Draw(im)
+    def balao(x, y, w_, h_, lines):
+        dr.ellipse((x, y, x + w_, y + h_), fill="white", outline="black", width=3)
+        ty = y + h_ / 2 - len(lines) * 17
+        for l in lines:
+            tw = dr.textlength(l, font=font); dr.text((x + w_ / 2 - tw / 2, ty), l, font=font, fill="black"); ty += 34
+    balao(60, 80, 420, 240, ["WHERE DID", "YOU GO LAST", "NIGHT?"])
+    balao(430, 520, 400, 220, ["I WAS AT", "THE LIBRARY."])
+    b = io.BytesIO(); im.save(b, "JPEG", quality=90)
+    md = pymupdf.open(); pg = md.new_page(width=900, height=1300); pg.insert_image(pg.rect, stream=b.getvalue())
+    bl = mt.balloons(mt._words(pg, "en"))
+    assert len(bl) == 2 and "NIGHT" in bl[0][1].upper() and "LIBRARY" in bl[1][1].upper(), bl
+    if traducao._installed("en", "pt"):
+        assert mt.translate_page(md, 0, "en", [("en", "pt")]) == 2
+        txt = md[0].get_text().lower()
+        assert "biblioteca" in txt and "você" in txt, txt
+print("tradução nos balões ok")

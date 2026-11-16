@@ -8,3 +8,7 @@
 -dontwarn com.tom_roush.**
 -dontwarn org.bouncycastle.**
 -dontwarn com.gemalto.jp2.**
+
+# junrar (quadrinhos .cbr): usa slf4j sem implementação
+-dontwarn org.slf4j.**
+-keep class com.github.junrar.** { *; }

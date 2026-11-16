@@ -18,6 +18,7 @@ As notas de cada versão aparecem na janela de atualização do programa.
     - escolha a pasta e cada subpasta vira uma série;
     - cada série mostra capa, % lido e etiquetas (Lendo, Quero ler, Concluído, Favoritos);
     - "Continuar" abre o primeiro capítulo não terminado.
+- **Tradução nos balões**: na barra de quadrinhos, "Traduzir" lê o texto dos balões (inglês, espanhol ou japonês) e escreve a tradução em português do Brasil dentro do próprio balão, centralizada e no maior tamanho que couber. Onomatopeias ficam como estão. Funciona na página ou no capítulo inteiro; "Ver original" desfaz. Sem internet depois de baixar o idioma na primeira vez.
 - **Abre na página em que você parou**, em qualquer arquivo (pode desligar em Preferências).
 - O Windows oferece o Dispersio no "Abrir com" de .cbz, .cbr, .epub, .mobi e .fb2.
 
