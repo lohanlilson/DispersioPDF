@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
@@ -274,13 +275,17 @@ fun commitInk(vm: AppVm, d: ViewerDoc) {
 
 /** Seleção de texto: ações sobre o trecho selecionado. */
 @Composable
-fun SelectionBar(vm: AppVm, d: ViewerDoc, onTranslate: ((String) -> Unit)? = null, onCopy: (String) -> Unit) {
+fun SelectionBar(vm: AppVm, d: ViewerDoc, onTranslate: ((String) -> Unit)? = null, onDictionary: ((String) -> Unit)? = null, onCopy: (String) -> Unit) {
     val sel = d.selection ?: return
     Surface(shadowElevation = 8.dp, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.padding(12.dp).navigationBarsPadding()) {
         Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton({ onCopy(sel.text); d.selection = null }) { Icon(Icons.Filled.ContentCopy, "Copiar") }
             if (onTranslate != null) IconButton({ onTranslate(sel.text); d.selection = null }) { Icon(Icons.Filled.Translate, "Traduzir") }
+            val few = sel.text.trim().split(Regex("\\s+")).size <= 3 && sel.text.trim().length <= 40
+            if (onDictionary != null && few) IconButton({ onDictionary(sel.text.trim()); d.selection = null }) {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, "Significado")
+            }
             if (!d.readOnly) listOf(Triple(Markup.HIGHLIGHT, Icons.Filled.Highlight, vm.prefs.highlightColor),
                 Triple(Markup.UNDERLINE, Icons.Filled.FormatUnderlined, 0xFF2D9D78),
                 Triple(Markup.STRIKEOUT, Icons.Filled.FormatStrikethrough, 0xFFD7373F)).forEach { (kind, icon, color) ->

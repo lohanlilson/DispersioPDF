@@ -74,6 +74,8 @@ class ViewerDoc(pdf: OpenPdf, uri: String, val name: String, val startPage: Int,
     var payments by mutableStateOf<List<PayItem>?>(null)
     var paymentsHidden by mutableStateOf(false)
     var threats by mutableStateOf<List<Seguranca.Threat>>(emptyList())
+    /** palavra sendo lida em voz alta (página, área) */
+    var speaking by mutableStateOf<Pair<Int, FracRect>?>(null)
     var threatsHidden by mutableStateOf(false)
     /** páginas de lado ou de cabeça para baixo: página → rotação certa */
     var orientFixes by mutableStateOf<Map<Int, Int>>(emptyMap())

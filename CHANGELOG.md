@@ -2,6 +2,15 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.22.0
+
+- **Dicionário**: duplo clique numa palavra (ou botão direito › Significado) mostra o significado.
+  - Português: pelo Wikcionário, com a forma básica ("casas" → casa, "correu" → correr).
+  - Outros idiomas: tradução para o português e significado.
+  - O que já foi consultado funciona sem internet. Pode desligar em Preferências.
+- **Ler em voz alta acompanhando a palavra**: lê página após página a partir de onde você está (ou da seleção), destaca a palavra falada e rola a tela junto. Barra com pausar, parar e velocidade (0,75× a 2×).
+- O duplo clique agora seleciona a palavra (antes, a linha inteira).
+
 ## 1.21.0
 
 - **Quadrinhos, mangás e livros**

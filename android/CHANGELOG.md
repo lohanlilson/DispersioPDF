@@ -9,6 +9,9 @@
 - **Biblioteca** (tela inicial › Quadrinhos e mangás): escolha a pasta e cada subpasta vira uma série, com capa, % lido, etiquetas (Lendo, Quero ler, Concluído), favoritos e "Continuar".
 - **Livros EPUB**: capítulos com tamanho da letra e tema claro, sépia ou escuro, voltando onde parou.
 - "Abrir" e "Abrir com" aceitam .cbz, .cbr e .epub.
+- **Tradução nos balões**: no quadrinho, "Traduzir balões para o português" reconhece o texto (inglês, espanhol ou japonês) e escreve a tradução dentro dos balões. Continua nos próximos capítulos da série; "Ver original" desliga.
+- **Dicionário**: selecione uma palavra e toque no livro para ver o significado (português) ou a tradução e o significado (outros idiomas). O que já foi consultado funciona offline.
+- **Ler em voz alta** agora destaca a palavra que está sendo falada.
 
 ## 0.17.0
 

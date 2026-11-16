@@ -43,7 +43,12 @@ fun printPdf(ctx: Context, file: File, name: String) {
 
 /** Leitura em voz alta (voz do Android em português), página por página. */
 class Reader(ctx: Context, private val text: suspend (Int) -> String, private val pages: Int,
+             private val chars: (suspend (Int) -> PageChars?)? = null,
+             private val onWord: (Int, FracRect?) -> Unit = { _, _ -> },
              private val onPage: (Int) -> Unit) {
+    /** Palavras do trecho falado: posição no texto falado → área na página (para destacar a palavra lida). */
+    private class Tok(val at: Int, val end: Int, val rect: FracRect?)
+    private var toks: List<List<Tok>> = emptyList()
     var playing by mutableStateOf(false)
         private set
     var page by mutableIntStateOf(0)
@@ -63,6 +68,13 @@ class Reader(ctx: Context, private val text: suspend (Int) -> String, private va
         tts.language = Locale("pt", "BR")
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
+            override fun onRangeStart(id: String?, start: Int, end: Int, frame: Int) {
+                val n = id?.substringAfterLast('-')?.toIntOrNull() ?: return
+                val list = toks.getOrNull(n) ?: return
+                val t = list.lastOrNull { it.at <= start } ?: return
+                val pg = page
+                scope.launch(kotlinx.coroutines.Dispatchers.Main) { onWord(pg, t.rect) }
+            }
             override fun onError(id: String?) {}
             override fun onDone(id: String?) {
                 scope.launch(kotlinx.coroutines.Dispatchers.Main) { next() }
@@ -79,11 +91,30 @@ class Reader(ctx: Context, private val text: suspend (Int) -> String, private va
 
     private fun loadPage() {
         scope.launch(kotlinx.coroutines.Dispatchers.Main) {
-            val t = text(page).replace(Regex("\\s+"), " ").trim()
-            chunks = t.split(Regex("(?<=[.!?;:])\\s+")).fold(mutableListOf<String>()) { acc, s ->
-                if (acc.isNotEmpty() && acc.last().length + s.length < 1500) acc[acc.lastIndex] = acc.last() + " " + s else acc += s
-                acc
-            }.filter { it.isNotBlank() }
+            val pc = chars?.let { runCatching { it(page) }.getOrNull() }
+            if (pc != null && pc.text.isNotBlank()) {
+                // trechos de até ~1500 caracteres, terminando em fim de frase, guardando onde cada palavra está na página
+                val words = Regex("\\S+").findAll(pc.text).toList()
+                val cs = ArrayList<String>(); val ts = ArrayList<List<Tok>>()
+                var sb = StringBuilder(); var cur = ArrayList<Tok>()
+                for (m in words) {
+                    if (sb.isNotEmpty()) sb.append(' ')
+                    var rect: FracRect? = null
+                    for (k in m.range) pc.frac.getOrNull(k)?.let { f -> rect = rect?.let { FracRect(minOf(it.l, f.l), minOf(it.t, f.t), maxOf(it.r, f.r), maxOf(it.b, f.b)) } ?: f }
+                    cur += Tok(sb.length, sb.length + m.value.length, rect)
+                    sb.append(m.value)
+                    if (sb.length > 1200 && m.value.last() in ".!?;:") { cs += sb.toString(); ts += cur; sb = StringBuilder(); cur = ArrayList() }
+                }
+                if (sb.isNotEmpty()) { cs += sb.toString(); ts += cur }
+                chunks = cs; toks = ts
+            } else {
+                val t = text(page).replace(Regex("\\s+"), " ").trim()
+                chunks = t.split(Regex("(?<=[.!?;:])\\s+")).fold(mutableListOf<String>()) { acc, s ->
+                    if (acc.isNotEmpty() && acc.last().length + s.length < 1500) acc[acc.lastIndex] = acc.last() + " " + s else acc += s
+                    acc
+                }.filter { it.isNotBlank() }
+                toks = emptyList()
+            }
             idx = 0
             onPage(page)
             if (chunks.isEmpty()) next() else speak()
@@ -116,6 +147,7 @@ class Reader(ctx: Context, private val text: suspend (Int) -> String, private va
     fun stop() {
         playing = false
         tts.stop()
+        onWord(page, null)
     }
 
     fun release() {

@@ -131,6 +131,9 @@ object Comic {
     fun lastRead(ctx: Context, key: String) = sp(ctx).getLong("quando_$key", 0)
     fun mode(ctx: Context, series: String, default: String) = sp(ctx).getString("modo_$series", null) ?: default
     fun saveMode(ctx: Context, series: String, mode: String) = sp(ctx).edit().putString("modo_$series", mode).apply()
+    /** Idioma de origem da tradução nos balões, lembrado por série (null = original). */
+    fun trLang(ctx: Context, series: String) = sp(ctx).getString("trad_$series", null)
+    fun setTrLang(ctx: Context, series: String, lang: String?) = sp(ctx).edit().apply { if (lang == null) remove("trad_$series") else putString("trad_$series", lang) }.apply()
 }
 
 /** Cache de páginas decodificadas (limite pela memória disponível). */

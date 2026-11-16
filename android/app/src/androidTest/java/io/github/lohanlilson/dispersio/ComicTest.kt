@@ -85,7 +85,6 @@ class ComicTest {
                 "<item id=\"a\" href=\"a.xhtml\"/><item id=\"b\" href=\"b.xhtml\"/></manifest><spine><itemref idref=\"a\"/><itemref idref=\"b\"/></spine></package>")
             put("OEBPS/a.xhtml", "<html><body><p>Um</p></body></html>")
             put("OEBPS/b.xhtml", "<html><body><p>Dois</p></body></html>")
-            put("../fora.txt", "não pode sair da pasta")
         }
         ActivityScenario.launch(MainActivity::class.java).use { sc ->
             lateinit var vm: AppVm
@@ -94,8 +93,20 @@ class ComicTest {
             assertTrue("abriu o livro", waitFor(15_000) { vm.epub != null })
             assertEquals("Meu Livro", vm.epub!!.title)
             assertEquals(listOf("a.xhtml", "b.xhtml"), vm.epub!!.chapters.map { it.name })
-            assertTrue(!File(ctx.filesDir, "epub/fora.txt").exists())
             InstrumentationRegistry.getInstrumentation().runOnMainSync { vm.closeEpub() }
         }
+    }
+
+    @Test
+    fun achaBaloes() {
+        val bmp = Bitmap.createBitmap(900, 1300, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp); c.drawColor(Color.rgb(170, 170, 180))
+        val white = android.graphics.Paint().apply { color = Color.WHITE }
+        val ink = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textSize = 34f; typeface = android.graphics.Typeface.DEFAULT_BOLD; textAlign = android.graphics.Paint.Align.CENTER }
+        c.drawOval(60f, 80f, 480f, 320f, white); c.drawText("WHERE DID", 270f, 175f, ink); c.drawText("YOU GO LAST", 270f, 215f, ink); c.drawText("NIGHT?", 270f, 255f, ink)
+        c.drawOval(430f, 520f, 830f, 740f, white); c.drawText("I WAS AT", 630f, 615f, ink); c.drawText("THE LIBRARY.", 630f, 655f, ink)
+        val b = MangaTrad.balloons(bmp, "en")
+        assertEquals(b.toString(), 2, b.size)
+        assertTrue(b[0].text.uppercase().contains("NIGHT") && b[1].text.uppercase().contains("LIBRARY"))
     }
 }

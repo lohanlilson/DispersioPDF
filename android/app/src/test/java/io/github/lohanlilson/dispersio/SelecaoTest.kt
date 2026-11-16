@@ -86,3 +86,22 @@ class CelularTest {
         org.junit.Assert.assertFalse(Celular.isLink("00020126580014br.gov.bcb.pix"))
     }
 }
+
+class DialogoTest {
+    @Test fun tuParaVoce() {
+        assertEquals("Onde você foi ontem à noite?", MangaTrad.dialogBr("Onde foste ontem à noite?"))
+        assertEquals("Não minta para mim!", MangaTrad.dialogBr("Não mintas para mim!"))
+        assertEquals("Você está louco? Eu vou com você.", MangaTrad.dialogBr("Tu estás louco? Eu vou contigo."))
+    }
+}
+
+class DicionarioTest {
+    @Test fun leWikcionario() {
+        val wt = "={{-pt-}}=\n==Substantivo==\n# [[construção]] que serve de [[moradia]]\n#* ''exemplo''\n# {{escopo|pt|Família}} [[lar]]\n={{-es-}}=\n# não\n"
+        val (defs, lemma) = Dicionario.ptDefs(wt)
+        assertEquals(listOf("Substantivo" to "construção que serve de moradia", "Substantivo" to "(Família) lar"), defs)
+        assertEquals(null, lemma)
+        assertEquals("casa", Dicionario.ptDefs("={{-pt-}}=\n==Forma==\n# plural de [[casa]]\n").second)
+        assertEquals("Saudade", Dicionario.clean("“Saudade!”"))
+    }
+}

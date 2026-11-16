@@ -75,10 +75,20 @@ class ComicSession(
 
 private val MODES = listOf("webtoon" to "Webtoon", "pagina" to "Página", "manga" to "Mangá")
 
+/** Tradução ligada (idioma de origem) e o cache das páginas já traduzidas. */
+class TrMode(val lang: String) { val cache = PageCache() }
+
 @Composable
-private fun PageImage(book: Comic.Book, i: Int, cache: PageCache, ratio: Float, maxW: Int, modifier: Modifier = Modifier) {
-    val bmp by produceState<Bitmap?>(cache.get(i), book, i) {
-        if (value == null) value = withContext(Dispatchers.IO) { book.bitmap(i, maxW)?.also { cache.put(i, it) } }
+private fun PageImage(book: Comic.Book, i: Int, cache: PageCache, ratio: Float, maxW: Int, modifier: Modifier = Modifier, tr: TrMode? = null) {
+    val bmp by produceState<Bitmap?>(tr?.cache?.get(i) ?: cache.get(i), book, i, tr) {
+        if (value == null || (tr != null && tr.cache.get(i) == null)) {
+            val orig = cache.get(i) ?: withContext(Dispatchers.IO) { book.bitmap(i, maxW)?.also { cache.put(i, it) } }
+            value = orig
+            if (tr != null && orig != null) {
+                val t = withContext(Dispatchers.Default) { runCatching { MangaTrad.translate(orig, tr.lang) }.getOrNull() }
+                if (t != null) { tr.cache.put(i, t); value = t }
+            }
+        }
     }
     val b = bmp
     if (b == null) {
@@ -92,7 +102,7 @@ private fun PageImage(book: Comic.Book, i: Int, cache: PageCache, ratio: Float, 
 
 /** Página com zoom (pinça e toque duplo) para os modos Página e Mangá. */
 @Composable
-private fun ZoomPage(book: Comic.Book, i: Int, cache: PageCache, ratio: Float, maxW: Int, onTap: () -> Unit) {
+private fun ZoomPage(book: Comic.Book, i: Int, cache: PageCache, ratio: Float, maxW: Int, tr: TrMode?, onTap: () -> Unit) {
     var scale by remember { mutableFloatStateOf(1f) }
     var off by remember { mutableStateOf(Offset.Zero) }
     Box(Modifier.fillMaxSize().pointerInput(i) {
@@ -103,7 +113,7 @@ private fun ZoomPage(book: Comic.Book, i: Int, cache: PageCache, ratio: Float, m
             off = if (scale > 1f) off + pan else Offset.Zero
         }
     }, contentAlignment = Alignment.Center) {
-        PageImage(book, i, cache, ratio, maxW, Modifier.graphicsLayer(scaleX = scale, scaleY = scale, translationX = off.x, translationY = off.y))
+        PageImage(book, i, cache, ratio, maxW, Modifier.graphicsLayer(scaleX = scale, scaleY = scale, translationX = off.x, translationY = off.y), tr)
     }
 }
 
@@ -119,10 +129,14 @@ fun ComicScreen(vm: AppVm, s: ComicSession) {
     var bars by remember { mutableStateOf(false) }
     val start = remember(book) { Comic.savedPage(ctx, book.key).coerceIn(0, total - 1) }
     var page by remember(book) { mutableStateOf(start) }
+    var tr by remember(book) { mutableStateOf(Comic.trLang(ctx, s.series)?.let { TrMode(it) }) }
+    var askLang by remember { mutableStateOf(false) }
+    var gate by remember { mutableStateOf<String?>(null) }
     val next = s.chapters.getOrNull(s.index + 1)
     val prev = s.chapters.getOrNull(s.index - 1)
     BackHandler { vm.closeComic() }
-    LaunchedEffect(page) { Comic.savePage(ctx, book.key, page, total) }
+    // grava ao mudar de página (e na primeira vez que abre o capítulo), sem apagar o “lido” de quem já terminou
+    LaunchedEffect(book, page) { if (page != start || Comic.progress(ctx, book.key) == null) Comic.savePage(ctx, book.key, page, total) }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         when (mode) {
@@ -131,7 +145,7 @@ fun ComicScreen(vm: AppVm, s: ComicSession) {
                 LaunchedEffect(list) { snapshotFlow { list.firstVisibleItemIndex }.collect { if (it < total) page = it } }
                 LaunchedEffect(mode) { if (list.firstVisibleItemIndex != page) list.scrollToItem(page) }
                 LazyColumn(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { bars = !bars }) }, state = list) {
-                    items(total, key = { it }) { i -> PageImage(book, i, cache, s.ratios.getOrElse(i) { 1.4f }, maxW) }
+                    items(total, key = { it }) { i -> PageImage(book, i, cache, s.ratios.getOrElse(i) { 1.4f }, maxW, tr = tr) }
                     item { EndCard(next, total) { vm.comicChapter(1) } }
                 }
             }
@@ -140,12 +154,14 @@ fun ComicScreen(vm: AppVm, s: ComicSession) {
                 LaunchedEffect(pager) { snapshotFlow { pager.currentPage }.collect { if (it < total) page = it } }
                 LaunchedEffect(mode) { if (pager.currentPage != page) pager.scrollToPage(page) }
                 HorizontalPager(pager, Modifier.fillMaxSize(), reverseLayout = mode == "manga", beyondViewportPageCount = 1) { i ->
-                    if (i < total) ZoomPage(book, i, cache, s.ratios.getOrElse(i) { 1.4f }, maxW) { bars = !bars }
+                    if (i < total) ZoomPage(book, i, cache, s.ratios.getOrElse(i) { 1.4f }, maxW, tr) { bars = !bars }
                     else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { EndCard(next, total) { vm.comicChapter(1) } }
                 }
             }
         }
 
+        if (askLang) LangDialog({ askLang = false; gate = it }) { askLang = false }
+        gate?.let { g -> ModelGate(g, "pt", onCancel = { gate = null }) { gate = null; tr = TrMode(g); Comic.setTrLang(ctx, s.series, g) } }
         AnimatedVisibility(bars, Modifier.align(Alignment.TopCenter)) {
             Row(Modifier.fillMaxWidth().background(Color(0xE6202024)).statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton({ vm.closeComic() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar", tint = Color.White) }
@@ -168,9 +184,31 @@ fun ComicScreen(vm: AppVm, s: ComicSession) {
                     Spacer(Modifier.weight(1f))
                     TextButton({ vm.comicChapter(1) }, enabled = next != null) { Text("Cap. ›", color = if (next != null) Color.White else Color.Gray) }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (tr == null) TextButton({ askLang = true }) { Text("Traduzir balões para o português", color = Color(0xFF8AB4F8)) }
+                    else {
+                        Text("Traduzido do ${MangaTrad.LANGS.first { it.first == tr!!.lang }.second.lowercase()}", color = Color(0xFFBBBBBB),
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        TextButton({ tr = null; Comic.setTrLang(ctx, s.series, null) }) { Text("Ver original", color = Color.White) }
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun LangDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(onDismissRequest = onDismiss,
+        title = { Text("Traduzir os balões") },
+        text = {
+            Column {
+                Text("Em que idioma está o quadrinho? A tradução fica dentro dos balões e continua nos próximos capítulos.",
+                    style = MaterialTheme.typography.bodySmall)
+                MangaTrad.LANGS.forEach { (k, n) -> TextButton({ onPick(k) }) { Text(n) } }
+            }
+        },
+        confirmButton = {}, dismissButton = { TextButton(onDismiss) { Text("Cancelar") } })
 }
 
 @Composable

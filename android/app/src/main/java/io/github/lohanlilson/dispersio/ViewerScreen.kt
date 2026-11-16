@@ -183,6 +183,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     var translating by remember { mutableStateOf(false) }
     var readingTr by remember { mutableStateOf(false) }
     var snippet by remember { mutableStateOf<String?>(null) }
+    var dictWord by remember { mutableStateOf<String?>(null) }
     var articlesQuery by remember { mutableStateOf<String?>(null) }
     var pickLang by remember { mutableStateOf(false) }
     var replaceDlg by remember { mutableStateOf(false) }
@@ -294,7 +295,9 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                                     DropdownMenuItem(text = { Text("Ler em voz alta") }, onClick = {
                                         menu = false
                                         reader?.release()
-                                        reader = Reader(ctx, { pg -> vm.engine.pageText(d.pdf, pg) }, d.pageCount) { pg ->
+                                        reader = Reader(ctx, { pg -> vm.engine.pageText(d.pdf, pg) }, d.pageCount,
+                                            chars = { pg -> vm.engine.pageChars(d.pdf, pg) },
+                                            onWord = { pg, r -> d.speaking = r?.let { pg to it } }) { pg ->
                                             scope.launch { list.animateScrollToItem(pg) }
                                         }.also { r -> scope.launch { while (!r.ready) kotlinx.coroutines.delay(100); r.start(d.page) } }
                                     })
@@ -522,7 +525,7 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
                 }
             }
             if (d.selection != null) Box(Modifier.align(Alignment.BottomCenter)) {
-                SelectionBar(vm, d, onTranslate = { snippet = it }) { copyText(ctx, it) }
+                SelectionBar(vm, d, onTranslate = { snippet = it }, onDictionary = { dictWord = it }) { copyText(ctx, it) }
             }
             reader?.let { r ->
                 Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 6.dp,
@@ -773,6 +776,10 @@ fun ViewerScreen(vm: AppVm, d: ViewerDoc) {
     }
     articlesQuery?.let { qq -> ArticlesScreen(vm, qq) { articlesQuery = null } }
     if (readingTr) vm.tr?.let { st -> TranslatedReading(vm, st) { readingTr = false } } ?: run { readingTr = false }
+    dictWord?.let { w ->
+        val lang = d.language ?: "pt"          // idioma do documento (detectado ao abrir)
+        DictionaryDialog(w, lang) { dictWord = null }
+    }
     snippet?.let { text ->
         val dst = Traducao.target(vm.prefs)
         var src = Traducao.detect(text) ?: vm.tr?.src ?: d.language ?: "en"
@@ -1086,6 +1093,13 @@ private fun PageView(vm: AppVm, d: ViewerDoc, i: Int, sz: PageSize, pageW: Int,
             shown?.let {
                 Image(it, "Página ${i + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
                     colorFilter = if (d.night) INVERT else null)
+            }
+            d.speaking?.takeIf { it.first == i }?.let { (_, r) ->
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width
+                    drawRect(Color(0x5A50A0FF), Offset(r.l * w - 3, r.t * w - 2), Size((r.r - r.l) * w + 6, (r.b - r.t) * w + 4))
+                    drawRect(Color(0xE61473E6), Offset(r.l * w - 3, r.b * w + 1), Size((r.r - r.l) * w + 6, 4f))
+                }
             }
             val reds = d.redactions.filter { it.first == i }
             if (reds.isNotEmpty()) Canvas(Modifier.fillMaxSize()) {

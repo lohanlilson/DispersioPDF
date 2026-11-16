@@ -1529,6 +1529,21 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
         return dlg
 
+    def tool_dictionary(self, tab, word="", page=0, gpos=None, **kw):
+        """Significado (português) ou tradução + significado (outros idiomas) da palavra."""
+        from . import dicionario as D
+        from .dicionario_ui import DictPopup
+        cache = tab.__dict__.setdefault("_page_lang", {})
+        if page not in cache:
+            try:
+                cache[page] = D.word_language(tab.doc[page].get_text()[:3000])
+            except Exception:
+                cache[page] = "pt"
+        from PySide6.QtGui import QCursor
+        pop = DictPopup(self, word, cache[page], gpos or QCursor.pos())
+        pop.show()
+        return pop
+
     def tool_library(self, tab=None, **kw):
         """Biblioteca: séries com capa, % lido, etiquetas e “Continuar”. Fica aberta ao lado enquanto você lê."""
         from .biblioteca import LibraryDialog
@@ -2041,7 +2056,32 @@ class MainWindow(QMainWindow):
             PrintManager(self, sources, f"Imprimir {len(sources)} arquivo(s)").exec()
 
     def tool_read_aloud(self, tab, **kw):
-        self.tool_speak(tab, text=tab.view.selected_text() or tab.doc[tab.view.current_page()].get_text("text", sort=True))
+        """Lê em voz alta a partir da página atual (ou da seleção), página após página, destacando a palavra lida."""
+        try:
+            from PySide6.QtTextToSpeech import QTextToSpeech
+        except ImportError:
+            QMessageBox.information(self, APP, "Leitura em voz alta indisponível nesta instalação do Qt.")
+            return
+        old = getattr(self, "_reader", None)
+        if old is not None:
+            old.stop()
+            return
+        if self.tts is None:
+            self.tts = QTextToSpeech(self)
+            for loc in self.tts.availableLocales():
+                if loc.name().startswith("pt"):
+                    self.tts.setLocale(loc)
+                    break
+        self.tts.stop()
+        from .leitura_voz import ReadAloud
+        v = tab.view
+        page, start = v.current_page(), 0
+        if v.sel:
+            page, start = v.sel[0], v.sel[1]
+            v.clear_selection()
+        self._reader = ReadAloud(self, tab, self.tts)
+        self._reader.start(page, start)
+        return self._reader
 
     def tool_speak(self, tab, text="", **kw):
         try:

@@ -450,6 +450,11 @@ class PdfView(QGraphicsView):
         for k, hr in enumerate(self.search_hits.get(item.index, [])):
             cur = self.hit_list and self.hit_pos >= 0 and self.hit_list[self.hit_pos] == (item.index, k)
             p.fillRect(qr(hr), QColor(255, 140, 0, 130) if cur else QColor(255, 220, 0, 110))
+        sp = getattr(self, "speak_rect", None)          # palavra sendo lida em voz alta
+        if sp and sp[0] == item.index:
+            rr = qr(sp[1]).adjusted(-2, -1, 2, 1)
+            p.fillRect(rr, QColor(80, 160, 255, 90))
+            p.fillRect(QRectF(rr.left(), rr.bottom() - 2, rr.width(), 2.5), QColor(20, 115, 230, 230))
         if cached and getattr(self, "highlight_fields", True):
             for fr, ftype, signed in self.form_fields(item.index):
                 if ftype == pymupdf.PDF_WIDGET_TYPE_SIGNATURE:
@@ -1394,11 +1399,12 @@ class PdfView(QGraphicsView):
                 self.edit_annot_contents()
                 return
             k = self.nearest_word(i, pt, strict=True)
-            if k is not None:  # seleciona a linha/palavra
-                ws = self.words(i)
-                bl, ln = ws[k][2], ws[k][3]
-                same = [n for n, w in enumerate(ws) if (w[2], w[3]) == (bl, ln)]
-                self.set_selection(i, same[0], same[-1])
+            if k is not None:  # seleciona a palavra e mostra o significado (dicionário)
+                self.set_selection(i, k, k)
+                from .config import cfg
+                if cfg.get("dictionary_popup"):
+                    word = self.words(i)[k][1]
+                    self.request_tool("dictionary", word=word, page=i, gpos=e.globalPosition().toPoint())
         super().mouseDoubleClickEvent(e)
 
     def _follow_link(self, ln, i=None):
@@ -1568,6 +1574,10 @@ class PdfView(QGraphicsView):
             menu.addAction("Excluir", self.delete_selected_annot)
         elif self.sel:
             menu.addAction("Copiar", self.copy_selection)
+            seltxt = self.selected_text().strip()
+            if seltxt and len(seltxt.split()) <= 3 and len(seltxt) <= 40:
+                menu.addAction(f"Significado de “{seltxt}”", lambda w=seltxt, p=self.sel[0], g=e.globalPos():
+                               self.request_tool("dictionary", word=w, page=p, gpos=g))
             menu.addAction("Copiar para o Excel (em colunas)", self.copy_selection_table)
             menu.addAction("Salvar seleção no Excel…", lambda: self.request_tool("export_grid", grid=self.selection_grid()))
             menu.addSeparator()

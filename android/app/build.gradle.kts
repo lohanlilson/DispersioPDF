@@ -88,6 +88,7 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")   // ler o QR do computador (sem pedir câmera)
     implementation("com.github.junrar:junrar:7.5.5")   // quadrinhos .cbr (RAR)
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition-japanese:16.0.1")   // mangá em japonês (baixado pelo Play Services)
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     androidTestImplementation(bom)
