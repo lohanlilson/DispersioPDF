@@ -10,6 +10,7 @@ DEFAULTS = {
     "startup": "home",                   # home | last_session
     "recent_max": 20,
     "remember_page": True,
+    "check_partners": True,               # e-CNPJ: conferir o responsável no quadro de sócios da Receita
     "dictionary_popup": True,            # duplo clique numa palavra mostra o significado/tradução               # abrir na página em que parou (todos os arquivos, inclusive quadrinhos)
     "auto_update": True,
     "confirm_delete_pages": True,

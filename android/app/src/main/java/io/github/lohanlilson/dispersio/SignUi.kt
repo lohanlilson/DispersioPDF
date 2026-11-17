@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -176,14 +178,33 @@ fun CertSignDialog(vm: AppVm, fieldName: String?, onDismiss: () -> Unit,
 
 private val fmt = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
 
+/** Conferência no quadro de sócios (e-CNPJ) de cada assinatura, por índice; chega aos poucos. */
+@Composable
+fun partnerChecks(sigs: List<SigInfo>): Map<Int, Socios.Resultado> {
+    val ctx = LocalContext.current
+    val on = (ctx.applicationContext as? DispersioApp)?.prefs?.checkPartners ?: true
+    val r by produceState(emptyMap<Int, Socios.Resultado>(), sigs, on) {
+        if (!on) return@produceState
+        sigs.forEachIndexed { i, s -> Socios.verificar(ctx, s)?.let { value = value + (i to it) } }
+    }
+    return r
+}
+
+private fun partnerColor(n: String) = when (n) {
+    "ok" -> Color(0xFF2D9D78); "warn" -> Color(0xFFC58A00); "bad" -> Color(0xFFD7373F); else -> Color(0xFF1473E6)
+}
+
+private fun partnerMark(n: String) = when (n) { "ok" -> "✔ "; "warn" -> "⚠ "; "bad" -> "✖ "; else -> "ⓘ " }
+
 /** Faixa no topo quando o documento tem assinaturas. */
 @Composable
 fun SignatureBanner(d: ViewerDoc, onOpen: () -> Unit) {
     val sigs = d.signatures
     if (sigs.isEmpty()) return
-    val bad = sigs.any { !it.ok || it.badCert }
+    val partners = partnerChecks(sigs)
+    val bad = sigs.any { !it.ok || it.badCert } || partners.values.any { it.nivel == "bad" }
     val later = !bad && sigs.any { !it.coversWhole } && d.dirty.not() && sigs.last().coversWhole.not()
-    val untrusted = !bad && sigs.any { it.untrusted }
+    val untrusted = !bad && (sigs.any { it.untrusted } || partners.values.any { it.nivel == "warn" })
     val (bg, fg, icon) = when {
         bad -> Triple(Color(0xFFFDE8E9), Color(0xFFD7373F), Icons.Filled.Error)
         later || untrusted -> Triple(Color(0xFFFFF6DD), Color(0xFFC58A00), Icons.Filled.Warning)
@@ -200,7 +221,12 @@ fun SignatureBanner(d: ViewerDoc, onOpen: () -> Unit) {
     Surface(color = bg, modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = fg)
-            Text(msg, color = Color(0xFF222222), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 8.dp).weight(1f))
+            Column(Modifier.padding(start = 8.dp).weight(1f)) {
+                Text(msg, color = Color(0xFF222222), style = MaterialTheme.typography.bodyMedium)
+                partners.toSortedMap().values.forEach {
+                    Text(partnerMark(it.nivel) + it.texto, color = Color(0xFF222222), style = MaterialTheme.typography.bodySmall)
+                }
+            }
             Text("Detalhes", color = fg, style = MaterialTheme.typography.labelLarge)
         }
     }
@@ -212,8 +238,10 @@ fun SignaturesSheet(d: ViewerDoc, onChanges: (SigInfo) -> Unit = {}, onDismiss: 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Text("Assinaturas digitais", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+        val partners = partnerChecks(d.signatures)
+        val checking = (LocalContext.current.applicationContext as? DispersioApp)?.prefs?.checkPartners != false
         LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp)) {
-            items(d.signatures) { s ->
+            itemsIndexed(d.signatures) { idx, s ->
                 Column(Modifier.padding(vertical = 10.dp)) {
                     val color = if (s.ok) Color(0xFF2D9D78) else Color(0xFFD7373F)
                     Text((if (s.ok) "✔ " else "✖ ") + s.signer, color = color, fontWeight = FontWeight.SemiBold)
@@ -224,6 +252,16 @@ fun SignaturesSheet(d: ViewerDoc, onChanges: (SigInfo) -> Unit = {}, onDismiss: 
                         s.icp.responsibleCpf?.let { Text("CPF do responsável: $it" + (s.icp.responsibleBirth?.let { b -> " · nascimento $b" } ?: ""),
                             style = MaterialTheme.typography.bodySmall) }
                     } else (s.icp.holderCpf ?: s.document)?.let { Text("CPF/CNPJ: $it", style = MaterialTheme.typography.bodySmall) }
+                    val pr = partners[idx]
+                    if (pr != null) {
+                        Text(partnerMark(pr.nivel) + "Quadro de sócios: " + pr.texto, style = MaterialTheme.typography.bodySmall, color = partnerColor(pr.nivel))
+                        val lista = pr.dados?.socios.orEmpty()
+                        if (lista.isNotEmpty()) Text("Sócios e administradores: " + lista.take(8).joinToString("; ") { "${it.nome} (${it.qualificacao})" },
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (s.icp.type == "e-CNPJ" && checking) {
+                        Text("Conferindo o responsável no quadro de sócios…", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     s.icp.type?.let { Text("Certificado $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     Text("Data: " + ((s.tsaDate ?: s.date)?.let { fmt.format(it) } ?: "—") +
                         (if (s.tsaDate != null) " (carimbo de tempo)" else " (relógio do signatário)"), style = MaterialTheme.typography.bodySmall)

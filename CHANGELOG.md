@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.24.0
+
+- **Assinatura com e-CNPJ: quem assinou pode assinar pela empresa?** O programa consulta o quadro de sócios e administradores do CNPJ nos dados públicos da Receita Federal e confere se o responsável pelo certificado está nele (pelo nome e pelos dígitos do CPF que a Receita divulga). Se estiver, mostra o cargo (ex.: "consta como Sócio-Administrador"). Se não estiver, avisa que pode ser um procurador e que vale pedir a procuração. Também alerta se o CNPJ não estiver ativo. O resultado aparece na faixa do documento e na Validação da assinatura, com a lista de sócios. Só o CNPJ é enviado na consulta; dá para desligar nas Preferências.
+
 ## 1.23.0
 
 - **Assinaturas com e-CNPJ mostram quem assinou pela empresa.** O certificado e-CNPJ leva o nome da empresa, mas traz gravado o responsável por ele (nome e CPF). Agora a faixa do documento mostra "Assinado por: EMPRESA — responsável: FULANO, CPF …", e o mesmo aparece no Painel de assinaturas e na Validação da assinatura (com CNPJ, CPF do responsável e data de nascimento). Se o certificado não informar o responsável, isso é dito. No e-CPF aparece o CPF do titular.

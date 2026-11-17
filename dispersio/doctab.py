@@ -347,6 +347,29 @@ class PaymentsBar(QFrame):
         self.tab.statusMsg.emit(self.main.copy_label.replace("Copiar", "Copiado:") + " – " + self.main.copy[:60])
 
 
+class PartnersCheck(QThread):
+    """Consulta o quadro de sócios (Receita) para as assinaturas com e-CNPJ, fora da interface."""
+    found = Signal(int, dict)
+
+    def __init__(self, results, parent=None):
+        super().__init__(parent)
+        self.results = results
+
+    def run(self):
+        from . import socios
+        for i, r in enumerate(self.results):
+            c = r.get("cert") or {}
+            if c.get("tipo") != "e-CNPJ":
+                continue
+            try:
+                res = socios.verificar(c)
+            except Exception as e:  # noqa: BLE001
+                res = {"nivel": "info", "texto": f"Não foi possível conferir o quadro de sócios: {e}"}
+            if res:
+                r["socios"] = res
+                self.found.emit(i, res)
+
+
 class SignatureBar(QFrame):
     """Faixa no topo do documento com o resumo das assinaturas (como nos leitores profissionais)."""
 
@@ -411,10 +434,35 @@ class SignatureBar(QFrame):
             quem.append(nome)
         if n > 4:
             quem.append(f"e mais {n - 4}")
-        self.text.setText(f"<b>{msg}</b> Assinado por: {'; '.join(quem)}. "
-                          "Clique sobre uma assinatura para ver os detalhes.")
+        self._base = (f"<b>{msg}</b> Assinado por: {'; '.join(quem)}. "
+                      "Clique sobre uma assinatura para ver os detalhes.")
+        self._lvl = lvl
+        self._extra = {}
+        self.text.setText(self._base)
         self.btn.show()
         self.show()
+        if cfg.get("check_partners") and any((r.get("cert") or {}).get("tipo") == "e-CNPJ" for r in results):
+            pend = [r for r in results if r.get("socios")]
+            for i, r in enumerate(results):
+                if r.get("socios"):
+                    self._partners(i, r["socios"])
+            if len(pend) < sum((r.get("cert") or {}).get("tipo") == "e-CNPJ" for r in results):
+                self._worker = PartnersCheck(results, self)
+                self._worker.found.connect(self._partners)
+                self._worker.start()
+
+    def _partners(self, i, res):
+        """Acrescenta à faixa o resultado da conferência no quadro de sócios."""
+        from html import escape
+        sym = {"ok": "✔", "warn": "⚠", "bad": "✖", "info": "ⓘ"}[res.get("nivel", "info")]
+        self._extra[i] = f"{sym} {escape(res.get('texto', ''))}"
+        order = {"ok": 0, "info": 0, "warn": 1, "bad": 2}
+        lvl = self._lvl
+        if order.get(res.get("nivel"), 0) > order.get(lvl, 0):
+            lvl = res["nivel"]
+            self._lvl = lvl
+        self._style(lvl)
+        self.text.setText(self._base + "<br>Receita Federal: " + " &nbsp; ".join(self._extra[k] for k in sorted(self._extra)))
 
 
 class DocTab(QWidget):

@@ -76,6 +76,7 @@ fun SettingsScreen(vm: AppVm, onClose: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Toggle("Mostrar boletos, Pix e notas fiscais encontrados", p.detectPayments) { p.detectPayments = it }
                 Toggle("Avisar sobre documentos com cara de golpe", p.detectThreats) { p.detectThreats = it }
+                Toggle("Assinaturas com e-CNPJ: conferir o responsável no quadro de sócios da Receita (envia só o CNPJ)", p.checkPartners) { p.checkPartners = it }
                 Toggle("Perguntar antes de abrir sites do documento", p.confirmLinks) { p.confirmLinks = it }
                 if (p.trustedSites.isNotEmpty()) TextButton({ p.trustedSites = emptySet() }) { Text("Esquecer os sites que abrem sem perguntar (${p.trustedSites.size})") }
                 Toggle("Avisar quando houver páginas de lado ou de cabeça para baixo", p.detectOrientation) { p.detectOrientation = it }

@@ -54,6 +54,12 @@ class Prefs(ctx: Context) {
         get() = _pay.value
         set(v) { _pay.value = v; sp.edit().putBoolean("boletos", v).apply() }
 
+    private val _partners = mutableStateOf(sp.getBoolean("conferir_socios", true))
+    /** e-CNPJ: confere o responsável no quadro de sócios da Receita (envia só o CNPJ) */
+    var checkPartners: Boolean
+        get() = _partners.value
+        set(v) { _partners.value = v; sp.edit().putBoolean("conferir_socios", v).apply() }
+
     private val _threats = mutableStateOf(sp.getBoolean("avisar_golpes", true))
     /** avisa sobre documentos com cara de golpe (JavaScript, anexos de programa, links falsos) */
     var detectThreats: Boolean

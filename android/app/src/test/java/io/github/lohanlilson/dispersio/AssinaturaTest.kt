@@ -20,4 +20,18 @@ class AssinaturaTest {
         assertEquals("01/02/1980", icp.responsibleBirth)
         assertEquals("EMPRESA TESTE LTDA" to "12345678000195", Certs.splitName(Certs.cn(c)))
     }
+
+    private val qsa = Socios.Dados("EMPRESA TESTE LTDA", "ATIVA", listOf(
+        Socios.Socio("MARIA DE SOUZA", "***456789**", "Sócio-Administrador", "", ""),
+        Socios.Socio("JOSÉ PEREIRA", "***111222**", "Sócio", "", "")), "teste")
+
+    @Test fun quadroDeSocios() {
+        assertEquals("ok", Socios.conferir("MARIA DE SOUZA", "123.456.789-09", qsa).nivel)
+        val fora = Socios.conferir("CARLOS LIMA", "999.888.777-66", qsa)
+        assertEquals("warn", fora.nivel)
+        assertEquals(true, fora.texto.contains("procuração"))
+        assertEquals("warn", Socios.conferir("MARIA DE SOUZA", "000.999.999-00", qsa).nivel)
+        assertEquals("ok", Socios.conferir("Jose Pereira", "000.111.222-00", qsa).nivel)
+        assertEquals("bad", Socios.conferir("MARIA DE SOUZA", "123.456.789-09", qsa.copy(situacao = "BAIXADA")).nivel)
+    }
 }

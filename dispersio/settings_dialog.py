@@ -121,6 +121,9 @@ class SettingsDialog(QDialog):
         f.addRow(self.w["dictionary_popup"])
         self.w["remember_page"] = _check("Abrir os arquivos na página em que parei", "remember_page")
         f.addRow(self.w["remember_page"])
+        self.w["check_partners"] = _check("Assinaturas com e-CNPJ: conferir se o responsável consta como sócio ou "
+                                          "administrador na Receita Federal (envia só o CNPJ)", "check_partners")
+        f.addRow(self.w["check_partners"])
         self.w["detect_threats"] = _check("Avisar sobre documentos com cara de golpe (JavaScript, anexos de programa, links falsos)", "detect_threats")
         f.addRow(self.w["detect_threats"])
         self.w["confirm_links"] = _check("Perguntar antes de abrir sites a partir do documento (links suspeitos sempre perguntam)", "confirm_links")

@@ -524,6 +524,19 @@ class SignatureInfoDialog(QDialog):
         need = body.heightForWidth(580) if body.hasHeightForWidth() else body.sizeHint().height()
         scroll.setMinimumHeight(min(need + 12, max_h))
         lay.addWidget(scroll, 1)
+        from .config import cfg as _cfg
+        if c.get("tipo") == "e-CNPJ" and _cfg.get("check_partners"):
+            self._socios = QLabel("Conferindo o responsável no quadro de sócios da Receita Federal…")
+            self._socios.setWordWrap(True)
+            self._socios.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            lay.addWidget(self._socios)
+            if info.get("socios"):
+                self._show_partners(info["socios"])
+            else:
+                from .doctab import PartnersCheck
+                self._pw = PartnersCheck([info], self)
+                self._pw.found.connect(lambda _i, r: self._show_partners(r))
+                self._pw.start()
         if not info.get("trusted") and info.get("intact"):
             note = QLabel("Para certificados ICP-Brasil, a identidade é confirmada quando as cadeias da ICP-Brasil "
                           "estão instaladas no Windows (disponíveis no site do ITI).")
@@ -547,6 +560,18 @@ class SignatureInfoDialog(QDialog):
         close.clicked.connect(self.accept)
         row.addWidget(close)
         lay.addLayout(row)
+
+    def _show_partners(self, res):
+        col = SIG_COLORS.get(res.get("nivel"), "#1473e6") if res.get("nivel") in SIG_COLORS else "#1473e6"
+        sym = {"ok": "✔", "warn": "⚠", "bad": "✖"}.get(res.get("nivel"), "ⓘ")
+        linhas = [f"<b style='color:{col}'>{sym} Quadro de sócios (Receita Federal):</b> {html_escape(res.get('texto', ''))}"]
+        if res.get("socios"):
+            itens = "".join(f"<li>{html_escape(s['nome'])} — {html_escape(s['qualificacao'] or '—')}"
+                            + (f" (representante: {html_escape(s['representante'])})" if s.get("representante") else "")
+                            + "</li>" for s in res["socios"][:12])
+            linhas.append(f"<span style='color:gray'>Sócios e administradores de "
+                          f"{html_escape(res.get('razao_social') or '')}:</span><ul style='margin:2px'>{itens}</ul>")
+        self._socios.setText("<br>".join(linhas))
 
 
 def html_escape(t):

@@ -73,6 +73,26 @@ for pfx, esperado in ((ecnpj, "e-CNPJ"), (ecpf, "e-CPF")):
         check(c.get("titular_cpf") == "987.654.321-00" and not c.get("responsavel"), "e-CPF: CPF do titular")
         check(signing.signer_label(r) == "JOAO DA SILVA", "rótulo e-CPF")
 
+# ---- quadro de sócios (dados simulados, sem internet)
+from dispersio import socios
+qsa = {"razao_social": "EMPRESA TESTE LTDA", "situacao": "ATIVA", "fonte": "teste", "socios": [
+    {"nome": "MARIA DE SOUZA", "doc": "***456789**", "qualificacao": "Sócio-Administrador", "representante": "", "doc_representante": ""},
+    {"nome": "JOSÉ PEREIRA", "doc": "***111222**", "qualificacao": "Sócio", "representante": "", "doc_representante": ""}]}
+r1 = socios.conferir("MARIA DE SOUZA", "123.456.789-09", qsa)
+check(r1["nivel"] == "ok" and "Sócio-Administrador" in r1["texto"], "responsável consta como sócio-administrador")
+r2 = socios.conferir("CARLOS LIMA", "999.888.777-66", qsa)
+check(r2["nivel"] == "warn" and "NÃO consta" in r2["texto"] and "procuração" in r2["texto"], "responsável fora do quadro: avisa procurador")
+r3 = socios.conferir("MARIA DE SOUZA", "000.999.999-00", qsa)
+check(r3["nivel"] == "warn" and "CPF não confere" in r3["texto"], "mesmo nome com CPF diferente")
+r4 = socios.conferir("Jose Pereira", "000.111.222-00", qsa)
+check(r4["nivel"] == "ok", "nome sem acento/minúsculas e CPF conferem")
+r5 = socios.conferir("MARIA DE SOUZA", "123.456.789-09", {**qsa, "situacao": "BAIXADA"})
+check(r5["nivel"] == "bad" and "BAIXADA" in r5["texto"], "CNPJ baixado é alerta")
+r6 = socios.conferir("ANA COSTA", "123.456.789-09", {"razao_social": "ANA COSTA 12345678000195", "situacao": "ATIVA", "socios": []})
+check(r6["nivel"] == "ok", "empresa individual no nome do responsável")
+socios._mem["12345678000195"] = {**qsa, "_em": __import__("time").time()}
+res_cnpj["socios"] = None
+
 from PySide6.QtWidgets import QApplication
 app = QApplication.instance() or QApplication([])
 from dispersio import dialogs
@@ -80,6 +100,12 @@ dlg = dialogs.SignatureInfoDialog(None, res_cnpj)
 from PySide6.QtWidgets import QLabel
 txt = " ".join(w.text() for w in dlg.findChildren(QLabel))
 check("Responsável" in txt and "MARIA DE SOUZA" in txt and "123.456.789-09" in txt, "janela de validação mostra o responsável")
+import time as _t
+fim = _t.time() + 15
+while _t.time() < fim and "Quadro de sócios" not in dlg._socios.text():
+    app.processEvents()
+    _t.sleep(0.05)
+check("Sócio-Administrador" in dlg._socios.text() and "JOSÉ PEREIRA" in dlg._socios.text(), "janela mostra o quadro de sócios")
 
 from dispersio.mainwindow import MainWindow
 win = MainWindow(); win.resize(1200, 800); win.show()
@@ -100,6 +126,12 @@ barra = tab.sig_bar.text.text()
 print("   barra:", barra)
 check("Assinado por: EMPRESA TESTE LTDA — responsável: <b>MARIA DE SOUZA</b>, CPF 123.456.789-09" in barra,
       "faixa do documento mostra quem assinou pela empresa")
+fim = time.time() + 15
+while time.time() < fim and "Receita Federal" not in tab.sig_bar.text.text():
+    app.processEvents()
+    time.sleep(0.05)
+check("consta no quadro de sócios e administradores como Sócio-Administrador" in tab.sig_bar.text.text(),
+      "faixa mostra a conferência no quadro de sócios")
 
 print("RESULTADO:", "tudo certo" if not falhas else f"{falhas} falha(s)")
 sys.exit(1 if falhas else 0)
