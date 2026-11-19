@@ -794,12 +794,26 @@ class MainWindow(QMainWindow):
         box.exec()
 
     def bring_to_front(self):
+        """Traz a janela para a frente (também quando está minimizada), mantendo maximizada se estava."""
         if not self.isVisible():   # a janela foi fechada (ex.: com a fila da impressora aberta): reabre
             self.showMaximized() if cfg.qs.value("was_maximized", "true") == "true" else self.show()
-        if self.isMinimized():
-            self.showNormal()
+        st = self.windowState()
+        if st & Qt.WindowMinimized:
+            self.setWindowState((st & ~Qt.WindowMinimized) | Qt.WindowActive)
+            self.showMaximized() if st & Qt.WindowMaximized else self.showNormal()
         self.raise_()
         self.activateWindow()
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                u = ctypes.windll.user32
+                hwnd = int(self.winId())
+                if u.IsIconic(hwnd):
+                    u.ShowWindow(hwnd, 9)          # SW_RESTORE
+                u.SetForegroundWindow(hwnd)
+                u.BringWindowToTop(hwnd)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------ impressão rápida (Outlook / botão direito)
     def enqueue_print(self, files, printer=""):

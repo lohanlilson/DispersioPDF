@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.24.1
+
+- **Abrir um PDF com o programa minimizado agora traz a janela para a frente**, já mostrando o arquivo (e volta maximizada, se estava). Antes ela continuava minimizada até você clicar nela na barra de tarefas.
+
 ## 1.24.0
 
 - **Assinatura com e-CNPJ: quem assinou pode assinar pela empresa?** O programa consulta o quadro de sócios e administradores do CNPJ nos dados públicos da Receita Federal e confere se o responsável pelo certificado está nele (pelo nome e pelos dígitos do CPF que a Receita divulga). Se estiver, mostra o cargo (ex.: "consta como Sócio-Administrador"). Se não estiver, avisa que pode ser um procurador e que vale pedir a procuração. Também alerta se o CNPJ não estiver ativo. O resultado aparece na faixa do documento e na Validação da assinatura, com a lista de sócios. Só o CNPJ é enviado na consulta; dá para desligar nas Preferências.

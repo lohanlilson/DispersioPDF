@@ -52,6 +52,14 @@ def send_to_running(msg, wait_ms=400):
     if not sock.waitForConnected(wait_ms):
         sock.abort()
         return False
+    if sys.platform == "win32" and msg.get("cmd") not in ("print", "printed"):
+        # este processo foi aberto pela pessoa (tem o direito de ficar em primeiro plano): passa esse direito
+        # para a janela já aberta, senão o Windows só pisca o ícone na barra de tarefas
+        try:
+            import ctypes
+            ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+        except Exception:
+            pass
     sock.write(json.dumps(msg).encode("utf-8") + b"\n")
     sock.flush()
     ok = False
