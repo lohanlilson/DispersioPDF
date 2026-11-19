@@ -2,6 +2,10 @@
 
 As notas de cada versão aparecem na janela de atualização do programa.
 
+## 1.24.2
+
+- **Depois de atualizar, o programa reabre os documentos que estavam abertos**, cada um na página em que você parou, e volta para a aba em que você estava.
+
 ## 1.24.1
 
 - **Abrir um PDF com o programa minimizado agora traz a janela para a frente**, já mostrando o arquivo (e volta maximizada, se estava). Antes ela continuava minimizada até você clicar nela na barra de tarefas.

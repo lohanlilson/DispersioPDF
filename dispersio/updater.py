@@ -188,11 +188,15 @@ class UpdateDialog(QDialog):
             self.bar.hide()
             return
         self.accept()
+        import time
+        from .config import cfg
+        cfg.qs.setValue("reopen_after_update", time.time())   # ao reabrir, volta com os mesmos documentos
         if self.win.close():  # pergunta para salvar documentos abertos
             run_package(path)
             from PySide6.QtWidgets import QApplication
             QApplication.instance().quit()
         else:
+            cfg.qs.remove("reopen_after_update")
             QMessageBox.information(self.win, APP_NAME, "Atualização baixada. Ela será instalada quando você "
                                                         "fechar todos os documentos e clicar em Atualizar de novo.")
 

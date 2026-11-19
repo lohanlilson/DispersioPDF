@@ -263,11 +263,21 @@ def main():
     state["shown"] = True
     _show(win, app)
     from dispersio.config import cfg
-    if not paths and cfg.get("startup") == "last_session":
+    import time
+    try:
+        apos_update = time.time() - float(cfg.qs.value("reopen_after_update", 0) or 0) < 6 * 3600
+    except (TypeError, ValueError):
+        apos_update = False
+    cfg.qs.remove("reopen_after_update")
+    if apos_update or (not paths and cfg.get("startup") == "last_session"):
+        # depois de uma atualização, reabre sempre os documentos que estavam abertos (na página em que estavam)
         session = cfg.qs.value("session", []) or []
         for p in ([session] if isinstance(session, str) else session):
-            if os.path.exists(p):
+            if os.path.exists(p) and p not in paths:
                 win.open_path(p)
+        atual = cfg.qs.value("session_current", "") or ""
+        if atual and not paths:
+            win.open_path(atual)          # já aberto: só volta para a aba em que você estava
     for p in paths:
         win.open_path(p)
     QTimer.singleShot(1200, win.check_default_app)

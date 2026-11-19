@@ -403,6 +403,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         session = [t.path for t in self.tab_widgets[1:] if t.path]
+        cur = self.cur()
+        cfg.qs.setValue("session_current", cur.path if cur is not None and getattr(cur, "path", None) else "")
         for t in self.tab_widgets[1:]:
             t.save_position()
         cfg.qs.setValue("geometry", self.saveGeometry())
